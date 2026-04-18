@@ -31,6 +31,7 @@ interface Match {
   balance_confidence: number | null
   notes: string | null
   created_at: string
+  created_at: string
 }
 
 interface PlayerMatchStats {
