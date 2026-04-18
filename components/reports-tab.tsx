@@ -337,9 +337,9 @@ export function ReportsTab() {
   const leaderboardStats = new Map<string, { wins: number; losses: number; draws: number; played: number; form: ("W" | "L")[] }>()
 
   // Reverse matches to track form (most recent first) - matches come sorted ascending from API
-  const sortedMatches = [...matches].reverse()
+  const reversedMatches = [...matches].reverse()
 
-  for (const match of sortedMatches) {
+  for (const match of reversedMatches) {
     const redWon = match.red_score > match.blue_score
     const blueWon = match.blue_score > match.red_score
 
