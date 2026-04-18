@@ -333,33 +333,45 @@ export function ReportsTab() {
   const manualBlowouts = manualMatches.filter(m => Math.abs(m.red_score - m.blue_score) > 4).length
 
   // Leaderboard data
-  const leaderboardStats = new Map<string, { wins: number; losses: number; draws: number; played: number }>()
+  const leaderboardStats = new Map<string, { wins: number; losses: number; draws: number; played: number; form: ("W" | "L")[] }>()
 
-  for (const match of matches) {
+  // Sort matches by created_at descending to track form (most recent first)
+  const sortedMatches = [...matches].sort((a, b) => 
+    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+  )
+
+  for (const match of sortedMatches) {
     const redWon = match.red_score > match.blue_score
     const blueWon = match.blue_score > match.red_score
-    const isDraw = match.red_score === match.blue_score
 
     for (const playerName of match.red_team) {
       if (!leaderboardStats.has(playerName)) {
-        leaderboardStats.set(playerName, { wins: 0, losses: 0, draws: 0, played: 0 })
+        leaderboardStats.set(playerName, { wins: 0, losses: 0, draws: 0, played: 0, form: [] })
       }
       const stats = leaderboardStats.get(playerName)!
       stats.played++
-      if (redWon) stats.wins++
-      else if (blueWon) stats.losses++
-      else if (isDraw) stats.draws++
+      if (redWon) {
+        stats.wins++
+        if (stats.form.length < 5) stats.form.push("W")
+      } else if (blueWon) {
+        stats.losses++
+        if (stats.form.length < 5) stats.form.push("L")
+      }
     }
 
     for (const playerName of match.blue_team) {
       if (!leaderboardStats.has(playerName)) {
-        leaderboardStats.set(playerName, { wins: 0, losses: 0, draws: 0, played: 0 })
+        leaderboardStats.set(playerName, { wins: 0, losses: 0, draws: 0, played: 0, form: [] })
       }
       const stats = leaderboardStats.get(playerName)!
       stats.played++
-      if (blueWon) stats.wins++
-      else if (redWon) stats.losses++
-      else if (isDraw) stats.draws++
+      if (blueWon) {
+        stats.wins++
+        if (stats.form.length < 5) stats.form.push("W")
+      } else if (redWon) {
+        stats.losses++
+        if (stats.form.length < 5) stats.form.push("L")
+      }
     }
   }
 
@@ -869,6 +881,7 @@ export function ReportsTab() {
                     <tr className="border-b border-[var(--color-border)] text-[var(--color-text-dim)] text-xs uppercase">
                       <th className="px-4 py-3 text-left">#</th>
                       <th className="px-4 py-3 text-left">Player</th>
+                      <th className="px-4 py-3 text-center">Form</th>
                       <th className="px-4 py-3 text-center">Wins</th>
                       <th className="px-4 py-3 text-center">Losses</th>
                       <th className="px-4 py-3 text-center">Played</th>
@@ -897,6 +910,22 @@ export function ReportsTab() {
                             <span className={`font-medium ${isTop3 ? "text-[#ffd700]" : "text-[var(--color-text)]"}`}>
                               {player.name}
                             </span>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-center gap-1">
+                              {player.form.map((result, i) => (
+                                <span
+                                  key={i}
+                                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                                    result === "W"
+                                      ? "bg-[#27ae60] text-white"
+                                      : "bg-[#ff4757] text-white"
+                                  }`}
+                                >
+                                  {result}
+                                </span>
+                              ))}
+                            </div>
                           </td>
                           <td className="px-4 py-3 text-center text-[#27ae60] font-bold">{player.wins}</td>
                           <td className="px-4 py-3 text-center text-[#ff4757] font-bold">{player.losses}</td>
