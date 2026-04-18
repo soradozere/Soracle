@@ -336,10 +336,8 @@ export function ReportsTab() {
   // Leaderboard data
   const leaderboardStats = new Map<string, { wins: number; losses: number; draws: number; played: number; form: ("W" | "L")[] }>()
 
-  // Sort matches by created_at descending to track form (most recent first)
-  const sortedMatches = [...matches].sort((a, b) => 
-    new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-  )
+  // Reverse matches to track form (most recent first) - matches come sorted ascending from API
+  const sortedMatches = [...matches].reverse()
 
   for (const match of sortedMatches) {
     const redWon = match.red_score > match.blue_score
