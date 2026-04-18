@@ -880,11 +880,11 @@ export function ReportsTab() {
                     <tr className="border-b border-[var(--color-border)] text-[var(--color-text-dim)] text-xs uppercase">
                       <th className="px-4 py-3 text-left">#</th>
                       <th className="px-4 py-3 text-left">Player</th>
-                      <th className="px-4 py-3 text-center">Form</th>
                       <th className="px-4 py-3 text-center">Wins</th>
                       <th className="px-4 py-3 text-center">Losses</th>
                       <th className="px-4 py-3 text-center">Played</th>
                       <th className="px-4 py-3 text-right">Win %</th>
+                      <th className="px-4 py-3 text-center">Form</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -910,6 +910,18 @@ export function ReportsTab() {
                               {player.name}
                             </span>
                           </td>
+                          <td className="px-4 py-3 text-center text-[#27ae60] font-bold">{player.wins}</td>
+                          <td className="px-4 py-3 text-center text-[#ff4757] font-bold">{player.losses}</td>
+                          <td className="px-4 py-3 text-center text-[var(--color-text)]">{player.played}</td>
+                          <td className="px-4 py-3 text-right">
+                            <span className={`font-bold ${
+                              player.winPct >= 60 ? "text-[#27ae60]" :
+                              player.winPct >= 40 ? "text-[var(--color-text)]" :
+                              "text-[#ff4757]"
+                            }`}>
+                              {player.winPct.toFixed(0)}%
+                            </span>
+                          </td>
                           <td className="px-4 py-3">
                             <div className="flex items-center justify-center gap-1">
                               {player.form.map((result, i) => (
@@ -925,18 +937,6 @@ export function ReportsTab() {
                                 </span>
                               ))}
                             </div>
-                          </td>
-                          <td className="px-4 py-3 text-center text-[#27ae60] font-bold">{player.wins}</td>
-                          <td className="px-4 py-3 text-center text-[#ff4757] font-bold">{player.losses}</td>
-                          <td className="px-4 py-3 text-center text-[var(--color-text)]">{player.played}</td>
-                          <td className="px-4 py-3 text-right">
-                            <span className={`font-bold ${
-                              player.winPct >= 60 ? "text-[#27ae60]" :
-                              player.winPct >= 40 ? "text-[var(--color-text)]" :
-                              "text-[#ff4757]"
-                            }`}>
-                              {player.winPct.toFixed(0)}%
-                            </span>
                           </td>
                         </tr>
                       )
