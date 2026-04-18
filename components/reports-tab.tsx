@@ -871,7 +871,6 @@ export function ReportsTab() {
                       <th className="px-4 py-3 text-left">Player</th>
                       <th className="px-4 py-3 text-center">Wins</th>
                       <th className="px-4 py-3 text-center">Losses</th>
-                      <th className="px-4 py-3 text-center">Draws</th>
                       <th className="px-4 py-3 text-center">Played</th>
                       <th className="px-4 py-3 text-right">Win %</th>
                     </tr>
@@ -901,7 +900,6 @@ export function ReportsTab() {
                           </td>
                           <td className="px-4 py-3 text-center text-[#27ae60] font-bold">{player.wins}</td>
                           <td className="px-4 py-3 text-center text-[#ff4757] font-bold">{player.losses}</td>
-                          <td className="px-4 py-3 text-center text-[var(--color-text-dim)]">{player.draws}</td>
                           <td className="px-4 py-3 text-center text-[var(--color-text)]">{player.played}</td>
                           <td className="px-4 py-3 text-right">
                             <span className={`font-bold ${
