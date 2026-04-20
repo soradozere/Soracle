@@ -115,8 +115,15 @@ export default function TeamBalancer() {
 
         return true
       })
-      .sort((a, b) => a.name.localeCompare(b.name))
-  }, [players, searchQuery, roleFilter, micFilter, eliteFilter])
+      .sort((a, b) => {
+        const aStats = playerStats[a.name]
+        const bStats = playerStats[b.name]
+        const aPlayed = aStats ? aStats.wins + aStats.losses + aStats.draws : 0
+        const bPlayed = bStats ? bStats.wins + bStats.losses + bStats.draws : 0
+        if (bPlayed !== aPlayed) return bPlayed - aPlayed
+        return a.name.localeCompare(b.name)
+      })
+  }, [players, searchQuery, roleFilter, micFilter, eliteFilter, playerStats])
 
   const handlePlayerToggle = useCallback(
     (playerName: string) => {
