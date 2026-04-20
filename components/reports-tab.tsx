@@ -374,7 +374,7 @@ export function ReportsTab() {
     }
   }
 
-  const leaderboardMinMatches = Math.ceil(totalMatches * 0.20)
+  const leaderboardMinMatches = Math.ceil(totalMatches * 0.30)
 
   const leaderboard = Array.from(leaderboardStats.entries())
     .map(([name, stats]) => ({
@@ -871,7 +871,7 @@ export function ReportsTab() {
                 <Trophy className="w-5 h-5" />
                 Wins Leaderboard
               </h3>
-              <p className="text-xs text-[var(--color-text-dim)] mt-1">Players with {leaderboardMinMatches}+ matches this month (20% of {totalMatches})</p>
+              <p className="text-xs text-[var(--color-text-dim)] mt-1">Players with {leaderboardMinMatches}+ matches this month (30% of {totalMatches})</p>
             </div>
             {leaderboard.length > 0 ? (
               <div className="overflow-x-auto">
