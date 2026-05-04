@@ -11,6 +11,27 @@ interface Star {
   twinklePhase: number
 }
 
+interface Nebula {
+  x: number
+  y: number
+  radiusX: number
+  radiusY: number
+  rotation: number
+  r: number
+  g: number
+  b: number
+  opacity: number
+}
+
+interface Galaxy {
+  x: number
+  y: number
+  radius: number
+  rotation: number
+  opacity: number
+  arms: number
+}
+
 interface Meteor {
   x: number
   y: number
@@ -29,6 +50,8 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const starsRef = useRef<Star[]>([])
   const meteorsRef = useRef<Meteor[]>([])
+  const nebulasRef = useRef<Nebula[]>([])
+  const galaxiesRef = useRef<Galaxy[]>([])
   const hyperspaceRef = useRef(false)
   const hyperspaceTimeoutRef = useRef<NodeJS.Timeout>()
   const animationFrameIdRef = useRef<number>()
@@ -68,6 +91,8 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       canvas.width = window.innerWidth
       canvas.height = window.innerHeight
       initStars()
+      initNebulas()
+      initGalaxies()
     }
 
     const initStars = () => {
@@ -86,6 +111,52 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       }
 
       starsRef.current = stars
+    }
+
+    // Nebula color palettes: cool blues, magentas, teals, purples
+    const nebulaPalettes = [
+      { r: 80,  g: 160, b: 255 },  // blue
+      { r: 180, g: 80,  b: 220 },  // violet
+      { r: 60,  g: 200, b: 220 },  // teal
+      { r: 220, g: 80,  b: 140 },  // pink
+      { r: 80,  g: 120, b: 200 },  // deep blue
+      { r: 140, g: 60,  b: 180 },  // purple
+    ]
+
+    const initNebulas = () => {
+      const count = 4 + Math.floor(Math.random() * 3)
+      const nebulas: Nebula[] = []
+      for (let i = 0; i < count; i++) {
+        const palette = nebulaPalettes[Math.floor(Math.random() * nebulaPalettes.length)]
+        nebulas.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          radiusX: 80 + Math.random() * 220,
+          radiusY: 50 + Math.random() * 140,
+          rotation: Math.random() * Math.PI * 2,
+          r: palette.r,
+          g: palette.g,
+          b: palette.b,
+          opacity: 0.04 + Math.random() * 0.07,
+        })
+      }
+      nebulasRef.current = nebulas
+    }
+
+    const initGalaxies = () => {
+      const count = 2 + Math.floor(Math.random() * 2)
+      const galaxies: Galaxy[] = []
+      for (let i = 0; i < count; i++) {
+        galaxies.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          radius: 40 + Math.random() * 80,
+          rotation: Math.random() * Math.PI * 2,
+          opacity: 0.06 + Math.random() * 0.08,
+          arms: 2 + Math.floor(Math.random() * 3),
+        })
+      }
+      galaxiesRef.current = galaxies
     }
 
     const initMeteors = () => {
@@ -129,6 +200,75 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       const isHyperspace = hyperspaceRef.current
       const color = currentColorRef.current
       const time = Date.now() * 0.001
+
+      // Draw nebulas
+      if (!isHyperspace) {
+        nebulasRef.current.forEach((nebula) => {
+          ctx.save()
+          ctx.translate(nebula.x, nebula.y)
+          ctx.rotate(nebula.rotation)
+          ctx.scale(1, nebula.radiusY / nebula.radiusX)
+
+          const gradient = ctx.createRadialGradient(0, 0, 0, 0, 0, nebula.radiusX)
+          gradient.addColorStop(0,   `rgba(${nebula.r}, ${nebula.g}, ${nebula.b}, ${nebula.opacity})`)
+          gradient.addColorStop(0.4, `rgba(${nebula.r}, ${nebula.g}, ${nebula.b}, ${nebula.opacity * 0.5})`)
+          gradient.addColorStop(1,   `rgba(${nebula.r}, ${nebula.g}, ${nebula.b}, 0)`)
+
+          ctx.beginPath()
+          ctx.arc(0, 0, nebula.radiusX, 0, Math.PI * 2)
+          ctx.fillStyle = gradient
+          ctx.fill()
+          ctx.restore()
+        })
+
+        // Draw galaxies (spiral arm pattern via dots)
+        galaxiesRef.current.forEach((galaxy) => {
+          ctx.save()
+          ctx.translate(galaxy.x, galaxy.y)
+          ctx.rotate(galaxy.rotation)
+
+          // Soft core glow
+          const coreGrad = ctx.createRadialGradient(0, 0, 0, 0, 0, galaxy.radius * 0.3)
+          coreGrad.addColorStop(0, `rgba(255, 240, 200, ${galaxy.opacity * 1.2})`)
+          coreGrad.addColorStop(1, `rgba(255, 240, 200, 0)`)
+          ctx.beginPath()
+          ctx.arc(0, 0, galaxy.radius * 0.3, 0, Math.PI * 2)
+          ctx.fillStyle = coreGrad
+          ctx.fill()
+
+          // Spiral arms
+          for (let arm = 0; arm < galaxy.arms; arm++) {
+            const armOffset = (arm / galaxy.arms) * Math.PI * 2
+            for (let i = 0; i < 60; i++) {
+              const t = i / 60
+              const angle = armOffset + t * Math.PI * 3
+              const r = t * galaxy.radius
+              const px = Math.cos(angle) * r
+              const py = Math.sin(angle) * r * 0.4
+              const dotOpacity = galaxy.opacity * (1 - t) * 0.9
+              const dotSize = (1 - t) * 1.5 + 0.3
+              ctx.beginPath()
+              ctx.arc(px, py, dotSize, 0, Math.PI * 2)
+              ctx.fillStyle = `rgba(200, 220, 255, ${dotOpacity})`
+              ctx.fill()
+            }
+          }
+
+          // Outer haze
+          const hazeGrad = ctx.createRadialGradient(0, 0, galaxy.radius * 0.2, 0, 0, galaxy.radius)
+          hazeGrad.addColorStop(0, `rgba(160, 180, 255, ${galaxy.opacity * 0.4})`)
+          hazeGrad.addColorStop(1, `rgba(160, 180, 255, 0)`)
+          ctx.save()
+          ctx.scale(1, 0.4)
+          ctx.beginPath()
+          ctx.arc(0, 0, galaxy.radius, 0, Math.PI * 2)
+          ctx.fillStyle = hazeGrad
+          ctx.fill()
+          ctx.restore()
+
+          ctx.restore()
+        })
+      }
 
       // Draw stars
       starsRef.current.forEach((star) => {
