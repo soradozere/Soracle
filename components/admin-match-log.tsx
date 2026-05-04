@@ -7,7 +7,7 @@ import { evaluateTeams } from "@/lib/balance-algorithm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Check, X, Loader2, ChevronRight, ChevronLeft, Search } from "lucide-react"
+import { Check, X, Loader2, ChevronRight, ChevronLeft, Search, Calendar } from "lucide-react"
 import type { Player } from "@/lib/types"
 
 function getBalanceConfidence(score: number): number {
@@ -42,6 +42,12 @@ export function AdminMatchLog() {
   const [activeTeam, setActiveTeam] = useState<"red" | "blue">("red")
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [balanceScore, setBalanceScore] = useState<number | null>(null)
+  const [matchDate, setMatchDate] = useState<string>(() => {
+    const now = new Date()
+    // Format as YYYY-MM-DDTHH:MM for datetime-local input
+    const pad = (n: number) => String(n).padStart(2, "0")
+    return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
+  })
 
   useEffect(() => {
     fetchPlayersFromDB().then(setPlayers)
@@ -178,6 +184,7 @@ export function AdminMatchLog() {
       match_type: matchType,
       balance_confidence: balanceScore !== null ? Math.round(balanceScore) : 0,
       notes: notes || undefined,
+      played_at: matchDate ? new Date(matchDate).toISOString() : undefined,
     })
 
     if (result.success) {
@@ -201,6 +208,9 @@ export function AdminMatchLog() {
     setBlueScore("")
     setNotes("")
     setMessage(null)
+    const now = new Date()
+    const pad = (n: number) => String(n).padStart(2, "0")
+    setMatchDate(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`)
   }
 
   return (
@@ -405,6 +415,28 @@ export function AdminMatchLog() {
               placeholder="0"
             />
           </div>
+        </div>
+
+        {/* Match Date/Time */}
+        <div>
+          <label className="block text-sm font-medium text-muted-foreground mb-1 flex items-center gap-1.5">
+            <Calendar className="w-4 h-4" />
+            Match Date &amp; Time
+          </label>
+          <Input
+            type="datetime-local"
+            value={matchDate}
+            onChange={(e) => setMatchDate(e.target.value)}
+            max={(() => {
+              const now = new Date()
+              const pad = (n: number) => String(n).padStart(2, "0")
+              return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`
+            })()}
+            className="w-full"
+          />
+          <p className="text-xs text-muted-foreground mt-1">
+            Defaults to now. Change this if you&apos;re logging a match that happened earlier.
+          </p>
         </div>
 
         {/* Notes */}

@@ -94,6 +94,7 @@ export async function logMatch(data: {
   match_type: "normal" | "competitive"
   balance_confidence: number
   notes?: string
+  played_at?: string
 }) {
   try {
     const supabase = await createClient()
@@ -130,6 +131,7 @@ export async function logMatch(data: {
       match_type: data.match_type,
       balance_confidence: data.balance_confidence,
       notes: data.notes || null,
+      ...(data.played_at ? { created_at: data.played_at } : {}),
     })
 
     if (error) {
