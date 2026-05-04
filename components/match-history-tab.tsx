@@ -64,9 +64,11 @@ export function MatchHistoryTab() {
     setIsSavingDate(true)
     const result = await updateMatchDate(matchId, new Date(editDateValue).toISOString())
     if (result.success) {
-      setMatches(matches.map((m) =>
-        m.id === matchId ? { ...m, created_at: new Date(editDateValue).toISOString() } : m
-      ))
+      setMatches(
+        matches
+          .map((m) => m.id === matchId ? { ...m, created_at: new Date(editDateValue).toISOString() } : m)
+          .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+      )
     }
     setEditDateId(null)
     setIsSavingDate(false)
