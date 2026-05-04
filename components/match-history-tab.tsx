@@ -1,10 +1,11 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getMatches, deleteMatch } from "@/app/admin/actions"
+import { getMatches, deleteMatch, updateMatchDate } from "@/app/admin/actions"
 import { createClient } from "@/lib/supabase/client"
-import { Trophy, Clock, Trash2 } from "lucide-react"
+import { Trophy, Clock, Trash2, Pencil, Check, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 
 interface Match {
   id: string
@@ -26,6 +27,9 @@ export function MatchHistoryTab() {
   const [isAdmin, setIsAdmin] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [editDateId, setEditDateId] = useState<string | null>(null)
+  const [editDateValue, setEditDateValue] = useState<string>("")
+  const [isSavingDate, setIsSavingDate] = useState(false)
 
   useEffect(() => {
     // Check if user is authenticated (admin)
@@ -43,6 +47,30 @@ export function MatchHistoryTab() {
       setLoading(false)
     })
   }, [])
+
+  const toDatetimeLocal = (isoString: string) => {
+    const d = new Date(isoString)
+    const pad = (n: number) => String(n).padStart(2, "0")
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+  }
+
+  const openEditDate = (match: Match) => {
+    setEditDateId(match.id)
+    setEditDateValue(toDatetimeLocal(match.created_at))
+  }
+
+  const handleSaveDate = async (matchId: string) => {
+    if (!editDateValue) return
+    setIsSavingDate(true)
+    const result = await updateMatchDate(matchId, new Date(editDateValue).toISOString())
+    if (result.success) {
+      setMatches(matches.map((m) =>
+        m.id === matchId ? { ...m, created_at: new Date(editDateValue).toISOString() } : m
+      ))
+    }
+    setEditDateId(null)
+    setIsSavingDate(false)
+  }
 
   const handleDelete = async (matchId: string) => {
     setIsDeleting(true)
@@ -120,6 +148,42 @@ export function MatchHistoryTab() {
                 </div>
               )}
 
+              {/* Edit Date Dialog - only for admins */}
+              {isAdmin && editDateId === match.id && (
+                <div className="absolute inset-0 bg-[var(--color-surface)]/95 backdrop-blur-sm rounded-lg flex items-center justify-center z-10">
+                  <div className="text-center p-4 w-full max-w-xs">
+                    <p className="text-[var(--color-text)] font-medium mb-3">Edit match date &amp; time</p>
+                    <Input
+                      type="datetime-local"
+                      value={editDateValue}
+                      onChange={(e) => setEditDateValue(e.target.value)}
+                      className="mb-3 w-full"
+                    />
+                    <div className="flex gap-2 justify-center">
+                      <Button
+                        size="sm"
+                        onClick={() => handleSaveDate(match.id)}
+                        disabled={isSavingDate}
+                        className="flex items-center gap-1"
+                      >
+                        <Check className="w-3 h-3" />
+                        {isSavingDate ? "Saving..." : "Save"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setEditDateId(null)}
+                        disabled={isSavingDate}
+                        className="flex items-center gap-1"
+                      >
+                        <X className="w-3 h-3" />
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-3">
                   <span className={`px-2 py-0.5 rounded text-xs font-bold ${
@@ -141,13 +205,22 @@ export function MatchHistoryTab() {
                     {date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
                   {isAdmin && (
-                    <button
-                      onClick={() => setDeleteConfirm(match.id)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[#ff4757]/20 text-[var(--color-text-dim)] hover:text-[#ff4757]"
-                      title="Delete match"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => openEditDate(match)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[var(--color-primary)]/20 text-[var(--color-text-dim)] hover:text-[var(--color-primary)]"
+                        title="Edit match date"
+                      >
+                        <Pencil className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirm(match.id)}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-[#ff4757]/20 text-[var(--color-text-dim)] hover:text-[#ff4757]"
+                        title="Delete match"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   )}
                 </div>
               </div>

@@ -170,6 +170,33 @@ export async function getMatches() {
   }
 }
 
+export async function updateMatchDate(matchId: string, newDate: string) {
+  try {
+    const supabase = await createClient()
+
+    const { data: { user }, error: authError } = await supabase.auth.getUser()
+    if (authError || !user) {
+      return { success: false, error: "Unauthorized - admin authentication required" }
+    }
+
+    const { error } = await supabase
+      .from("matches")
+      .update({ created_at: newDate })
+      .eq("id", matchId)
+
+    if (error) {
+      return { success: false, error: error.message }
+    }
+
+    return { success: true }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to update match date",
+    }
+  }
+}
+
 export async function deleteMatch(matchId: string) {
   try {
     const supabase = await createClient()
