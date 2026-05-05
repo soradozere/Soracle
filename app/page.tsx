@@ -12,7 +12,7 @@ import { TierListView } from "@/components/tier-list-view"
 import { TutorialDialog } from "@/components/tutorial-dialog"
 import { MatchHistoryTab } from "@/components/match-history-tab"
 import { ReportsTab } from "@/components/reports-tab"
-import { getPlayerStats } from "@/app/admin/actions"
+import { getMonthlyPlayerStats } from "@/app/admin/actions"
 import { balanceTeamsWithOptions, balanceTeamsCompetitive } from "@/lib/balance-algorithm"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import { themes, applyTheme, type ThemeName } from "@/lib/themes"
@@ -54,7 +54,7 @@ export default function TeamBalancer() {
       setPlayers(data)
       setLoading(false)
     })
-    getPlayerStats().then((result) => {
+    getMonthlyPlayerStats().then((result) => {
       if (result.success) {
         setPlayerStats(result.data as Record<string, { wins: number; losses: number; draws: number }>)
       }

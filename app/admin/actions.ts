@@ -254,6 +254,60 @@ export async function getMatchesByMonth(year: number, month: number) {
   }
 }
 
+export async function getMonthlyPlayerStats() {
+  try {
+    const supabase = await createClient()
+
+    const now = new Date()
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+
+    const { data: matches, error } = await supabase
+      .from("matches")
+      .select("red_team, blue_team, red_score, blue_score")
+      .gte("created_at", startOfMonth.toISOString())
+      .lte("created_at", endOfMonth.toISOString())
+
+    if (error) {
+      return { success: false, error: error.message, data: {} }
+    }
+
+    const stats = new Map<string, { wins: number; losses: number; draws: number }>()
+
+    for (const match of matches || []) {
+      const redWon = match.red_score > match.blue_score
+      const blueWon = match.blue_score > match.red_score
+
+      for (const player of match.red_team) {
+        if (!stats.has(player)) stats.set(player, { wins: 0, losses: 0, draws: 0 })
+        const s = stats.get(player)!
+        if (redWon) s.wins++
+        else if (blueWon) s.losses++
+        else s.draws++
+      }
+
+      for (const player of match.blue_team) {
+        if (!stats.has(player)) stats.set(player, { wins: 0, losses: 0, draws: 0 })
+        const s = stats.get(player)!
+        if (blueWon) s.wins++
+        else if (redWon) s.losses++
+        else s.draws++
+      }
+    }
+
+    const statsObj: Record<string, { wins: number; losses: number; draws: number }> = {}
+    stats.forEach((value, key) => { statsObj[key] = value })
+
+    return { success: true, data: statsObj }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to fetch monthly player stats",
+      data: {},
+    }
+  }
+}
+
 export async function getPlayerStats() {
   try {
     const supabase = await createClient()
