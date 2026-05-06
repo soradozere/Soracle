@@ -761,96 +761,108 @@ export default function TeamBalancer() {
               <section>
                 <h3 className="text-xl font-bold text-text-bright mb-3">The Challenge</h3>
                 <p className="leading-relaxed">
-                  JK2 CTF requires both balanced overall skill AND proper role coverage. You can&apos;t just average player
-                  ratings—that ignores whether teams can actually cap, chase, or defend effectively. It also matters how
-                  skill is distributed—two evenly-totalled teams can still produce a blowout if one side has all the top
-                  players.
+                  JK2 CTF requires both balanced overall skill AND proper role coverage. You can&apos;t just average player ratings — that ignores whether teams can actually cap, chase, or defend effectively. It also matters how skill is distributed — two evenly-totalled teams can still produce a blowout if one side has all the top players.
                 </p>
               </section>
 
               <section>
                 <h3 className="text-xl font-bold text-text-bright mb-3">How It Works</h3>
                 <p className="leading-relaxed mb-4">
-                  The balancer evaluates every possible team split using a priority system:
+                  The balancer checks all 924 possible team splits and picks the most balanced one. Each split gets a penalty score — lower is better.
+                </p>
+                <p className="leading-relaxed mb-4">
+                  Here&apos;s what it&apos;s checking:
                 </p>
                 <ul className="space-y-3">
                   <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">1.</span>
+                    <span className="text-primary font-mono font-bold">•</span>
                     <div>
-                      <strong className="text-text-bright">Tier Balance (weight: 3.0)</strong>
+                      <strong className="text-text-bright">Tier balance</strong>
                       <p className="text-sm text-text-dim mt-1">
-                        Balances total team strength using tier values (1-10). Target: ≤2 point difference. Tier
-                        measures your overall competitive impact.
+                        Both teams should add up to roughly the same total tier. This is the main check.
                       </p>
                     </div>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-accent-red font-mono font-bold">2.</span>
+                    <span className="text-primary font-mono font-bold">•</span>
                     <div>
-                      <strong className="text-text-bright">Critical Role Coverage (penalty: 500)</strong>
+                      <strong className="text-text-bright">Role coverage</strong>
                       <p className="text-sm text-text-dim mt-1">
-                        Ensures both teams have viable Cappers and Chasers (4+ role rating). Missing either =
-                        unplayable.
+                        Each team needs at least one Capper and one Chaser. Missing either = broken match.
                       </p>
                     </div>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-accent-green font-mono font-bold">3.</span>
+                    <span className="text-primary font-mono font-bold">•</span>
                     <div>
-                      <strong className="text-text-bright">Top-3 Strength Balance (weight: 2.0)</strong>
+                      <strong className="text-text-bright">Top-3 vs Top-3</strong>
                       <p className="text-sm text-text-dim mt-1">
-                        Compares the combined tier of each team&apos;s three strongest players. This prevents &quot;top-heavy&quot;
-                        splits where one team has all the elite players even though the tier totals look close.
+                        The three best players on each team should be roughly equal in strength.
                       </p>
                     </div>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-accent-purple font-mono font-bold">4.</span>
+                    <span className="text-primary font-mono font-bold">•</span>
                     <div>
-                      <strong className="text-text-bright">Role Strength Balance (weight: 0.8)</strong>
+                      <strong className="text-text-bright">Bottom-3 vs Bottom-3</strong>
                       <p className="text-sm text-text-dim mt-1">
-                        Balances the total role ratings for each position (Capper, Chase, Camp, Cleaner, Support)
-                        between teams. Example: If Red has 25 total Capper rating and Blue has 15, that creates
-                        imbalance—even if tier totals are equal.
+                        Same idea, but for the three weakest. Stops one team having a much lower floor.
                       </p>
                     </div>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-accent-yellow font-mono font-bold">5.</span>
+                    <span className="text-primary font-mono font-bold">•</span>
                     <div>
-                      <strong className="text-text-bright">Elite Distribution (weight: 1.5)</strong>
+                      <strong className="text-text-bright">No stacking elites</strong>
                       <p className="text-sm text-text-dim mt-1">
-                        Prevents stacking top-tier players on one team. The threshold is dynamic—it&apos;s based on the top
-                        25% of players in the current pool, not a fixed number.
+                        If one team gets three or more tier 8+ players and the other doesn&apos;t, that&apos;s a problem.
                       </p>
                     </div>
                   </li>
                   <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">6.</span>
+                    <span className="text-primary font-mono font-bold">•</span>
                     <div>
-                      <strong className="text-text-bright">Top Two Separation (penalty: 8000)</strong>
-                      <p className="text-sm text-text-dim mt-1">Never puts the two highest-tier players together.</p>
+                      <strong className="text-text-bright">Even role spread</strong>
+                      <p className="text-sm text-text-dim mt-1">
+                        Each team should have similar total ratings in every role, not just overall.
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-primary font-mono font-bold">•</span>
+                    <div>
+                      <strong className="text-text-bright">Don&apos;t stack the top player</strong>
+                      <p className="text-sm text-text-dim mt-1">
+                        The #1 player shouldn&apos;t be teamed up with too many other top-tier players.
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-primary font-mono font-bold">•</span>
+                    <div>
+                      <strong className="text-text-bright">Mic balance</strong>
+                      <p className="text-sm text-text-dim mt-1">
+                        Light tiebreaker. Tries to spread mic users evenly.
+                      </p>
                     </div>
                   </li>
                 </ul>
+                <p className="leading-relaxed mt-4">
+                  The balancer weighs all of these together and picks the split with the lowest combined penalty.
+                </p>
               </section>
 
               <section>
                 <h3 className="text-xl font-bold text-text-bright mb-3">Understanding the Two Rating Systems</h3>
                 <p className="leading-relaxed">
-                  Tier values balance overall strength. Role ratings ensure team composition works. A tier 8 Capper and
-                  tier 8 Chaser might have a similar tier value (both impact the game equally), but different role
-                  profiles (they fill different needs).
+                  Tier values balance overall strength. Role ratings ensure team composition works. A tier 8 Capper and a tier 8 Chaser have similar competitive impact (same tier), but fill completely different needs on a team (different role profiles). The balancer uses tier as the primary balance metric and roles as the composition metric.
                 </p>
               </section>
 
               <section>
                 <h3 className="text-xl font-bold text-text-bright mb-3">Balance Confidence</h3>
                 <p className="leading-relaxed">
-                  Each balance option shows a confidence percentage — this is the balancer&apos;s assessment of how fair the
-                  split is, based on all the factors above. Higher is better. You&apos;ll also see this score on logged
-                  matches in the Match History tab, so you can track whether higher-confidence balances produce closer
-                  games.
+                  Each balance option shows a confidence percentage based on the penalty score — lower penalty translates to higher confidence. You&apos;ll also see this on logged matches in the Match History tab, so you can track whether higher-confidence balances actually produce closer games.
                 </p>
               </section>
 
