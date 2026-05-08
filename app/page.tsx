@@ -17,7 +17,7 @@ import { balanceTeamsWithOptions, balanceTeamsCompetitive } from "@/lib/balance-
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import { themes, applyTheme, type ThemeName } from "@/lib/themes"
 import type { Player, BalanceOption, BalanceHistoryEntry } from "@/lib/types"
-import { Search, Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, HelpCircle, History, BarChart3 } from "lucide-react"
+import { Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, HelpCircle, History, BarChart3 } from "lucide-react"
 import Image from "next/image"
 import { useToast } from "@/hooks/use-toast"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -32,7 +32,6 @@ export default function TeamBalancer() {
   const [roleFilter, setRoleFilter] = useState<string | null>(null)
   const [micFilter, setMicFilter] = useState(false)
   const [eliteFilter, setEliteFilter] = useState(false)
-  const [showFilters, setShowFilters] = useState(false)
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
   const [competitiveMode, setCompetitiveMode] = useState(false)
   const [cutPlayers, setCutPlayers] = useState<string[]>([])
@@ -539,17 +538,6 @@ export default function TeamBalancer() {
                   </Tooltip>
                 </TooltipProvider>
 
-                <button
-                  onClick={() => setShowFilters(!showFilters)}
-                  className={`px-3 py-1.5 rounded-md text-sm transition-all font-medium ${
-                    showFilters
-                      ? "bg-[#66fcf1] text-[#0b0c10] font-bold"
-                      : "bg-[#2a3441]/60 backdrop-blur-sm text-[#c5c6c7] hover:bg-[#3d4855] border border-[#3d4855]"
-                  }`}
-                >
-                  <Search className="w-4 h-4 inline mr-1" />
-                  Search
-                </button>
               </div>
 
               <div className="flex items-center gap-2">
@@ -593,22 +581,20 @@ export default function TeamBalancer() {
               </div>
             </div>
 
-            {showFilters && (
-              <FilterPanel
-                searchQuery={searchQuery}
-                setSearchQuery={setSearchQuery}
-                roleFilter={roleFilter}
-                setRoleFilter={setRoleFilter}
-                micFilter={micFilter}
-                setMicFilter={setMicFilter}
-                eliteFilter={eliteFilter}
-                setEliteFilter={setEliteFilter}
-                players={players}
-                onSelectPlayer={handlePlayerToggle}
-                showDropdown={showSearchDropdown}
-                setShowDropdown={setShowSearchDropdown}
-              />
-            )}
+            <FilterPanel
+              searchQuery={searchQuery}
+              setSearchQuery={setSearchQuery}
+              roleFilter={roleFilter}
+              setRoleFilter={setRoleFilter}
+              micFilter={micFilter}
+              setMicFilter={setMicFilter}
+              eliteFilter={eliteFilter}
+              setEliteFilter={setEliteFilter}
+              players={players}
+              onSelectPlayer={handlePlayerToggle}
+              showDropdown={showSearchDropdown}
+              setShowDropdown={setShowSearchDropdown}
+            />
           </div>
 
           {competitiveMode && selectedPlayers.length > 0 && (
