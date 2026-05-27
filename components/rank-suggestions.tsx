@@ -6,7 +6,7 @@ import { ArrowUp, ArrowDown, TrendingUp, TrendingDown, RefreshCw } from "lucide-
 import { Button } from "@/components/ui/button"
 
 // Minimum matches required for a suggestion
-const MIN_MATCHES_THRESHOLD = 10
+const MIN_MATCHES_THRESHOLD = 5
 
 // Minimum performance gap to trigger a suggestion (15%)
 const MIN_GAP_THRESHOLD = 0.15
