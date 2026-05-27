@@ -187,7 +187,7 @@ export function MatchHistoryTab() {
               )}
 
               <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className={`px-2 py-0.5 rounded text-xs font-bold ${
                     match.match_type === "algorithm" 
                       ? "bg-[var(--color-primary)]/20 text-[var(--color-primary)]" 
@@ -195,11 +195,39 @@ export function MatchHistoryTab() {
                   }`}>
                     {match.match_type === "algorithm" ? "ALGORITHM" : "MANUAL"}
                   </span>
-                  {match.red_tiers && match.blue_tiers && (
-                    <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-[var(--color-text-dim)]/20 text-[var(--color-text-dim)]">
-                      Tier gap: {Math.abs(match.red_tiers.reduce((a, b) => a + b, 0) - match.blue_tiers.reduce((a, b) => a + b, 0))}
-                    </span>
-                  )}
+                  {match.red_tiers && match.blue_tiers && (() => {
+                    const redTotal = match.red_tiers.reduce((a, b) => a + b, 0)
+                    const blueTotal = match.blue_tiers.reduce((a, b) => a + b, 0)
+                    const tierGap = Math.abs(redTotal - blueTotal)
+                    const avgStrength = (redTotal + blueTotal) / 2
+                    const pct = avgStrength / 60
+
+                    const strengthColor =
+                      pct >= 0.9 ? { bg: "bg-[var(--color-primary)]/25", text: "text-[var(--color-primary)]" } :
+                      pct >= 0.75 ? { bg: "bg-[#f39c12]/20", text: "text-[#f39c12]" } :
+                      pct >= 0.55 ? { bg: "bg-[#e67e22]/20", text: "text-[#e67e22]" } :
+                      { bg: "bg-[var(--color-text-dim)]/15", text: "text-[var(--color-text-dim)]" }
+
+                    const strengthLabel =
+                      pct >= 0.9 ? "Elite" :
+                      pct >= 0.75 ? "High" :
+                      pct >= 0.55 ? "Mid" :
+                      "Low"
+
+                    return (
+                      <>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs font-bold ${strengthColor.bg} ${strengthColor.text}`}
+                          title={`Avg team strength: ${avgStrength.toFixed(1)} / 60`}
+                        >
+                          {strengthLabel} {avgStrength.toFixed(0)}/60
+                        </span>
+                        <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-[var(--color-text-dim)]/20 text-[var(--color-text-dim)]">
+                          Tier gap: {tierGap}
+                        </span>
+                      </>
+                    )
+                  })()}
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="flex items-center gap-1 text-xs text-[var(--color-text-dim)]">
