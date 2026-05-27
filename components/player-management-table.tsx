@@ -269,6 +269,8 @@ export function PlayerManagementTable() {
                         tier_value: Number.parseInt(e.target.value) || 0,
                       })
                     }
+                    onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </TableCell>
                 <TableCell>
@@ -300,6 +302,8 @@ export function PlayerManagementTable() {
                         capper_rating: Number.parseInt(e.target.value) || 0,
                       })
                     }
+                    onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </TableCell>
                 <TableCell>
@@ -312,6 +316,8 @@ export function PlayerManagementTable() {
                         chase_rating: Number.parseInt(e.target.value) || 0,
                       })
                     }
+                    onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </TableCell>
                 <TableCell>
@@ -324,6 +330,8 @@ export function PlayerManagementTable() {
                         camp_rating: Number.parseInt(e.target.value) || 0,
                       })
                     }
+                    onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </TableCell>
                 <TableCell>
@@ -336,6 +344,8 @@ export function PlayerManagementTable() {
                         cleaner_rating: Number.parseInt(e.target.value) || 0,
                       })
                     }
+                    onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </TableCell>
                 <TableCell>
@@ -348,6 +358,8 @@ export function PlayerManagementTable() {
                         support_rating: Number.parseInt(e.target.value) || 0,
                       })
                     }
+                    onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </TableCell>
                 <TableCell>
@@ -423,6 +435,8 @@ export function PlayerManagementTable() {
                             tier_value: Number.parseInt(e.target.value) || 0,
                           })
                         }
+                        onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                        className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                     ) : (
                       player.tier_value
@@ -464,6 +478,8 @@ export function PlayerManagementTable() {
                             capper_rating: Number.parseInt(e.target.value) || 0,
                           })
                         }
+                        onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                        className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                     ) : (
                       player.capper_rating
@@ -480,6 +496,8 @@ export function PlayerManagementTable() {
                             chase_rating: Number.parseInt(e.target.value) || 0,
                           })
                         }
+                        onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                        className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                     ) : (
                       player.chase_rating
@@ -496,6 +514,8 @@ export function PlayerManagementTable() {
                             camp_rating: Number.parseInt(e.target.value) || 0,
                           })
                         }
+                        onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                        className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                     ) : (
                       player.camp_rating
@@ -512,6 +532,8 @@ export function PlayerManagementTable() {
                             cleaner_rating: Number.parseInt(e.target.value) || 0,
                           })
                         }
+                        onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                        className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                     ) : (
                       player.cleaner_rating
@@ -528,6 +550,8 @@ export function PlayerManagementTable() {
                             support_rating: Number.parseInt(e.target.value) || 0,
                           })
                         }
+                        onKeyDown={(e) => { if (e.key === "ArrowUp" || e.key === "ArrowDown") e.preventDefault() }}
+                        className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                     ) : (
                       player.support_rating
