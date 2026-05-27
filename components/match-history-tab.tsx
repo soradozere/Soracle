@@ -203,13 +203,13 @@ export function MatchHistoryTab() {
                     const pct = avgStrength / 60
 
                     const strengthColor =
-                      pct >= 0.92 ? { bg: "bg-green-500/20", text: "text-green-600" } :
-                      pct >= 0.75 ? { bg: "bg-[#e67e22]/20", text: "text-[#e67e22]" } :
+                      avgStrength >= 45 ? { bg: "bg-green-500/20", text: "text-green-600" } :
+                      avgStrength >= 30 ? { bg: "bg-[#e67e22]/20", text: "text-[#e67e22]" } :
                       { bg: "bg-[var(--color-text-dim)]/15", text: "text-[var(--color-text-dim)]" }
 
                     const strengthLabel =
-                      pct >= 0.92 ? "High" :
-                      pct >= 0.75 ? "Mid" :
+                      avgStrength >= 45 ? "High" :
+                      avgStrength >= 30 ? "Mid" :
                       "Low"
 
                     return (
