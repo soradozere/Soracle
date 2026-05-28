@@ -116,6 +116,17 @@ export function PlayerManagementTable() {
         return
       }
 
+      // Log tier change if tier was updated
+      const originalPlayer = players.find(p => p.id === editingId)
+      if (originalPlayer && originalPlayer.tier_value !== editingPlayer.tier_value) {
+        await supabase.from("tier_changes").insert({
+          player_id: editingId,
+          player_name: editingPlayer.name || originalPlayer.name,
+          previous_tier: originalPlayer.tier_value,
+          new_tier: editingPlayer.tier_value || 0,
+        })
+      }
+
       toast({
         title: "Success",
         description: "Player updated successfully",
