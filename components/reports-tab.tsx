@@ -7,6 +7,7 @@ import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import type { Player } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
+import { TierChangelog } from "@/components/tier-changelog"
 import {
   LineChart,
   Line,
@@ -1058,6 +1059,10 @@ export function ReportsTab() {
           </div>
         </>
       )}
+
+      <div className="mt-12">
+        <TierChangelog />
+      </div>
     </div>
   )
 }
