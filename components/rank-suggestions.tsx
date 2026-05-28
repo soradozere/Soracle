@@ -6,7 +6,7 @@ import { ArrowUp, ArrowDown, TrendingUp, TrendingDown, RefreshCw } from "lucide-
 import { Button } from "@/components/ui/button"
 
 // Minimum matches required for a suggestion
-const MIN_MATCHES_THRESHOLD = 10
+const MIN_MATCHES_THRESHOLD = 5
 
 // Minimum performance gap to trigger a suggestion (15%)
 const MIN_GAP_THRESHOLD = 0.15
@@ -87,7 +87,8 @@ export function RankSuggestions() {
         playerTierMap.set(player.name, player.tier_value)
       }
 
-      // Calculate stats for each player
+      // Calculate stats for each player using their CURRENT tier for expected win prob,
+      // so suggestions reflect performance relative to where they stand right now.
       const playerStats = new Map<string, {
         totalExpectedWinProb: number
         wins: number
@@ -97,14 +98,22 @@ export function RankSuggestions() {
       for (const match of (matches || []) as Match[]) {
         if (!match.red_tiers || !match.blue_tiers) continue
 
-        const redTierSum = match.red_tiers.reduce((a, b) => a + b, 0)
-        const blueTierSum = match.blue_tiers.reduce((a, b) => a + b, 0)
+        const redWon = match.red_score > match.blue_score
+        const blueWon = match.blue_score > match.red_score
+
+        // Build current-tier sums for each team (falling back to snapshot tier if player not found)
+        const redCurrentTiers = match.red_team.map(
+          (name, i) => playerTierMap.get(name) ?? (match.red_tiers![i] ?? 0)
+        )
+        const blueCurrentTiers = match.blue_team.map(
+          (name, i) => playerTierMap.get(name) ?? (match.blue_tiers![i] ?? 0)
+        )
+
+        const redTierSum = redCurrentTiers.reduce((a, b) => a + b, 0)
+        const blueTierSum = blueCurrentTiers.reduce((a, b) => a + b, 0)
         const totalTiers = redTierSum + blueTierSum
 
         if (totalTiers === 0) continue
-
-        const redWon = match.red_score > match.blue_score
-        const blueWon = match.blue_score > match.red_score
 
         // Process red team players
         for (const playerName of match.red_team) {
