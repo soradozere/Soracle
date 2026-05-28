@@ -1061,7 +1061,7 @@ export function ReportsTab() {
       )}
 
       <div className="mt-12">
-        <TierChangelog />
+        <TierChangelog year={selectedYear} month={selectedMonth} />
       </div>
     </div>
   )
