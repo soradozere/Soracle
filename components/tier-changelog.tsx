@@ -13,7 +13,12 @@ interface TierChange {
   changed_at: string
 }
 
-export function TierChangelog() {
+interface TierChangelogProps {
+  year: number
+  month: number // 1-based (1 = January)
+}
+
+export function TierChangelog({ year, month }: TierChangelogProps) {
   const [changes, setChanges] = useState<TierChange[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
@@ -21,15 +26,14 @@ export function TierChangelog() {
 
   useEffect(() => {
     fetchChanges()
-  }, [])
+  }, [year, month])
 
   async function fetchChanges() {
     setIsLoading(true)
 
-    // Get current month and year
-    const now = new Date()
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-    const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59)
+    // Use the selected month/year from the Reports tab
+    const monthStart = new Date(year, month - 1, 1)
+    const monthEnd = new Date(year, month, 0, 23, 59, 59)
 
     const { data, error } = await supabase
       .from("tier_changes")
@@ -69,7 +73,7 @@ export function TierChangelog() {
       <div className="rounded-lg border border-[var(--color-border)] p-6 bg-[var(--color-surface)]">
         <h2 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Tier Changelog</h2>
         <div className="text-center text-[var(--color-text-dim)] py-8">
-          No tier changes this month
+          No tier changes in {new Date(year, month - 1).toLocaleString("en-US", { month: "long", year: "numeric" })}
         </div>
       </div>
     )
