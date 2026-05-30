@@ -31,6 +31,7 @@ export function PlayerManagementTable() {
   const [editingPlayer, setEditingPlayer] = useState<Partial<Player>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [isAdding, setIsAdding] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
   const { toast } = useToast()
   const supabase = createClient()
 
@@ -63,9 +64,12 @@ export function PlayerManagementTable() {
     setEditingId(null)
     setEditingPlayer({})
     setIsAdding(false)
+    setIsSaving(false)
   }
 
   async function saveEdit() {
+    if (isSaving) return
+    
     if (!editingPlayer.name?.trim()) {
       toast({
         title: "Error",
@@ -74,6 +78,8 @@ export function PlayerManagementTable() {
       })
       return
     }
+
+    setIsSaving(true)
 
     const playerData = {
       name: editingPlayer.name,
@@ -133,6 +139,7 @@ export function PlayerManagementTable() {
       })
     }
 
+    setIsSaving(false)
     cancelEdit()
     fetchPlayers()
   }
