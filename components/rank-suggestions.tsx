@@ -5,14 +5,13 @@ import { createClient } from "@/lib/supabase/client"
 import { ArrowUp, ArrowDown, TrendingUp, TrendingDown, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 
-// Minimum matches required for a suggestion
+// Minimum matches AT THE PLAYER'S CURRENT TIER required for a suggestion.
+// Only games played since the player's last tier change count (see match loop below),
+// so this sample resets whenever an admin re-ranks a player.
 const MIN_MATCHES_THRESHOLD = 5
 
 // Minimum performance gap to trigger a suggestion (15%)
 const MIN_GAP_THRESHOLD = 0.15
-
-// Gap threshold for +/- 2 tier suggestion (25%)
-const LARGE_GAP_THRESHOLD = 0.25
 
 interface RankSuggestion {
   playerName: string
@@ -87,13 +86,39 @@ export function RankSuggestions() {
         playerTierMap.set(player.name, player.tier_value)
       }
 
-      // Calculate stats for each player using their CURRENT tier for expected win prob,
-      // so suggestions reflect performance relative to where they stand right now.
+      // Calculate stats for each player using the TIER SNAPSHOTS recorded at match time
+      // (red_tiers/blue_tiers), not current tiers. This does two things:
+      //   1. Expected win prob reflects how teams were actually balanced when the match was
+      //      played, so re-ranking one player can't distort everyone else's baseline.
+      //   2. We only count a match toward a player if their snapshot tier equals their CURRENT
+      //      tier — i.e. games played since their last tier change. Once an admin moves a
+      //      player, the games that motivated the move stop counting, so the suggestion no
+      //      longer re-fires against the new tier.
       const playerStats = new Map<string, {
         totalExpectedWinProb: number
         wins: number
         matches: number
       }>()
+
+      const accumulate = (
+        playerName: string,
+        snapshotTier: number | null | undefined,
+        expectedWinProb: number,
+        won: boolean,
+      ) => {
+        const currentTier = playerTierMap.get(playerName)
+        if (currentTier === undefined) return
+        // Only count games played at the player's current tier.
+        if (snapshotTier == null || snapshotTier !== currentTier) return
+
+        if (!playerStats.has(playerName)) {
+          playerStats.set(playerName, { totalExpectedWinProb: 0, wins: 0, matches: 0 })
+        }
+        const stats = playerStats.get(playerName)!
+        stats.totalExpectedWinProb += expectedWinProb
+        stats.matches++
+        if (won) stats.wins++
+      }
 
       for (const match of (matches || []) as Match[]) {
         if (!match.red_tiers || !match.blue_tiers) continue
@@ -101,43 +126,22 @@ export function RankSuggestions() {
         const redWon = match.red_score > match.blue_score
         const blueWon = match.blue_score > match.red_score
 
-        // Build current-tier sums for each team (falling back to snapshot tier if player not found)
-        const redCurrentTiers = match.red_team.map(
-          (name, i) => playerTierMap.get(name) ?? (match.red_tiers![i] ?? 0)
-        )
-        const blueCurrentTiers = match.blue_team.map(
-          (name, i) => playerTierMap.get(name) ?? (match.blue_tiers![i] ?? 0)
-        )
-
-        const redTierSum = redCurrentTiers.reduce((a, b) => a + b, 0)
-        const blueTierSum = blueCurrentTiers.reduce((a, b) => a + b, 0)
+        // Use the snapshot tiers (tiers at match time) for the expected-win calculation.
+        const redTierSum = match.red_tiers.reduce((a, b) => a + b, 0)
+        const blueTierSum = match.blue_tiers.reduce((a, b) => a + b, 0)
         const totalTiers = redTierSum + blueTierSum
 
         if (totalTiers === 0) continue
 
-        // Process red team players
-        for (const playerName of match.red_team) {
-          if (!playerStats.has(playerName)) {
-            playerStats.set(playerName, { totalExpectedWinProb: 0, wins: 0, matches: 0 })
-          }
-          const stats = playerStats.get(playerName)!
-          const expectedWinProb = redTierSum / totalTiers
-          stats.totalExpectedWinProb += expectedWinProb
-          stats.matches++
-          if (redWon) stats.wins++
-        }
+        const redExpected = redTierSum / totalTiers
+        const blueExpected = blueTierSum / totalTiers
 
-        // Process blue team players
-        for (const playerName of match.blue_team) {
-          if (!playerStats.has(playerName)) {
-            playerStats.set(playerName, { totalExpectedWinProb: 0, wins: 0, matches: 0 })
-          }
-          const stats = playerStats.get(playerName)!
-          const expectedWinProb = blueTierSum / totalTiers
-          stats.totalExpectedWinProb += expectedWinProb
-          stats.matches++
-          if (blueWon) stats.wins++
-        }
+        match.red_team.forEach((playerName, i) => {
+          accumulate(playerName, match.red_tiers![i], redExpected, redWon)
+        })
+        match.blue_team.forEach((playerName, i) => {
+          accumulate(playerName, match.blue_tiers![i], blueExpected, blueWon)
+        })
       }
 
       // Generate suggestions
@@ -156,13 +160,12 @@ export function RankSuggestions() {
         // Only suggest if gap exceeds threshold
         if (Math.abs(performanceGap) < MIN_GAP_THRESHOLD) continue
 
+        // Move at most one tier per suggestion. A genuinely mis-ranked player will be
+        // moved again next sample window once they've played enough games at the new tier;
+        // this avoids noise-driven 2-tier jumps from small samples.
         let tierChange = 0
-        if (performanceGap >= LARGE_GAP_THRESHOLD) {
-          tierChange = 2
-        } else if (performanceGap >= MIN_GAP_THRESHOLD) {
+        if (performanceGap >= MIN_GAP_THRESHOLD) {
           tierChange = 1
-        } else if (performanceGap <= -LARGE_GAP_THRESHOLD) {
-          tierChange = -2
         } else if (performanceGap <= -MIN_GAP_THRESHOLD) {
           tierChange = -1
         }
@@ -225,7 +228,7 @@ export function RankSuggestions() {
       <div className="p-8 text-center">
         <p className="text-[#8892a0] mb-2">No rank suggestions available.</p>
         <p className="text-[#8892a0] text-sm">
-          Players need at least {MIN_MATCHES_THRESHOLD} matches with tier data before suggestions appear.
+          Players need at least {MIN_MATCHES_THRESHOLD} matches at their current tier this month before suggestions appear. Re-ranking a player resets their count.
         </p>
         <Button onClick={fetchSuggestions} variant="outline" size="sm" className="mt-4">
           <RefreshCw className="w-4 h-4 mr-2" />
@@ -239,7 +242,7 @@ export function RankSuggestions() {
     <div className="space-y-4">
       <div className="flex items-center justify-between mb-4">
         <p className="text-sm text-[#8892a0]">
-          {suggestions.length} suggestion{suggestions.length !== 1 ? "s" : ""} based on current month performance
+          {suggestions.length} suggestion{suggestions.length !== 1 ? "s" : ""} based on this month's games played at each player's current tier
         </p>
         <Button onClick={fetchSuggestions} variant="outline" size="sm">
           <RefreshCw className="w-4 h-4 mr-2" />
