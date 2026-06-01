@@ -89,7 +89,7 @@ export function PlayerManagementTable() {
     }
 
     if (isAdding) {
-      const { error } = await supabase.from("players").insert(playerData)
+      const { data, error } = await supabase.from("players").insert(playerData).select().single()
 
       if (error) {
         toast({
@@ -100,6 +100,7 @@ export function PlayerManagementTable() {
         return
       }
 
+      setPlayers((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
       toast({
         title: "Success",
         description: "Player added successfully",
@@ -127,6 +128,9 @@ export function PlayerManagementTable() {
         })
       }
 
+      setPlayers((prev) =>
+        prev.map((p) => (p.id === editingId ? { ...p, ...playerData } : p))
+      )
       toast({
         title: "Success",
         description: "Player updated successfully",
@@ -134,7 +138,6 @@ export function PlayerManagementTable() {
     }
 
     cancelEdit()
-    fetchPlayers()
   }
 
   async function deletePlayer(id: string) {
@@ -151,12 +154,11 @@ export function PlayerManagementTable() {
       return
     }
 
+    setPlayers((prev) => prev.filter((p) => p.id !== id))
     toast({
       title: "Success",
       description: "Player deleted successfully",
     })
-
-    fetchPlayers()
   }
 
   function startAdd() {
