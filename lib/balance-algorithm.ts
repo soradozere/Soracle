@@ -320,18 +320,18 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
       wasRandomized: globalRandomize,
     }
 
-    let label = "Alternative Balance"
-    let description = "Different team composition"
+    let label = "Slight Wildcard"
+    let description = "Shuffled for variety"
 
     if (index === 0) {
       label = "Perfect Balance"
-      description = "Optimal balance score"
+      description = "Closest possible match"
     } else if (result.tierDiff < 1.5) {
-      label = "Tier Balanced"
-      description = `Tier diff: ${result.tierDiff.toFixed(1)}`
+      label = "Fair Fight"
+      description = `Teams within ${result.tierDiff.toFixed(1)} tier points`
     } else {
-      label = `Option ${index + 1}`
-      description = `Score: ${result.score.toFixed(0)}`
+      label = "Slight Edge"
+      description = "Playable, but one side's a bit stronger"
     }
 
     return {
