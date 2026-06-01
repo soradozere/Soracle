@@ -8,6 +8,7 @@ interface TeamDisplayProps {
   result: BalanceResult
   players: Player[]
   onCopy: () => void
+  onCopyAll: () => void
   onSwapSides: () => void
 }
 
@@ -19,7 +20,7 @@ const ROLE_LABELS = {
   Support: "SUP",
 }
 
-export const TeamDisplay = memo(function TeamDisplay({ result, players, onCopy, onSwapSides }: TeamDisplayProps) {
+export const TeamDisplay = memo(function TeamDisplay({ result, players, onCopy, onCopyAll, onSwapSides }: TeamDisplayProps) {
   const getPlayerRoleCoverage = useMemo(() => {
     return (teamNames: string[]) => {
       const teamPlayers = teamNames.map((name) => players.find((p) => p.name === name)!).filter(Boolean)
@@ -51,6 +52,19 @@ export const TeamDisplay = memo(function TeamDisplay({ result, players, onCopy, 
             >
               <Copy className="w-4 h-4 inline mr-1" />
               Copy Teams
+            </button>
+            <button
+              onClick={onCopyAll}
+              style={{
+                backgroundColor: "var(--color-primary)",
+                borderColor: "var(--color-primary)",
+                color: "var(--color-background)",
+                boxShadow: "0 10px 15px -3px var(--color-primary-glow)",
+              }}
+              className="px-4 py-2 rounded-md hover:opacity-90 transition-all text-sm font-medium border"
+            >
+              <Copy className="w-4 h-4 inline mr-1" />
+              Copy All Options
             </button>
             <button
               onClick={onSwapSides}

@@ -43,9 +43,7 @@ export function TierChangelog({ year, month, isAdmin = false }: TierChangelogPro
       .lte("changed_at", monthEnd.toISOString())
       .order("changed_at", { ascending: false })
 
-    if (!isAdmin) {
-      query = query.or("hidden.is.null,hidden.eq.false")
-    }
+    query = query.or("hidden.is.null,hidden.eq.false")
 
     const { data, error } = await query
 
@@ -107,7 +105,7 @@ export function TierChangelog({ year, month, isAdmin = false }: TierChangelogPro
     <div className="rounded-lg border border-[var(--color-border)] p-6 bg-[var(--color-surface)]">
       <h2 className="text-lg font-semibold mb-4 text-[var(--color-text)]">Tier Changelog</h2>
       <div className="space-y-3">
-        {changes.filter((c) => isAdmin || !c.hidden).map((change) => (
+        {changes.map((change) => (
           <div
             key={change.id}
             className="relative flex items-center justify-between p-3 rounded-md bg-[var(--color-background)] border border-[var(--color-border)]/50 hover:bg-[var(--color-background)]/80 transition-colors"
@@ -116,7 +114,7 @@ export function TierChangelog({ year, month, isAdmin = false }: TierChangelogPro
               <button
                 onClick={() => hideChange(change.id)}
                 className="absolute top-1.5 right-1.5 w-5 h-5 flex items-center justify-center rounded-full text-[var(--color-text-dim)] hover:text-[#ff4757] hover:bg-[#ff4757]/10 transition-colors"
-                title="Hide from clients"
+                title="Hide from all"
               >
                 <X className="w-3 h-3" />
               </button>

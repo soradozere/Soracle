@@ -261,6 +261,17 @@ export default function TeamBalancer() {
     }
   }
 
+  const handleCopyAllOptions = () => {
+    if (balanceOptions.length === 0) return
+    const k = 0.004
+    const floor = 30
+    const sections = balanceOptions.map((option) => {
+      const confidence = Math.round(floor + (100 - floor) * Math.exp(-k * option.score))
+      return `${option.label} (Balance: ${confidence}%)\n🔥 Red Team: ${option.result.teamRed.join(", ")}\n💧 Blue Team: ${option.result.teamBlue.join(", ")}`
+    })
+    navigator.clipboard.writeText(sections.join("\n\n"))
+  }
+
   const handleSwapSides = () => {
     if (balanceOptions.length > 0) {
       setBalanceOptions((prevOptions) =>
@@ -714,6 +725,7 @@ export default function TeamBalancer() {
                 result={balanceOptions[selectedOptionIndex].result}
                 players={players}
                 onCopy={handleCopyTeams}
+                onCopyAll={handleCopyAllOptions}
                 onSwapSides={handleSwapSides}
               />
             </>
