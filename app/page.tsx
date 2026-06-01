@@ -267,7 +267,7 @@ export default function TeamBalancer() {
     const floor = 30
     const sections = balanceOptions.map((option) => {
       const confidence = Math.round(floor + (100 - floor) * Math.exp(-k * option.score))
-      return `${option.label} (Balance: ${confidence}%)\n🔥 Red Team: ${option.result.teamRed.join(", ")}\n💧 Blue Team: ${option.result.teamBlue.join(", ")}`
+      return `${option.label} — ${option.description} (Balance: ${confidence}%)\n🔥 Red Team: ${option.result.teamRed.join(", ")}\n💧 Blue Team: ${option.result.teamBlue.join(", ")}`
     })
     navigator.clipboard.writeText(sections.join("\n\n"))
   }
