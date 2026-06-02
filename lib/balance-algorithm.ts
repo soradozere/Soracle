@@ -255,10 +255,6 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
     uniqueResults.push(results[uniqueResults.length])
   }
 
-  // Randomize red/blue assignment ONCE per call so all options share the same orientation.
-  // This keeps visual comparison between options stable.
-  const globalRandomize = Math.random() < 0.5
-
   // Convert to BalanceOption format
   return uniqueResults.map((result, index) => {
     // Sort teams by tier
@@ -302,8 +298,22 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
       swapText = `Suggested Swap: ${bestSwap.red} ↔ ${bestSwap.blue} (tier difference: ${result.tierDiff.toFixed(1)} → ${bestSwap.newDiff.toFixed(1)})`
     }
 
-    // Apply the global randomization flip
-    if (globalRandomize) {
+    // Colour assignment: the weaker team (lower tier total) takes Blue, since the
+    // Blue base is easier to hold and that handicap nudges a skewed match back toward
+    // even. Only when the tier totals are exactly equal is red/blue randomised.
+    // Decided per option, so each option reflects its own skew direction.
+    let wasRandomized = false
+    let flip = false
+    if (redTierTotal === blueTierTotal) {
+      wasRandomized = true
+      flip = Math.random() < 0.5
+    } else {
+      // redTeam currently holds team1 (tier total = redTierTotal). If it's the weaker
+      // side, flip so the weaker team ends up on Blue.
+      flip = redTierTotal < blueTierTotal
+    }
+
+    if (flip) {
       ;[redTeam, blueTeam] = [blueTeam, redTeam]
         ;[redMicCount, blueMicCount] = [blueMicCount, redMicCount]
         ;[redTierTotal, blueTierTotal] = [blueTierTotal, redTierTotal]
@@ -317,7 +327,7 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
       redTierTotal,
       blueTierTotal,
       swapText,
-      wasRandomized: globalRandomize,
+      wasRandomized,
     }
 
     let label = "Slight Wildcard"
