@@ -2,8 +2,6 @@
 
 A team balancer for **Jedi Knight II: Jedi Outcast** 6v6 Capture the Flag. Drop in your roster, pick 12 players, and Soracle evaluates every possible split to find the fairest teams — accounting not just for raw skill but for role coverage, skill distribution, and how the top players are spread.
 
-> Internally branded "Soracle", also known as JK2 CTF Team Balancer.
-
 ## What it does
 
 - **Smart balancing** — checks all 924 possible team splits for 12 players and scores each one with a penalty function (lower is better). Beyond matching total tier, it balances top-3 and bottom-3 strength, tier variance, per-role strength, and prevents stacking elite players or clustering the top player with too many strong teammates.
