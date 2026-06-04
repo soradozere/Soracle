@@ -25,6 +25,12 @@ import {
 } from "@/components/ui/command"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { Check, ChevronsUpDown, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
@@ -219,6 +225,8 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
   const [rowToPlayerId, setRowToPlayerId] = useState<Record<number, string | null>>({})
   // Sorted-row index -> player id that was auto-prefilled with high confidence.
   const [autoMatched, setAutoMatched] = useState<Record<number, string>>({})
+  // Sorted-row index -> merge/sub flag (null if unflagged). Same key as rowToPlayerId.
+  const [rowFlags, setRowFlags] = useState<Record<number, "merge" | "sub" | null>>({})
 
   // Fetch players the first time the modal opens; cache for the session.
   useEffect(() => {
@@ -290,6 +298,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
     setMissingColumns([])
     setRowToPlayerId({})
     setAutoMatched({})
+    setRowFlags({})
   }
 
   function handleClose(nextOpen: boolean) {
@@ -414,6 +423,15 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
   )
   const allMapped = sortedRows.length > 0 && mappedCount === sortedRows.length
 
+  const mergeCount = sortedRows.reduce(
+    (acc, _row, i) => acc + (rowFlags[i] === "merge" ? 1 : 0),
+    0,
+  )
+  const subCount = sortedRows.reduce(
+    (acc, _row, i) => acc + (rowFlags[i] === "sub" ? 1 : 0),
+    0,
+  )
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="bg-[var(--color-surface)]/95 backdrop-blur-md border-[#66fcf1]/30 text-white max-w-3xl max-h-[85vh] flex flex-col">
@@ -513,6 +531,35 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                 </dl>
               </div>
 
+              {/* Flag action bar — only when at least one row is flagged */}
+              {(mergeCount > 0 || subCount > 0) && (
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-[#66fcf1]/40 bg-[#66fcf1]/5 px-3 py-2">
+                  {mergeCount > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={mergeCount < 2}
+                      onClick={() => console.log("merge clicked")}
+                      className="h-7 bg-[#66fcf1] px-3 text-xs font-medium text-black hover:bg-[#66fcf1]/80 disabled:opacity-40"
+                    >
+                      Merge Selected ({mergeCount})
+                    </Button>
+                  )}
+                  {subCount > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={subCount < 2}
+                      onClick={() => console.log("sub clicked")}
+                      className="h-7 border-[#66fcf1]/50 bg-transparent px-3 text-xs font-medium text-[#66fcf1] hover:bg-[#66fcf1]/10 disabled:opacity-40"
+                    >
+                      Configure Substitution ({subCount})
+                    </Button>
+                  )}
+                </div>
+              )}
+
               {/* Review table */}
               <div className="rounded-lg border border-[var(--color-border)] overflow-hidden">
                 <table className="w-full border-collapse text-left text-sm">
@@ -521,6 +568,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                       <th className="px-3 py-2 font-medium">In-game Name</th>
                       <th className="px-3 py-2 font-medium">Team</th>
                       <th className="px-3 py-2 font-medium">Soracle Player</th>
+                      <th className="px-2 py-2 text-center font-medium">Flags</th>
                       <th className="px-3 py-2 text-right font-medium">Caps</th>
                       <th className="px-3 py-2 text-right font-medium">Returns</th>
                       <th className="px-3 py-2 text-right font-medium">Kills</th>
@@ -572,6 +620,51 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                                 setRowToPlayerId((prev) => ({ ...prev, [i]: id }))
                               }
                             />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            <div className="flex items-center justify-center gap-2">
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <label className="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-[#8892a0]">
+                                    <Checkbox
+                                      checked={rowFlags[i] === "merge"}
+                                      onCheckedChange={(c) =>
+                                        setRowFlags((prev) => ({
+                                          ...prev,
+                                          [i]: c ? "merge" : null,
+                                        }))
+                                      }
+                                      className="size-3.5 border-[#66fcf1]/40 data-[state=checked]:border-[#66fcf1] data-[state=checked]:bg-[#66fcf1] data-[state=checked]:text-black"
+                                    />
+                                    M
+                                  </label>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-white">
+                                  Flag this row as a reconnect of another row (Merge with another
+                                  row of the same player)
+                                </TooltipContent>
+                              </Tooltip>
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <label className="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-[#8892a0]">
+                                    <Checkbox
+                                      checked={rowFlags[i] === "sub"}
+                                      onCheckedChange={(c) =>
+                                        setRowFlags((prev) => ({
+                                          ...prev,
+                                          [i]: c ? "sub" : null,
+                                        }))
+                                      }
+                                      className="size-3.5 border-[#66fcf1]/40 data-[state=checked]:border-[#66fcf1] data-[state=checked]:bg-[#66fcf1] data-[state=checked]:text-black"
+                                    />
+                                    S
+                                  </label>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-white">
+                                  Flag this row as part of a substitution (Sub in or out)
+                                </TooltipContent>
+                              </Tooltip>
+                            </div>
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums">
                             {row["CAPTURES-CURRENT"]}
