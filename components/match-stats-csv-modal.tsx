@@ -81,6 +81,12 @@ const REQUIRED_COLUMNS = [
   "TIME-SUM",
 ] as const
 
+// Numeric counter columns summed when merging reconnect rows — every required
+// column except the two identity columns (team + name).
+const SUMMABLE_COLUMNS = REQUIRED_COLUMNS.filter(
+  (col) => col !== "LAST-NONSPEC-TEAM" && col !== "NAME-CLEAN",
+)
+
 // Fuzzy-matching tuning. Lower fuse score = better match.
 // THRESHOLD controls which matches fuse returns at all; CONFIDENCE_THRESHOLD
 // controls which of those are good enough to auto-prefill the dropdown.
@@ -101,6 +107,18 @@ interface ParseSummary {
   warnings: string[]
 }
 
+// A row as rendered in the review table: either an original parsed row or a
+// virtual row produced by merging several reconnect rows of the same player.
+type DisplayRow =
+  | { kind: "single"; rowIndex: number; data: CsvRow; team: TeamClass }
+  | {
+      kind: "merged"
+      mergeIndex: number
+      originalRowIndices: number[]
+      data: CsvRow
+      team: TeamClass
+    }
+
 function toInt(value: string | undefined): number {
   const n = parseInt((value ?? "").trim(), 10)
   return Number.isFinite(n) ? n : 0
@@ -111,6 +129,16 @@ function classifyTeam(row: CsvRow): TeamClass {
   if (team === "Red") return "Red"
   if (team === "Blue") return "Blue"
   return "Other"
+}
+
+// Combine several rows of the same player into one virtual row: sum the numeric
+// counters, keep the first row's identity (name + team).
+function mergeRowData(rows: CsvRow[]): CsvRow {
+  const merged: CsvRow = { ...rows[0] }
+  for (const col of SUMMABLE_COLUMNS) {
+    merged[col] = String(rows.reduce((sum, r) => sum + toInt(r[col]), 0))
+  }
+  return merged
 }
 
 // Filename starts with YYYY-MM-DD<sep>HH_MM_SS, where <sep> is "_" or " " —
@@ -227,6 +255,12 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
   const [autoMatched, setAutoMatched] = useState<Record<number, string>>({})
   // Sorted-row index -> merge/sub flag (null if unflagged). Same key as rowToPlayerId.
   const [rowFlags, setRowFlags] = useState<Record<number, "merge" | "sub" | null>>({})
+  // Completed merges: each combines its constituent sorted-row indices into one
+  // summed virtual row. Resets with the rest of the parse state.
+  const [mergedRows, setMergedRows] = useState<
+    Array<{ originalRowIndices: number[]; mergedData: CsvRow }>
+  >([])
+  const [mergeError, setMergeError] = useState<string | null>(null)
 
   // Fetch players the first time the modal opens; cache for the session.
   useEffect(() => {
@@ -292,6 +326,88 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
     setAutoMatched(auto)
   }, [summary, players, fuse, sortedRows])
 
+  // Rows as shown in the table: merged rows replace their constituents in place,
+  // everything else passes through in sorted order.
+  const displayRows = useMemo<DisplayRow[]>(() => {
+    const constituentToMerge = new Map<number, number>()
+    mergedRows.forEach((m, mi) => {
+      m.originalRowIndices.forEach((idx) => constituentToMerge.set(idx, mi))
+    })
+    const out: DisplayRow[] = []
+    const placed = new Set<number>()
+    sortedRows.forEach(({ row, team }, i) => {
+      const mi = constituentToMerge.get(i)
+      if (mi === undefined) {
+        out.push({ kind: "single", rowIndex: i, data: row, team })
+      } else if (!placed.has(mi)) {
+        placed.add(mi)
+        const m = mergedRows[mi]
+        out.push({
+          kind: "merged",
+          mergeIndex: mi,
+          originalRowIndices: m.originalRowIndices,
+          data: m.mergedData,
+          team: classifyTeam(m.mergedData),
+        })
+      }
+    })
+    return out
+  }, [sortedRows, mergedRows])
+
+  function handleMerge() {
+    const flagged = displayRows.filter(
+      (d): d is Extract<DisplayRow, { kind: "single" }> =>
+        d.kind === "single" && rowFlags[d.rowIndex] === "merge",
+    )
+    if (flagged.length < 2) return
+
+    const unmapped = flagged.filter((d) => !rowToPlayerId[d.rowIndex])
+    if (unmapped.length > 0) {
+      const positions = unmapped
+        .map((d) => displayRows.indexOf(d) + 1)
+        .sort((a, b) => a - b)
+      setMergeError(
+        `Merge requires all selected rows to be mapped to the same Soracle player. Please map row(s) [${positions.join(", ")}] first.`,
+      )
+      return
+    }
+
+    if (new Set(flagged.map((d) => rowToPlayerId[d.rowIndex])).size > 1) {
+      setMergeError("Merge requires all selected rows to be mapped to the same Soracle player.")
+      return
+    }
+
+    if (new Set(flagged.map((d) => d.team)).size > 1) {
+      setMergeError("Merge requires all selected rows to be on the same team.")
+      return
+    }
+
+    const indices = flagged.map((d) => d.rowIndex)
+    const mergedData = mergeRowData(flagged.map((d) => d.data))
+    setMergedRows((prev) => [...prev, { originalRowIndices: indices, mergedData }])
+    setRowFlags((prev) => {
+      const next = { ...prev }
+      indices.forEach((idx) => {
+        next[idx] = null
+      })
+      return next
+    })
+    setMergeError(null)
+  }
+
+  function handleUnmerge(mergeIndex: number) {
+    const target = mergedRows[mergeIndex]
+    setMergedRows((prev) => prev.filter((_, i) => i !== mergeIndex))
+    setRowFlags((prev) => {
+      const next = { ...prev }
+      target?.originalRowIndices.forEach((idx) => {
+        next[idx] = null
+      })
+      return next
+    })
+    setMergeError(null)
+  }
+
   function reset() {
     setSummary(null)
     setError(null)
@@ -299,6 +415,8 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
     setRowToPlayerId({})
     setAutoMatched({})
     setRowFlags({})
+    setMergedRows([])
+    setMergeError(null)
   }
 
   function handleClose(nextOpen: boolean) {
@@ -417,18 +535,22 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
     return `Red ${s.redScore} - Blue ${s.blueScore}, ${winner}`
   }
 
-  const mappedCount = sortedRows.reduce(
-    (acc, _row, i) => acc + (rowToPlayerId[i] ? 1 : 0),
-    0,
-  )
-  const allMapped = sortedRows.length > 0 && mappedCount === sortedRows.length
+  const totalRows = displayRows.length
+  const mappedCount = displayRows.reduce((acc, d) => {
+    const id =
+      d.kind === "merged"
+        ? rowToPlayerId[d.originalRowIndices[0]]
+        : rowToPlayerId[d.rowIndex]
+    return acc + (id ? 1 : 0)
+  }, 0)
+  const allMapped = totalRows > 0 && mappedCount === totalRows
 
-  const mergeCount = sortedRows.reduce(
-    (acc, _row, i) => acc + (rowFlags[i] === "merge" ? 1 : 0),
+  const mergeCount = displayRows.reduce(
+    (acc, d) => acc + (d.kind === "single" && rowFlags[d.rowIndex] === "merge" ? 1 : 0),
     0,
   )
-  const subCount = sortedRows.reduce(
-    (acc, _row, i) => acc + (rowFlags[i] === "sub" ? 1 : 0),
+  const subCount = displayRows.reduce(
+    (acc, d) => acc + (d.kind === "single" && rowFlags[d.rowIndex] === "sub" ? 1 : 0),
     0,
   )
 
@@ -540,7 +662,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                       size="sm"
                       variant="outline"
                       disabled={mergeCount < 2}
-                      onClick={() => console.log("merge clicked")}
+                      onClick={handleMerge}
                       className="h-7 border-[#66fcf1]/50 bg-transparent px-3 text-xs font-medium text-[#66fcf1] hover:bg-[#66fcf1]/10 disabled:opacity-40"
                     >
                       Merge Selected ({mergeCount})
@@ -561,6 +683,13 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                 </div>
               )}
 
+              {/* Merge validation error */}
+              {mergeError && (
+                <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
+                  {mergeError}
+                </div>
+              )}
+
               {/* Review table */}
               <div className="rounded-lg border border-[var(--color-border)] overflow-hidden">
                 <table className="w-full border-collapse text-left text-sm">
@@ -577,23 +706,46 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedRows.map(({ row, team }, i) => {
-                      const teamChanged = i > 0 && sortedRows[i - 1].team !== team
+                    {displayRows.map((d, idx) => {
+                      const prev = idx > 0 ? displayRows[idx - 1] : null
+                      const teamChanged = prev !== null && prev.team !== d.team
+                      const team = d.team
+                      const row = d.data
                       const muted = team === "Other"
-                      // Green indicator: still showing the high-confidence auto-match.
+                      const isMerged = d.kind === "merged"
+                      const playerValue =
+                        d.kind === "merged"
+                          ? rowToPlayerId[d.originalRowIndices[0]] ?? null
+                          : rowToPlayerId[d.rowIndex] ?? null
+                      // Green indicator: un-merged single row still showing its auto-match.
                       const isAutoMatched =
-                        autoMatched[i] !== undefined && rowToPlayerId[i] === autoMatched[i]
+                        d.kind === "single" &&
+                        autoMatched[d.rowIndex] !== undefined &&
+                        rowToPlayerId[d.rowIndex] === autoMatched[d.rowIndex]
                       return (
                         <tr
-                          key={i}
+                          key={d.kind === "merged" ? `m-${d.mergeIndex}` : `s-${d.rowIndex}`}
                           className={cn(
                             "border-t border-[var(--color-border)]/40",
                             teamChanged && "border-t-2 border-t-[#66fcf1]/25",
                             muted && "text-[#6b7280]",
                             isAutoMatched && "border-l-2 border-l-green-500/70 bg-green-500/5",
+                            isMerged && "border-l-2 border-l-[#66fcf1] bg-[#66fcf1]/5",
                           )}
                         >
-                          <td className="px-3 py-1.5 font-medium">{row["NAME-CLEAN"]}</td>
+                          <td className="px-3 py-1.5 font-medium">
+                            <div className="flex items-center gap-2">
+                              <span>{row["NAME-CLEAN"]}</span>
+                              {d.kind === "merged" && (
+                                <Badge
+                                  variant="outline"
+                                  className="shrink-0 border-[#66fcf1]/50 bg-[#66fcf1]/10 px-1.5 py-0 text-[10px] text-[#66fcf1]"
+                                >
+                                  Merged ({d.originalRowIndices.length})
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-3 py-1.5">
                             {team === "Red" && (
                               <Badge
@@ -616,56 +768,77 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                           <td className="px-3 py-1.5">
                             <PlayerCombobox
                               players={sortedPlayers}
-                              value={rowToPlayerId[i] ?? null}
+                              value={playerValue}
                               onChange={(id) =>
-                                setRowToPlayerId((prev) => ({ ...prev, [i]: id }))
+                                setRowToPlayerId((prev) => {
+                                  if (d.kind === "merged") {
+                                    const next = { ...prev }
+                                    d.originalRowIndices.forEach((oi) => {
+                                      next[oi] = id
+                                    })
+                                    return next
+                                  }
+                                  return { ...prev, [d.rowIndex]: id }
+                                })
                               }
                             />
                           </td>
                           <td className="px-2 py-1.5">
-                            <div className="flex items-center justify-center gap-2">
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <label className="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-[#8892a0]">
-                                    <Checkbox
-                                      checked={rowFlags[i] === "merge"}
-                                      onCheckedChange={(c) =>
-                                        setRowFlags((prev) => ({
-                                          ...prev,
-                                          [i]: c ? "merge" : null,
-                                        }))
-                                      }
-                                      className="size-3.5 border-[#66fcf1]/40 data-[state=checked]:border-[#66fcf1] data-[state=checked]:bg-[#66fcf1] data-[state=checked]:text-black"
-                                    />
-                                    M
-                                  </label>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-white">
-                                  Flag this row as a reconnect of another row (Merge with another
-                                  row of the same player)
-                                </TooltipContent>
-                              </Tooltip>
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <label className="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-[#8892a0]">
-                                    <Checkbox
-                                      checked={rowFlags[i] === "sub"}
-                                      onCheckedChange={(c) =>
-                                        setRowFlags((prev) => ({
-                                          ...prev,
-                                          [i]: c ? "sub" : null,
-                                        }))
-                                      }
-                                      className="size-3.5 border-[#66fcf1]/40 data-[state=checked]:border-[#66fcf1] data-[state=checked]:bg-[#66fcf1] data-[state=checked]:text-black"
-                                    />
-                                    S
-                                  </label>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-white">
-                                  Flag this row as part of a substitution (Sub in or out)
-                                </TooltipContent>
-                              </Tooltip>
-                            </div>
+                            {d.kind === "merged" ? (
+                              <div className="flex items-center justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnmerge(d.mergeIndex)}
+                                  className="text-[11px] font-medium text-[#8892a0] underline-offset-2 hover:text-[#66fcf1] hover:underline"
+                                >
+                                  Unmerge
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center gap-2">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <label className="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-[#8892a0]">
+                                      <Checkbox
+                                        checked={rowFlags[d.rowIndex] === "merge"}
+                                        onCheckedChange={(c) =>
+                                          setRowFlags((prev) => ({
+                                            ...prev,
+                                            [d.rowIndex]: c ? "merge" : null,
+                                          }))
+                                        }
+                                        className="size-3.5 border-[#66fcf1]/40 data-[state=checked]:border-[#66fcf1] data-[state=checked]:bg-[#66fcf1] data-[state=checked]:text-black"
+                                      />
+                                      M
+                                    </label>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-white">
+                                    Flag this row as a reconnect of another row (Merge with another
+                                    row of the same player)
+                                  </TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <label className="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-[#8892a0]">
+                                      <Checkbox
+                                        checked={rowFlags[d.rowIndex] === "sub"}
+                                        onCheckedChange={(c) =>
+                                          setRowFlags((prev) => ({
+                                            ...prev,
+                                            [d.rowIndex]: c ? "sub" : null,
+                                          }))
+                                        }
+                                        className="size-3.5 border-[#66fcf1]/40 data-[state=checked]:border-[#66fcf1] data-[state=checked]:bg-[#66fcf1] data-[state=checked]:text-black"
+                                      />
+                                      S
+                                    </label>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-white">
+                                    Flag this row as part of a substitution (Sub in or out)
+                                  </TooltipContent>
+                                </Tooltip>
+                              </div>
+                            )}
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums">
                             {row["CAPTURES-CURRENT"]}
@@ -689,7 +862,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                   allMapped ? "text-green-400" : "text-[#8892a0]",
                 )}
               >
-                {mappedCount} of {sortedRows.length} players mapped
+                {mappedCount} of {totalRows} players mapped
               </p>
             </div>
           )}
