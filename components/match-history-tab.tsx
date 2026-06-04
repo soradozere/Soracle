@@ -1,9 +1,9 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getMatches, deleteMatch, updateMatchDate } from "@/app/admin/actions"
+import { getMatches, deleteMatch, updateMatchDate, getMatchStats } from "@/app/admin/actions"
 import { createClient } from "@/lib/supabase/client"
-import { Trophy, Clock, Trash2, Pencil, Check, X } from "lucide-react"
+import { Trophy, Clock, Trash2, Pencil, Check, X, BarChart3, ChevronDown, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -19,6 +19,111 @@ interface Match {
   balance_confidence: number | null
   notes: string | null
   created_at: string
+  stats_csv_uploaded_at?: string | null
+}
+
+// One per-player scoreboard row (from getMatchStats; players(name) is joined).
+interface ScoreboardRow {
+  player_id: string
+  team: "Red" | "Blue"
+  played_partial: boolean
+  score: number
+  captures: number
+  returns: number
+  base_cleaner: number
+  dbs_kills: number
+  kills: number
+  deaths: number
+  dfa_kills: number
+  flag_hold_ms: number
+  time_played: number | null
+  players: { name: string } | { name: string }[] | null
+}
+
+// Whole-seconds duration as m:ss.
+function formatMmss(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`
+}
+
+function scoreboardName(row: ScoreboardRow): string {
+  const p = row.players
+  if (!p) return "Unknown"
+  return Array.isArray(p) ? p[0]?.name ?? "Unknown" : p.name
+}
+
+function TeamScoreboard({ rows, team }: { rows: ScoreboardRow[]; team: "Red" | "Blue" }) {
+  const color = team === "Red" ? "#ff4757" : "#00d4ff"
+  // Sorted by Score desc — mirrors the in-game scoreboard ranking.
+  const sorted = [...rows].sort((a, b) => b.score - a.score)
+  const cols = ["Score", "Caps", "Ret", "BC", "DBS", "K", "D", "DFA", "Hold"]
+
+  if (sorted.length === 0) return null
+
+  return (
+    <div className="overflow-x-auto rounded-lg border border-[var(--color-border)]">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="border-b border-[var(--color-border)] text-[var(--color-text-dim)]">
+            <th className="px-3 py-2 text-left font-bold" style={{ color }}>
+              {team.toUpperCase()} TEAM
+            </th>
+            {cols.map((c) => (
+              <th key={c} className="px-2 py-2 text-right font-medium tabular-nums">
+                {c}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((r) => (
+            <tr key={r.player_id} className="border-t border-[var(--color-border)]/40">
+              <td className="px-3 py-1.5 text-left">
+                <span className="text-[var(--color-text)]">{scoreboardName(r)}</span>
+                {r.played_partial && (
+                  <span className="ml-1.5 rounded bg-amber-500/15 px-1 py-0.5 text-[10px] font-bold text-amber-400">
+                    PARTIAL
+                  </span>
+                )}
+              </td>
+              <td className="px-2 py-1.5 text-right font-bold tabular-nums" style={{ color }}>
+                {r.score}
+              </td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text)]">{r.captures}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text)]">{r.returns}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text)]">{r.base_cleaner}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text)]">{r.dbs_kills}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text)]">{r.kills}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text)]">{r.deaths}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text)]">{r.dfa_kills}</td>
+              <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text)]">
+                {formatMmss((r.flag_hold_ms || 0) / 1000)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function MatchScoreboard({ rows }: { rows: ScoreboardRow[] }) {
+  const red = rows.filter((r) => r.team === "Red")
+  const blue = rows.filter((r) => r.team === "Blue")
+  // No match-length field exists — the longest player time ≈ full match duration.
+  // time_played (TIME-SUM) is already in minutes.
+  const durationMinutes = rows.reduce((max, r) => Math.max(max, r.time_played ?? 0), 0)
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-1.5 text-xs text-[var(--color-text-dim)]">
+        <Clock className="h-3 w-3" />
+        Match duration: <span className="font-medium text-[var(--color-text)]">{Math.round(durationMinutes)}m</span>
+      </div>
+      <TeamScoreboard rows={red} team="Red" />
+      <TeamScoreboard rows={blue} team="Blue" />
+    </div>
+  )
 }
 
 export function MatchHistoryTab() {
@@ -30,6 +135,10 @@ export function MatchHistoryTab() {
   const [editDateId, setEditDateId] = useState<string | null>(null)
   const [editDateValue, setEditDateValue] = useState<string>("")
   const [isSavingDate, setIsSavingDate] = useState(false)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const [statsCache, setStatsCache] = useState<Record<string, ScoreboardRow[]>>({})
+  const [statsLoadingId, setStatsLoadingId] = useState<string | null>(null)
+  const [statsErrors, setStatsErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
     // Check if user is authenticated (admin)
@@ -72,6 +181,28 @@ export function MatchHistoryTab() {
     }
     setEditDateId(null)
     setIsSavingDate(false)
+  }
+
+  // Lazy-load a match's scoreboard the first time it's expanded; cache thereafter.
+  const toggleExpand = async (matchId: string) => {
+    if (expandedId === matchId) {
+      setExpandedId(null)
+      return
+    }
+    setExpandedId(matchId)
+    if (statsCache[matchId]) return
+    setStatsLoadingId(matchId)
+    setStatsErrors((prev) => {
+      const { [matchId]: _removed, ...rest } = prev
+      return rest
+    })
+    const result = await getMatchStats(matchId)
+    if (result.success) {
+      setStatsCache((prev) => ({ ...prev, [matchId]: result.data as ScoreboardRow[] }))
+    } else {
+      setStatsErrors((prev) => ({ ...prev, [matchId]: result.error || "Failed to load stats" }))
+    }
+    setStatsLoadingId(null)
   }
 
   const handleDelete = async (matchId: string) => {
@@ -303,6 +434,41 @@ export function MatchHistoryTab() {
                 <p className="mt-3 text-sm text-[var(--color-text-dim)] italic border-t border-[var(--color-border)] pt-3">
                   {match.notes}
                 </p>
+              )}
+
+              {/* Scoreboard — only for matches uploaded with a stats CSV */}
+              {match.stats_csv_uploaded_at && (
+                <div className="mt-3 border-t border-[var(--color-border)] pt-3">
+                  <button
+                    onClick={() => toggleExpand(match.id)}
+                    className="flex items-center gap-1.5 text-sm font-medium text-[var(--color-primary)] hover:opacity-80"
+                  >
+                    <BarChart3 className="h-4 w-4" />
+                    {expandedId === match.id ? "Hide scoreboard" : "View scoreboard"}
+                    <ChevronDown
+                      className={`h-4 w-4 transition-transform ${expandedId === match.id ? "rotate-180" : ""}`}
+                    />
+                  </button>
+
+                  {expandedId === match.id && (
+                    <div className="mt-3">
+                      {statsLoadingId === match.id ? (
+                        <div className="flex items-center gap-2 py-4 text-sm text-[var(--color-text-dim)]">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Loading scoreboard…
+                        </div>
+                      ) : statsErrors[match.id] ? (
+                        <p className="py-2 text-sm text-[#ff4757]">{statsErrors[match.id]}</p>
+                      ) : statsCache[match.id] && statsCache[match.id].length > 0 ? (
+                        <MatchScoreboard rows={statsCache[match.id]} />
+                      ) : (
+                        <p className="py-2 text-sm text-[var(--color-text-dim)] italic">
+                          No per-player stats recorded for this match.
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )

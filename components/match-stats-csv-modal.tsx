@@ -46,6 +46,7 @@ interface MatchStatsCsvModalProps {
 const REQUIRED_COLUMNS = [
   "LAST-NONSPEC-TEAM",
   "NAME-CLEAN",
+  "SCORE-SUM",
   "CAPTURES-CURRENT",
   "RETURNS-CURRENT",
   "BC-CURRENT",
@@ -164,6 +165,8 @@ function buildMatchStat(
     player_id: playerId,
     team,
     played_partial: partial,
+
+    score: toInt(row["SCORE-SUM"]),
 
     captures: toInt(row["CAPTURES-CURRENT"]),
     returns: toInt(row["RETURNS-CURRENT"]),
