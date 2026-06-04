@@ -55,6 +55,7 @@ export async function fetchPlayersFromDB(): Promise<Player[]> {
       is_active: dbPlayer.is_active ?? true,
       last_match_at: dbPlayer.last_match_at ?? null,
       manually_inactive: dbPlayer.manually_inactive ?? false,
+      discord_ids: dbPlayer.discord_ids ?? [],
     }))
   } catch (error) {
     console.error("Failed to fetch players from database:", error)
