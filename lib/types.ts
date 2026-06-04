@@ -100,3 +100,17 @@ export interface MatchStats {
 
   created_at: string
 }
+
+// A match_stats row ready to insert, before match_id / id / created_at exist.
+export type MatchStatInsert = Omit<MatchStats, "id" | "match_id" | "created_at">
+
+// Payload handed from the CSV modal to the Log Match form on confirm.
+export interface CsvMatchData {
+  redTeamNames: string[]
+  blueTeamNames: string[]
+  redScore: number
+  blueScore: number
+  matchPlayedAtIso: string | null
+  matchStats: MatchStatInsert[]
+  csvFile: File
+}

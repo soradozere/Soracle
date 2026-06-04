@@ -176,6 +176,130 @@ export async function logMatch(data: {
   }
 }
 
+// Logs a match that has an associated stats CSV. Orders the work so the DB stays
+// consistent on any failure: upload CSV → insert match → insert stats → move CSV.
+// The client passes the raw file plus a JSON `payload` field via FormData.
+export async function logMatchWithStats(formData: FormData) {
+  const file = formData.get("file") as File | null
+  const payloadRaw = formData.get("payload")
+
+  if (!file) return { success: false, error: "No CSV file provided" }
+  if (typeof payloadRaw !== "string") return { success: false, error: "Missing match payload" }
+
+  let payload: {
+    uuid: string
+    red_team: string[]
+    blue_team: string[]
+    red_score: number
+    blue_score: number
+    match_type: string
+    balance_confidence: number
+    notes?: string
+    played_at: string | null
+    match_stats: Array<Record<string, unknown>>
+  }
+  try {
+    payload = JSON.parse(payloadRaw)
+  } catch {
+    return { success: false, error: "Malformed match payload" }
+  }
+
+  const BUCKET = "match-csvs"
+  const pendingPath = `pending/${payload.uuid}.csv`
+
+  try {
+    const supabase = await createClient()
+
+    // 1. Upload the raw CSV to a UUID-named pending path (no match_id yet).
+    const { error: uploadError } = await supabase.storage
+      .from(BUCKET)
+      .upload(pendingPath, file, { contentType: "text/csv", upsert: false })
+    if (uploadError) {
+      return { success: false, error: `CSV upload failed: ${uploadError.message}` }
+    }
+
+    // Helper: best-effort removal of the pending CSV during rollback. A missing
+    // DELETE policy should not mask the real error — just warn and move on.
+    const removePending = async () => {
+      const { error } = await supabase.storage.from(BUCKET).remove([pendingPath])
+      if (error) {
+        console.warn(`Failed to remove pending CSV ${pendingPath}: ${error.message}`)
+      }
+    }
+
+    // 2. Insert the matches row (same tier-lookup logic as logMatch), tagged with
+    //    stats_csv_uploaded_at = now() and match_played_at = parsed timestamp.
+    const allPlayers = [...payload.red_team, ...payload.blue_team]
+    const { data: playerData, error: playerError } = await supabase
+      .from("players")
+      .select("name, tier_value")
+      .in("name", allPlayers)
+    if (playerError) {
+      await removePending()
+      return { success: false, error: playerError.message }
+    }
+
+    const tierMap = new Map<string, number>()
+    for (const p of playerData || []) tierMap.set(p.name, p.tier_value)
+    const red_tiers = payload.red_team.map((n) => tierMap.get(n) ?? 5)
+    const blue_tiers = payload.blue_team.map((n) => tierMap.get(n) ?? 5)
+
+    const { data: inserted, error: matchError } = await supabase
+      .from("matches")
+      .insert({
+        red_team: payload.red_team,
+        blue_team: payload.blue_team,
+        red_tiers,
+        blue_tiers,
+        red_score: payload.red_score,
+        blue_score: payload.blue_score,
+        match_type: payload.match_type,
+        balance_confidence: payload.balance_confidence,
+        notes: payload.notes || null,
+        stats_csv_uploaded_at: new Date().toISOString(),
+        ...(payload.played_at
+          ? { match_played_at: payload.played_at, created_at: payload.played_at }
+          : {}),
+      })
+      .select("id")
+      .single()
+    if (matchError || !inserted) {
+      await removePending()
+      return { success: false, error: matchError?.message || "Failed to create match" }
+    }
+
+    const matchId = inserted.id as string
+
+    // 4. Bulk-insert match_stats, all tied to the new match_id (atomic).
+    const statsRows = payload.match_stats.map((s) => ({ ...s, match_id: matchId }))
+    const { error: statsError } = await supabase.from("match_stats").insert(statsRows)
+    if (statsError) {
+      // Rollback: cascade clears any stats, then drop the pending CSV.
+      await supabase.from("matches").delete().eq("id", matchId)
+      await removePending()
+      return { success: false, error: `Failed to save stats: ${statsError.message}` }
+    }
+
+    // 5. Move the CSV from pending/ to its final match_id-named path. A failure
+    //    here leaves data correct but the file stuck in pending/ — warn, succeed.
+    const { error: moveError } = await supabase.storage
+      .from(BUCKET)
+      .move(pendingPath, `${matchId}.csv`)
+    if (moveError) {
+      console.warn(
+        `Match ${matchId} saved, but CSV move failed (left at ${pendingPath}): ${moveError.message}`,
+      )
+    }
+
+    return { success: true }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to log match with stats",
+    }
+  }
+}
+
 export async function getMatches() {
   try {
     const supabase = await createClient()
