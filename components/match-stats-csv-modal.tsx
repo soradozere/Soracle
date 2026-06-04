@@ -34,11 +34,12 @@ import {
 import { Check, ChevronsUpDown, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
-import type { Player } from "@/lib/types"
+import type { CsvMatchData, MatchStatInsert, Player } from "@/lib/types"
 
 interface MatchStatsCsvModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onCsvDataReady: (data: CsvMatchData) => void
 }
 
 // Required CSV column headers. Parsing is aborted if any are missing.
@@ -151,6 +152,62 @@ function mergeRowData(rows: CsvRow[]): CsvRow {
   return merged
 }
 
+// Map a finished display row to a match_stats insert payload. CSV counter columns
+// map 1:1 to DB fields; player_id, team and played_partial come from the review UI.
+function buildMatchStat(
+  row: CsvRow,
+  playerId: string,
+  team: "Red" | "Blue",
+  partial: boolean,
+): MatchStatInsert {
+  return {
+    player_id: playerId,
+    team,
+    played_partial: partial,
+
+    captures: toInt(row["CAPTURES-CURRENT"]),
+    returns: toInt(row["RETURNS-CURRENT"]),
+    base_cleaner: toInt(row["BC-CURRENT"]),
+    assists: toInt(row["ASSISTS-CURRENT"]),
+    flag_grabs: toInt(row["FLAGGRABS-CURRENT"]),
+    flag_hold_ms: toInt(row["FLAGHOLD-CURRENT"]),
+
+    kills: toInt(row["KILLS"]),
+    deaths: toInt(row["DEATHS"]),
+
+    red_kills: toInt(row["RED-KILLS"]),
+    yellow_kills: toInt(row["YEL-KILLS"]),
+    blue_kills: toInt(row["BLU-KILLS"]),
+    dfa_kills: toInt(row["DFA-KILLS"]),
+    ydfa_kills: toInt(row["YDFA-KILLS"]),
+    bs_kills: toInt(row["BS-KILLS"]),
+    dbs_kills: toInt(row["DBS-KILLS"]),
+    blubs_kills: toInt(row["BLUBS-KILLS"]),
+    upcut_kills: toInt(row["UPCUT-KILLS"]),
+
+    red_returns: toInt(row["RED-RETURNS"]),
+    yellow_returns: toInt(row["YEL-RETURNS"]),
+    blue_returns: toInt(row["BLU-RETURNS"]),
+    dfa_returns: toInt(row["DFA-RETURNS"]),
+    ydfa_returns: toInt(row["YDFA-RETURNS"]),
+    bs_returns: toInt(row["BS-RETURNS"]),
+    dbs_returns: toInt(row["DBS-RETURNS"]),
+    blubs_returns: toInt(row["BLUBS-RETURNS"]),
+    upcut_returns: toInt(row["UPCUT-RETURNS"]),
+
+    mine_kills: toInt(row["MINE-KILLS"]),
+    mine_returns: toInt(row["MINE-RETURNS"]),
+    doom_kills: toInt(row["DOOM-KILLS"]),
+    turret_kills: toInt(row["TUR-KILLS"]),
+    idle_kills: toInt(row["IDLE-KILLS"]),
+
+    mine_grabs_red: toInt(row["MINEGRABS-REDBASE"]),
+    mine_grabs_blue: toInt(row["MINEGRABS-BLUEBASE"]),
+
+    time_played: toInt(row["TIME-SUM"]),
+  }
+}
+
 // Filename starts with YYYY-MM-DD<sep>HH_MM_SS, where <sep> is "_" or " " —
 // convert to an ISO 8601 UTC string.
 function parseTimestampFromFilename(filename: string): string | null {
@@ -249,8 +306,9 @@ function PlayerCombobox({
   )
 }
 
-export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalProps) {
+export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: MatchStatsCsvModalProps) {
   const [summary, setSummary] = useState<ParseSummary | null>(null)
+  const [csvFile, setCsvFile] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [missingColumns, setMissingColumns] = useState<string[]>([])
 
@@ -536,6 +594,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
 
   function reset() {
     setSummary(null)
+    setCsvFile(null)
     setError(null)
     setMissingColumns([])
     setRowToPlayerId({})
@@ -558,6 +617,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
     reset()
     const file = event.target.files?.[0]
     if (!file) return
+    setCsvFile(file)
 
     Papa.parse<CsvRow>(file, {
       header: true,
@@ -683,6 +743,58 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
     (acc, d) => acc + (d.kind === "single" && rowFlags[d.rowIndex] === "sub" ? 1 : 0),
     0,
   )
+
+  // Any remaining "Other"-team row blocks confirm: match_stats.team is Red/Blue only.
+  const hasOtherTeam = displayRows.some((d) => d.team === "Other")
+  // Dangling merge/sub flags must be applied or cleared before handing off.
+  const hasPendingFlags = mergeCount > 0 || subCount > 0
+  const canConfirm =
+    csvFile !== null && summary !== null && allMapped && !hasOtherTeam && !hasPendingFlags
+
+  // Assemble the handoff payload from the final display rows (post merge/sub).
+  // Scores and rosters are recomputed here so they reflect the resolved rows.
+  function buildCsvData(): CsvMatchData | null {
+    if (!summary || !csvFile) return null
+    const redTeamNames: string[] = []
+    const blueTeamNames: string[] = []
+    let redScore = 0
+    let blueScore = 0
+    const matchStats: MatchStatInsert[] = []
+
+    for (const d of displayRows) {
+      if (d.team !== "Red" && d.team !== "Blue") return null
+      const playerId =
+        d.kind === "merged" ? rowToPlayerId[d.originalRowIndices[0]] : rowToPlayerId[d.rowIndex]
+      if (!playerId) return null
+      const partial = d.kind === "single" && d.partial
+      const captures = toInt(d.data["CAPTURES-CURRENT"])
+      if (d.team === "Red") {
+        redTeamNames.push(playerName(playerId))
+        redScore += captures
+      } else {
+        blueTeamNames.push(playerName(playerId))
+        blueScore += captures
+      }
+      matchStats.push(buildMatchStat(d.data, playerId, d.team, partial))
+    }
+
+    return {
+      redTeamNames,
+      blueTeamNames,
+      redScore,
+      blueScore,
+      matchPlayedAtIso: summary.timestampIso,
+      matchStats,
+      csvFile,
+    }
+  }
+
+  function handleConfirm() {
+    const data = buildCsvData()
+    if (!data) return
+    onCsvDataReady(data)
+    handleClose(false)
+  }
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -1151,7 +1263,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
           )}
         </div>
 
-        <DialogFooter className="shrink-0">
+        <DialogFooter className="shrink-0 sm:justify-between">
           <Button
             type="button"
             variant="outline"
@@ -1160,6 +1272,25 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
           >
             Cancel
           </Button>
+          <div className="flex flex-col items-end gap-1">
+            <Button
+              type="button"
+              disabled={!canConfirm}
+              onClick={handleConfirm}
+              className="bg-[#66fcf1] px-4 font-medium text-black hover:bg-[#66fcf1]/80 disabled:opacity-40"
+            >
+              Confirm and Pre-fill Form
+            </Button>
+            {summary && !canConfirm && (
+              <p className="text-[11px] text-[#8892a0]">
+                {hasPendingFlags
+                  ? "Resolve all merge/sub flags first."
+                  : hasOtherTeam
+                    ? "Remove or fix unexpected-team rows first."
+                    : "Map every row to a Soracle player first."}
+              </p>
+            )}
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

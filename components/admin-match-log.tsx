@@ -1,15 +1,24 @@
 "use client"
 
 import { useState, useEffect, useRef } from "react"
-import { logMatch } from "@/app/admin/actions"
+import { logMatch, logMatchWithStats } from "@/app/admin/actions"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import { evaluateTeams } from "@/lib/balance-algorithm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Check, X, Loader2, ChevronRight, ChevronLeft, Search, Calendar, Upload } from "lucide-react"
-import type { Player } from "@/lib/types"
+import { Check, X, Loader2, ChevronRight, ChevronLeft, Search, Calendar, Upload, FileBarChart2 } from "lucide-react"
+import type { CsvMatchData, Player } from "@/lib/types"
 import { MatchStatsCsvModal } from "@/components/match-stats-csv-modal"
+import { useToast } from "@/hooks/use-toast"
+
+// Convert a UTC ISO timestamp into the local "YYYY-MM-DDTHH:MM" value the
+// datetime-local input expects, so the stored instant round-trips on submit.
+function isoToLocalInput(iso: string): string {
+  const d = new Date(iso)
+  const pad = (n: number) => String(n).padStart(2, "0")
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
+}
 
 function getBalanceConfidence(score: number): number {
   const k = 0.004
@@ -42,6 +51,8 @@ export function AdminMatchLog() {
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const [activeTeam, setActiveTeam] = useState<"red" | "blue">("red")
   const [csvModalOpen, setCsvModalOpen] = useState(false)
+  const [csvData, setCsvData] = useState<CsvMatchData | null>(null)
+  const { toast } = useToast()
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [balanceScore, setBalanceScore] = useState<number | null>(null)
   const [matchDate, setMatchDate] = useState<string>(() => {
@@ -158,6 +169,18 @@ export function AdminMatchLog() {
     setBlueTeam(blueTeam.filter((p) => p !== name))
   }
 
+  // Pre-fill the form from a confirmed CSV upload. All fields stay editable; the
+  // pending stats payload + raw file ride along in csvData until submit.
+  const handleCsvDataReady = (data: CsvMatchData) => {
+    setCsvData(data)
+    setRedTeam(data.redTeamNames)
+    setBlueTeam(data.blueTeamNames)
+    setRedScore(String(data.redScore))
+    setBlueScore(String(data.blueScore))
+    if (data.matchPlayedAtIso) setMatchDate(isoToLocalInput(data.matchPlayedAtIso))
+    setMessage(null)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setIsSubmitting(true)
@@ -172,21 +195,74 @@ export function AdminMatchLog() {
       return
     }
 
-    if (redTeam.length !== 6 || blueTeam.length !== 6) {
+    // CSV-derived matches may carry subs/partials (e.g. 7 names per side), so the
+    // strict 6/6 rule is relaxed to "non-empty" on that path only.
+    if (csvData) {
+      if (redTeam.length === 0 || blueTeam.length === 0) {
+        setMessage({ type: "error", text: "Both teams need at least one player" })
+        setIsSubmitting(false)
+        return
+      }
+    } else if (redTeam.length !== 6 || blueTeam.length !== 6) {
       setMessage({ type: "error", text: "Both teams must have exactly 6 players" })
       setIsSubmitting(false)
       return
     }
 
+    const balance_confidence = balanceScore !== null ? Math.round(balanceScore) : 0
+    const played_at = matchDate ? new Date(matchDate).toISOString() : null
+
+    if (csvData) {
+      // Stats path: send the raw file + JSON payload to the orchestrating action.
+      const formData = new FormData()
+      formData.append("file", csvData.csvFile)
+      formData.append(
+        "payload",
+        JSON.stringify({
+          uuid: crypto.randomUUID(),
+          red_team: redTeam,
+          blue_team: blueTeam,
+          red_score: red,
+          blue_score: blue,
+          match_type: matchType,
+          balance_confidence,
+          notes: notes || undefined,
+          played_at,
+          match_stats: csvData.matchStats,
+        }),
+      )
+
+      const result = await logMatchWithStats(formData)
+
+      if (result.success) {
+        toast({ title: "Match logged with stats." })
+        setRedTeam([])
+        setBlueTeam([])
+        setRedScore("")
+        setBlueScore("")
+        setNotes("")
+        setCsvData(null)
+        const now = new Date()
+        const pad = (n: number) => String(n).padStart(2, "0")
+        setMatchDate(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`)
+      } else {
+        setMessage({ type: "error", text: result.error || "Failed to log match with stats" })
+      }
+
+      setIsSubmitting(false)
+      return
+    }
+
+    // Manual path: unchanged.
     const result = await logMatch({
       red_team: redTeam,
       blue_team: blueTeam,
       red_score: red,
       blue_score: blue,
       match_type: matchType,
-      balance_confidence: balanceScore !== null ? Math.round(balanceScore) : 0,
+      balance_confidence,
       notes: notes || undefined,
-      played_at: matchDate ? new Date(matchDate).toISOString() : undefined,
+      played_at: played_at ?? undefined,
     })
 
     if (result.success) {
@@ -209,6 +285,7 @@ export function AdminMatchLog() {
     setRedScore("")
     setBlueScore("")
     setNotes("")
+    setCsvData(null)
     setMessage(null)
     const now = new Date()
     const pad = (n: number) => String(n).padStart(2, "0")
@@ -242,6 +319,7 @@ export function AdminMatchLog() {
             type="button"
             variant="outline"
             size="sm"
+            disabled={isSubmitting}
             onClick={() => setCsvModalOpen(true)}
             className="border-[#66fcf1]/40 text-[#66fcf1] hover:bg-[#66fcf1]/10 hover:text-[#66fcf1] hover:border-[#66fcf1]"
           >
@@ -481,28 +559,48 @@ export function AdminMatchLog() {
           </div>
         )}
 
+        {csvData && (
+          <div className="flex items-center gap-2 rounded-md border border-[#66fcf1]/40 bg-[#66fcf1]/5 px-3 py-2 text-sm text-[#66fcf1]">
+            <FileBarChart2 className="w-4 h-4 shrink-0" />
+            <span>
+              Stats from CSV will be saved on submit ({csvData.matchStats.length} player rows).
+            </span>
+          </div>
+        )}
+
         <div className="flex gap-3">
           <Button
             type="submit"
-            disabled={isSubmitting || redTeam.length !== 6 || blueTeam.length !== 6 || !redScore || !blueScore}
+            disabled={
+              isSubmitting ||
+              !redScore ||
+              !blueScore ||
+              (csvData
+                ? redTeam.length === 0 || blueTeam.length === 0
+                : redTeam.length !== 6 || blueTeam.length !== 6)
+            }
             className="flex-1"
           >
             {isSubmitting ? (
               <>
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                Logging Match...
+                {csvData ? "Saving..." : "Logging Match..."}
               </>
             ) : (
               "Log Match Result"
             )}
           </Button>
-          <Button type="button" variant="outline" onClick={clearAll}>
+          <Button type="button" variant="outline" onClick={clearAll} disabled={isSubmitting}>
             Clear
           </Button>
         </div>
       </form>
 
-      <MatchStatsCsvModal open={csvModalOpen} onOpenChange={setCsvModalOpen} />
+      <MatchStatsCsvModal
+        open={csvModalOpen}
+        onOpenChange={setCsvModalOpen}
+        onCsvDataReady={handleCsvDataReady}
+      />
     </div>
   )
 }
