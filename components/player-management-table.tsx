@@ -23,12 +23,34 @@ interface Player {
   tooltip: string | null
   manually_inactive: boolean
   last_match_at: string | null
+  discord_ids: string[]
+}
+
+// Discord snowflake IDs are 17-19 digit numbers; allow a little slack on either side.
+const DISCORD_ID_PATTERN = /^\d{15,21}$/
+
+// Parse a free-form string of Discord IDs (separated by commas, semicolons, or
+// whitespace) into a deduped list of valid IDs plus any tokens that aren't valid.
+function parseDiscordIds(raw: string): { ids: string[]; invalid: string[] } {
+  const tokens = raw.split(/[\s,;]+/).map((t) => t.trim()).filter(Boolean)
+  const ids: string[] = []
+  const invalid: string[] = []
+  for (const token of tokens) {
+    if (!DISCORD_ID_PATTERN.test(token)) {
+      invalid.push(token)
+    } else if (!ids.includes(token)) {
+      ids.push(token)
+    }
+  }
+  return { ids, invalid }
 }
 
 export function PlayerManagementTable() {
   const [players, setPlayers] = useState<Player[]>([])
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editingPlayer, setEditingPlayer] = useState<Partial<Player>>({})
+  // Raw text the admin types for Discord IDs; parsed into discord_ids on save.
+  const [discordInput, setDiscordInput] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [isAdding, setIsAdding] = useState(false)
   const { toast } = useToast()
@@ -57,11 +79,13 @@ export function PlayerManagementTable() {
   function startEdit(player: Player) {
     setEditingId(player.id)
     setEditingPlayer({ ...player })
+    setDiscordInput((player.discord_ids || []).join(", "))
   }
 
   function cancelEdit() {
     setEditingId(null)
     setEditingPlayer({})
+    setDiscordInput("")
     setIsAdding(false)
   }
 
@@ -75,6 +99,33 @@ export function PlayerManagementTable() {
       return
     }
 
+    const { ids: discordIds, invalid } = parseDiscordIds(discordInput)
+    if (invalid.length > 0) {
+      toast({
+        title: "Invalid Discord ID",
+        description: `These don't look like Discord IDs (17-19 digit numbers): ${invalid.join(", ")}`,
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Pre-check cross-player uniqueness for a friendly message (the DB trigger is
+    // the hard guarantee). Find any other player already using one of these IDs.
+    if (discordIds.length > 0) {
+      const conflict = players.find(
+        (p) => p.id !== editingId && (p.discord_ids || []).some((id) => discordIds.includes(id)),
+      )
+      if (conflict) {
+        const shared = (conflict.discord_ids || []).filter((id) => discordIds.includes(id))
+        toast({
+          title: "Duplicate Discord ID",
+          description: `Discord ID ${shared.join(", ")} is already assigned to ${conflict.name}.`,
+          variant: "destructive",
+        })
+        return
+      }
+    }
+
     const playerData = {
       name: editingPlayer.name,
       tier_value: editingPlayer.tier_value || 0,
@@ -86,6 +137,7 @@ export function PlayerManagementTable() {
       support_rating: editingPlayer.support_rating || 0,
       tooltip: editingPlayer.tooltip || null,
       manually_inactive: editingPlayer.manually_inactive || false,
+      discord_ids: discordIds,
     }
 
     if (isAdding) {
@@ -163,6 +215,7 @@ export function PlayerManagementTable() {
 
   function startAdd() {
     setIsAdding(true)
+    setDiscordInput("")
     setEditingPlayer({
       name: "",
       tier_value: 0,
@@ -174,13 +227,14 @@ export function PlayerManagementTable() {
       support_rating: 0,
       tooltip: "",
       manually_inactive: false,
+      discord_ids: [],
     })
   }
 
   function exportToCSV() {
     // Create CSV header
-    const headers = ["Player", "Tier rank", "Mic", "Capper skill", "Chase skill", "Camp skill", "Cleaner skill", "Support skill", "Tooltip"]
-    
+    const headers = ["Player", "Tier rank", "Mic", "Capper skill", "Chase skill", "Camp skill", "Cleaner skill", "Support skill", "Tooltip", "Discord IDs"]
+
     // Create CSV rows
     const rows = players.map(player => [
       player.name,
@@ -191,7 +245,9 @@ export function PlayerManagementTable() {
       player.camp_rating,
       player.cleaner_rating,
       player.support_rating,
-      player.tooltip || ""
+      player.tooltip || "",
+      // Semicolon-separated so the value never contains a comma (keeps CSV parsing simple).
+      (player.discord_ids || []).join(";")
     ])
     
     // Combine headers and rows
@@ -258,6 +314,7 @@ export function PlayerManagementTable() {
               <TableHead className="w-[90px]">Cleaner</TableHead>
               <TableHead className="w-[90px]">Support</TableHead>
               <TableHead className="w-[200px]">Tooltip</TableHead>
+              <TableHead className="w-[200px]">Discord IDs</TableHead>
               <TableHead className="w-[100px]">Inactive</TableHead>
               <TableHead className="w-[120px]">Actions</TableHead>
             </TableRow>
@@ -385,6 +442,13 @@ export function PlayerManagementTable() {
                       })
                     }
                     placeholder="Optional"
+                  />
+                </TableCell>
+                <TableCell>
+                  <Input
+                    value={discordInput}
+                    onChange={(e) => setDiscordInput(e.target.value)}
+                    placeholder="Comma-separated IDs"
                   />
                 </TableCell>
                 <TableCell>
@@ -583,6 +647,19 @@ export function PlayerManagementTable() {
                       />
                     ) : (
                       player.tooltip || "-"
+                    )}
+                  </TableCell>
+                  <TableCell>
+                    {isEditing ? (
+                      <Input
+                        value={discordInput}
+                        onChange={(e) => setDiscordInput(e.target.value)}
+                        placeholder="Comma-separated IDs"
+                      />
+                    ) : (player.discord_ids || []).length > 0 ? (
+                      <span className="break-all text-sm">{player.discord_ids.join(", ")}</span>
+                    ) : (
+                      "-"
                     )}
                   </TableCell>
                   <TableCell>

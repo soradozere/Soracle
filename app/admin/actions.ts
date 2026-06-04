@@ -31,7 +31,11 @@ export async function uploadCSV(formData: FormData) {
       "Cleaner skill": "cleaner_rating",
       "Support skill": "support_rating",
       Tooltip: "tooltip",
+      "Discord IDs": "discord_ids",
     }
+
+    // Discord snowflake IDs are 17-19 digit numbers; allow a little slack.
+    const DISCORD_ID_PATTERN = /^\d{15,21}$/
 
     // Parse players
     const players = []
@@ -50,6 +54,13 @@ export async function uploadCSV(formData: FormData) {
           player[dbField] = value || null
         } else if (dbField === "mic") {
           player[dbField] = value.toLowerCase() === "yes"
+        } else if (dbField === "discord_ids") {
+          // Semicolon-separated within the cell; dedupe and drop blanks.
+          const ids: string[] = []
+          for (const id of value.split(";").map((s) => s.trim()).filter(Boolean)) {
+            if (!ids.includes(id)) ids.push(id)
+          }
+          player[dbField] = ids
         } else {
           player[dbField] = Number.parseInt(value) || 0
         }
@@ -62,6 +73,24 @@ export async function uploadCSV(formData: FormData) {
 
     if (players.length === 0) {
       return { success: false, error: "No valid players found in CSV" }
+    }
+
+    // Validate Discord ID format and enforce uniqueness across all players in the file.
+    const seenDiscordIds = new Map<string, string>()
+    for (const player of players) {
+      for (const id of (player.discord_ids || []) as string[]) {
+        if (!DISCORD_ID_PATTERN.test(id)) {
+          return { success: false, error: `Invalid Discord ID "${id}" for player ${player.name}` }
+        }
+        const existing = seenDiscordIds.get(id)
+        if (existing && existing !== player.name) {
+          return {
+            success: false,
+            error: `Discord ID ${id} is assigned to multiple players (${existing} and ${player.name})`,
+          }
+        }
+        seenDiscordIds.set(id, player.name)
+      }
     }
 
     // Insert into database

@@ -14,6 +14,7 @@ export interface Player {
   is_active?: boolean
   last_match_at?: string | null
   manually_inactive?: boolean
+  discord_ids?: string[]
 }
 
 export interface BalanceResult {
