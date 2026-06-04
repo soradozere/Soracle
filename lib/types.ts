@@ -50,6 +50,9 @@ export interface MatchStats {
   team: "Red" | "Blue"
   played_partial: boolean
 
+  // In-game scoreboard score (SCORE-SUM)
+  score: number
+
   // Flag stats
   captures: number
   returns: number
