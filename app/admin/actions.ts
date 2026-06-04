@@ -407,6 +407,51 @@ export async function getMatchesByMonth(year: number, month: number) {
   }
 }
 
+// Per-player match_stats for a month, scoped by the parent match's date (same
+// window the Reports tab uses elsewhere). Returns raw rows; the client aggregates
+// and maps player_id -> name via the already-loaded players list.
+export async function getMatchStatsByMonth(year: number, month: number) {
+  try {
+    const supabase = await createClient()
+
+    const startDate = new Date(year, month - 1, 1)
+    const endDate = new Date(year, month, 0, 23, 59, 59, 999)
+
+    // Which matches fall in this month.
+    const { data: monthMatches, error: matchError } = await supabase
+      .from("matches")
+      .select("id")
+      .gte("created_at", startDate.toISOString())
+      .lte("created_at", endDate.toISOString())
+
+    if (matchError) {
+      return { success: false, error: matchError.message, data: [] }
+    }
+
+    const matchIds = (monthMatches || []).map((m) => m.id)
+    if (matchIds.length === 0) {
+      return { success: true, data: [] }
+    }
+
+    const { data, error } = await supabase
+      .from("match_stats")
+      .select("match_id, player_id, flag_hold_ms, dbs_kills, captures, returns")
+      .in("match_id", matchIds)
+
+    if (error) {
+      return { success: false, error: error.message, data: [] }
+    }
+
+    return { success: true, data: data || [] }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to fetch match stats",
+      data: [],
+    }
+  }
+}
+
 export async function getMonthlyPlayerStats() {
   try {
     const supabase = await createClient()
