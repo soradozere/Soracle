@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import Papa from "papaparse"
 import {
   Dialog,
@@ -9,13 +9,9 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog"
-import {
-  Collapsible,
-  CollapsibleTrigger,
-  CollapsibleContent,
-} from "@/components/ui/collapsible"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { ChevronDown } from "lucide-react"
+import { cn } from "@/lib/utils"
 
 interface MatchStatsCsvModalProps {
   open: boolean
@@ -63,6 +59,7 @@ const REQUIRED_COLUMNS = [
 ] as const
 
 type CsvRow = Record<string, string>
+type TeamClass = "Red" | "Blue" | "Other"
 
 interface ParseSummary {
   filename: string
@@ -78,6 +75,13 @@ interface ParseSummary {
 function toInt(value: string | undefined): number {
   const n = parseInt((value ?? "").trim(), 10)
   return Number.isFinite(n) ? n : 0
+}
+
+function classifyTeam(row: CsvRow): TeamClass {
+  const team = (row["LAST-NONSPEC-TEAM"] ?? "").trim()
+  if (team === "Red") return "Red"
+  if (team === "Blue") return "Blue"
+  return "Other"
 }
 
 // Filename starts with YYYY-MM-DD<sep>HH_MM_SS, where <sep> is "_" or " " —
@@ -107,6 +111,19 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
   const [summary, setSummary] = useState<ParseSummary | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [missingColumns, setMissingColumns] = useState<string[]>([])
+
+  // Sort rows: Red first, then Blue, then unexpected teams — Caps descending within each group.
+  const sortedRows = useMemo(() => {
+    if (!summary) return []
+    const rank: Record<TeamClass, number> = { Red: 0, Blue: 1, Other: 2 }
+    return summary.rows
+      .map((row) => ({ row, team: classifyTeam(row) }))
+      .sort((a, b) => {
+        const byTeam = rank[a.team] - rank[b.team]
+        if (byTeam !== 0) return byTeam
+        return toInt(b.row["CAPTURES-CURRENT"]) - toInt(a.row["CAPTURES-CURRENT"])
+      })
+  }, [summary])
 
   function reset() {
     setSummary(null)
@@ -232,14 +249,15 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="bg-[var(--color-surface)]/95 backdrop-blur-md border-[#66fcf1]/30 text-white max-w-lg max-h-[85vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="bg-[var(--color-surface)]/95 backdrop-blur-md border-[#66fcf1]/30 text-white max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogHeader className="shrink-0">
           <DialogTitle className="text-xl" style={{ color: "var(--color-primary)" }}>
             Upload Match Stats CSV
           </DialogTitle>
         </DialogHeader>
 
-        <div className="space-y-3">
+        {/* Scrollable content area — the modal frame itself never overflows the viewport. */}
+        <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
           <input
             type="file"
             accept=".csv"
@@ -270,7 +288,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
             </div>
           )}
 
-          {/* Summary */}
+          {/* Summary + review table */}
           {summary && (
             <div className="space-y-3">
               {summary.warnings.length > 0 && (
@@ -283,62 +301,106 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                 </div>
               )}
 
-              <div className="rounded-md border border-[#66fcf1]/20 bg-black/20 p-3 text-sm">
-                <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
-                  <dt className="text-[#8892a0]">Filename</dt>
-                  <dd className="font-mono text-xs break-all">{summary.filename}</dd>
-
-                  <dt className="text-[#8892a0]">Timestamp</dt>
-                  <dd className="font-mono text-xs">
-                    {summary.timestampIso ?? "Could not parse"}
-                  </dd>
-
-                  <dt className="text-[#8892a0]">Non-spec rows</dt>
-                  <dd>{summary.rows.length}</dd>
-
-                  <dt className="text-[#8892a0]">Rows by team</dt>
-                  <dd>
-                    Red: {summary.redCount}, Blue: {summary.blueCount}
-                  </dd>
-
-                  <dt className="text-[#8892a0]">Final score</dt>
-                  <dd>{scoreLine(summary)}</dd>
+              {/* Match summary panel */}
+              <div className="rounded-lg border border-[#66fcf1]/20 bg-black/30 p-4">
+                <h3
+                  className="font-mono text-sm font-bold uppercase tracking-wide mb-3"
+                  style={{ color: "var(--color-primary)" }}
+                >
+                  Match Summary
+                </h3>
+                <dl className="space-y-1.5 text-sm">
+                  <div className="flex items-baseline justify-between gap-4">
+                    <dt className="shrink-0 text-[#8892a0]">Filename</dt>
+                    <dd className="min-w-0 break-all text-right font-mono text-xs">
+                      {summary.filename}
+                    </dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-4">
+                    <dt className="shrink-0 text-[#8892a0]">Timestamp</dt>
+                    <dd className="text-right font-mono text-xs">
+                      {summary.timestampIso ?? "Could not parse"}
+                    </dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-4">
+                    <dt className="shrink-0 text-[#8892a0]">Non-spec rows</dt>
+                    <dd className="text-right">{summary.rows.length}</dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-4">
+                    <dt className="shrink-0 text-[#8892a0]">Rows by team</dt>
+                    <dd className="text-right">
+                      Red: {summary.redCount}, Blue: {summary.blueCount}
+                    </dd>
+                  </div>
+                  <div className="flex items-baseline justify-between gap-4">
+                    <dt className="shrink-0 text-[#8892a0]">Final score</dt>
+                    <dd className="text-right font-medium">{scoreLine(summary)}</dd>
+                  </div>
                 </dl>
               </div>
 
-              {/* Debug: raw parsed rows */}
-              <Collapsible>
-                <CollapsibleTrigger className="group flex w-full items-center justify-between rounded-md border border-[var(--color-border)] bg-transparent px-3 py-2 text-sm text-[#c5c6c7] hover:bg-[var(--color-border)]/40">
-                  <span>Show parsed rows ({summary.rows.length})</span>
-                  <ChevronDown className="h-4 w-4 transition-transform group-data-[state=open]:rotate-180" />
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2">
-                  <div className="max-h-64 overflow-auto rounded-md border border-[var(--color-border)]">
-                    <table className="w-full text-left text-xs">
-                      <thead className="sticky top-0 bg-[var(--color-surface)] text-[#8892a0]">
-                        <tr>
-                          <th className="px-2 py-1 font-medium">NAME-CLEAN</th>
-                          <th className="px-2 py-1 font-medium">Team</th>
-                          <th className="px-2 py-1 text-right font-medium">Caps</th>
-                          <th className="px-2 py-1 text-right font-medium">Kills</th>
-                          <th className="px-2 py-1 text-right font-medium">Deaths</th>
+              {/* Review table */}
+              <div className="rounded-lg border border-[var(--color-border)] overflow-hidden">
+                <table className="w-full border-collapse text-left text-sm">
+                  <thead className="sticky top-0 z-10 bg-[var(--color-surface)] text-xs text-[#8892a0]">
+                    <tr className="border-b border-[var(--color-border)]">
+                      <th className="px-3 py-2 font-medium">In-game Name</th>
+                      <th className="px-3 py-2 font-medium">Team</th>
+                      <th className="px-3 py-2 font-medium">Soracle Player</th>
+                      <th className="px-3 py-2 text-right font-medium">Caps</th>
+                      <th className="px-3 py-2 text-right font-medium">Returns</th>
+                      <th className="px-3 py-2 text-right font-medium">Kills</th>
+                      <th className="px-3 py-2 text-right font-medium">Deaths</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {sortedRows.map(({ row, team }, i) => {
+                      const teamChanged = i > 0 && sortedRows[i - 1].team !== team
+                      const muted = team === "Other"
+                      return (
+                        <tr
+                          key={i}
+                          className={cn(
+                            "border-t border-[var(--color-border)]/40",
+                            teamChanged && "border-t-2 border-t-[#66fcf1]/25",
+                            muted && "text-[#6b7280]",
+                          )}
+                        >
+                          <td className="px-3 py-1.5 font-medium">{row["NAME-CLEAN"]}</td>
+                          <td className="px-3 py-1.5">
+                            {team === "Red" && (
+                              <Badge
+                                variant="outline"
+                                className="border-red-500/40 bg-red-500/15 text-red-300"
+                              >
+                                Red
+                              </Badge>
+                            )}
+                            {team === "Blue" && (
+                              <Badge
+                                variant="outline"
+                                className="border-blue-500/40 bg-blue-500/15 text-blue-300"
+                              >
+                                Blue
+                              </Badge>
+                            )}
+                            {team === "Other" && <span className="text-[#6b7280]">—</span>}
+                          </td>
+                          <td className="px-3 py-1.5 text-xs text-[#6b7280]">—</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {row["CAPTURES-CURRENT"]}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">
+                            {row["RETURNS-CURRENT"]}
+                          </td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{row["KILLS"]}</td>
+                          <td className="px-3 py-1.5 text-right tabular-nums">{row["DEATHS"]}</td>
                         </tr>
-                      </thead>
-                      <tbody>
-                        {summary.rows.map((row, i) => (
-                          <tr key={i} className="border-t border-[var(--color-border)]/50">
-                            <td className="px-2 py-1 font-mono">{row["NAME-CLEAN"]}</td>
-                            <td className="px-2 py-1">{row["LAST-NONSPEC-TEAM"]}</td>
-                            <td className="px-2 py-1 text-right">{row["CAPTURES-CURRENT"]}</td>
-                            <td className="px-2 py-1 text-right">{row["KILLS"]}</td>
-                            <td className="px-2 py-1 text-right">{row["DEATHS"]}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 
@@ -350,7 +412,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0">
           <Button
             type="button"
             variant="outline"
