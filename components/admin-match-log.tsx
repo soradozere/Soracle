@@ -7,8 +7,9 @@ import { evaluateTeams } from "@/lib/balance-algorithm"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { Check, X, Loader2, ChevronRight, ChevronLeft, Search, Calendar } from "lucide-react"
+import { Check, X, Loader2, ChevronRight, ChevronLeft, Search, Calendar, Upload } from "lucide-react"
 import type { Player } from "@/lib/types"
+import { MatchStatsCsvModal } from "@/components/match-stats-csv-modal"
 
 function getBalanceConfidence(score: number): number {
   const k = 0.004
@@ -40,6 +41,7 @@ export function AdminMatchLog() {
   const [searchQuery, setSearchQuery] = useState("")
   const [highlightedIndex, setHighlightedIndex] = useState(0)
   const [activeTeam, setActiveTeam] = useState<"red" | "blue">("red")
+  const [csvModalOpen, setCsvModalOpen] = useState(false)
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [balanceScore, setBalanceScore] = useState<number | null>(null)
   const [matchDate, setMatchDate] = useState<string>(() => {
@@ -216,23 +218,35 @@ export function AdminMatchLog() {
   return (
     <div className="border rounded-lg p-6 bg-card">
       <form onSubmit={handleSubmit} className="space-y-6">
-        {/* Match Type Toggle */}
-        <div className="flex gap-2">
+        {/* Match Type Toggle + Stats CSV upload */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex gap-2">
+            <Button
+              type="button"
+              variant={matchType === "manual" ? "default" : "outline"}
+              onClick={() => setMatchType("manual")}
+              size="sm"
+            >
+              Manual
+            </Button>
+            <Button
+              type="button"
+              variant={matchType === "algorithm" ? "default" : "outline"}
+              onClick={() => setMatchType("algorithm")}
+              size="sm"
+            >
+              Algorithm
+            </Button>
+          </div>
           <Button
             type="button"
-            variant={matchType === "manual" ? "default" : "outline"}
-            onClick={() => setMatchType("manual")}
+            variant="outline"
             size="sm"
+            onClick={() => setCsvModalOpen(true)}
+            className="border-[#66fcf1]/40 text-[#66fcf1] hover:bg-[#66fcf1]/10 hover:text-[#66fcf1] hover:border-[#66fcf1]"
           >
-            Manual
-          </Button>
-          <Button
-            type="button"
-            variant={matchType === "algorithm" ? "default" : "outline"}
-            onClick={() => setMatchType("algorithm")}
-            size="sm"
-          >
-            Algorithm
+            <Upload className="w-4 h-4 mr-2" />
+            Upload Stats CSV
           </Button>
         </div>
 
@@ -487,6 +501,8 @@ export function AdminMatchLog() {
           </Button>
         </div>
       </form>
+
+      <MatchStatsCsvModal open={csvModalOpen} onOpenChange={setCsvModalOpen} />
     </div>
   )
 }
