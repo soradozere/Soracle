@@ -452,6 +452,33 @@ export async function getMatchStatsByMonth(year: number, month: number) {
   }
 }
 
+// All per-player stat rows for a single match, with player names joined, for the
+// expandable scoreboard on the Match History tab.
+export async function getMatchStats(matchId: string) {
+  try {
+    const supabase = await createClient()
+
+    const { data, error } = await supabase
+      .from("match_stats")
+      .select(
+        "player_id, team, played_partial, score, captures, returns, base_cleaner, dbs_kills, kills, deaths, dfa_kills, flag_hold_ms, time_played, players(name)",
+      )
+      .eq("match_id", matchId)
+
+    if (error) {
+      return { success: false, error: error.message, data: [] }
+    }
+
+    return { success: true, data: data || [] }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to fetch match stats",
+      data: [],
+    }
+  }
+}
+
 export async function getMonthlyPlayerStats() {
   try {
     const supabase = await createClient()
