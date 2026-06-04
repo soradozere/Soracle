@@ -1,8 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getMatchesByMonth } from "@/app/admin/actions"
-import { ChevronLeft, ChevronRight, Trophy, Target, BarChart3, Zap, Swords, Star } from "lucide-react"
+import { getMatchesByMonth, getMatchStatsByMonth } from "@/app/admin/actions"
+import { ChevronLeft, ChevronRight, Trophy, Target, BarChart3, Zap, Swords, Star, Flag, Skull, Crosshair, Shield } from "lucide-react"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import type { Player } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -42,16 +42,35 @@ interface PlayerMatchStats {
   losses: number
 }
 
+// Raw match_stats rows for the month (see getMatchStatsByMonth).
+interface MatchStatRow {
+  match_id: string
+  player_id: string
+  flag_hold_ms: number
+  dbs_kills: number
+  captures: number
+  returns: number
+}
+
 const MONTH_NAMES = [
   "January", "February", "March", "April", "May", "June",
   "July", "August", "September", "October", "November", "December"
 ]
+
+// flag_hold_ms is stored in milliseconds — render as m:ss (e.g. 272500 -> "4:32").
+function formatFlagHold(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000)
+  const minutes = Math.floor(totalSeconds / 60)
+  const seconds = totalSeconds % 60
+  return `${minutes}:${String(seconds).padStart(2, "0")}`
+}
 
 export function ReportsTab() {
   const now = new Date()
   const [selectedYear, setSelectedYear] = useState(now.getFullYear())
   const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1)
   const [matches, setMatches] = useState<Match[]>([])
+  const [matchStats, setMatchStats] = useState<MatchStatRow[]>([])
   const [players, setPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
   const [currentView, setCurrentView] = useState<"stats" | "leaderboard">("stats")
@@ -71,12 +90,14 @@ export function ReportsTab() {
     setLoading(true)
     Promise.all([
       getMatchesByMonth(selectedYear, selectedMonth),
-      fetchPlayersFromDB()
-    ]).then(([matchResult, playersData]) => {
+      fetchPlayersFromDB(),
+      getMatchStatsByMonth(selectedYear, selectedMonth)
+    ]).then(([matchResult, playersData, statsResult]) => {
       if (matchResult.success) {
         setMatches(matchResult.data as Match[])
       }
       setPlayers(playersData)
+      setMatchStats(statsResult.success ? (statsResult.data as MatchStatRow[]) : [])
       setLoading(false)
     })
   }, [selectedYear, selectedMonth])
@@ -299,6 +320,60 @@ export function ReportsTab() {
   const draws = matches.filter(m => m.red_score === m.blue_score).length
   const redPct = totalMatches > 0 ? Math.round((redWins / totalMatches) * 100) : 0
   const bluePct = totalMatches > 0 ? Math.round((blueWins / totalMatches) * 100) : 0
+
+  // CSV stat highlights — cumulative monthly totals per player. Only matches with
+  // an uploaded stats CSV contribute, so the qualifier is based on the number of
+  // matches that actually have stats this month (not all matches).
+  const playerIdToName = new Map<string, string>()
+  for (const player of players) {
+    if (player.id) playerIdToName.set(player.id, player.name)
+  }
+
+  const statAgg = new Map<
+    string,
+    { flagHoldMs: number; dbsKills: number; captures: number; returns: number; matches: number }
+  >()
+  for (const row of matchStats) {
+    if (!statAgg.has(row.player_id)) {
+      statAgg.set(row.player_id, { flagHoldMs: 0, dbsKills: 0, captures: 0, returns: 0, matches: 0 })
+    }
+    const agg = statAgg.get(row.player_id)!
+    agg.flagHoldMs += row.flag_hold_ms || 0
+    agg.dbsKills += row.dbs_kills || 0
+    agg.captures += row.captures || 0
+    agg.returns += row.returns || 0
+    agg.matches += 1
+  }
+
+  const statsMatchCount = new Set(matchStats.map((r) => r.match_id)).size
+  const statHighlightMinMatches = Math.max(1, Math.ceil(statsMatchCount * 0.3))
+
+  const qualifiedStatPlayers = Array.from(statAgg.entries())
+    .filter(([, agg]) => agg.matches >= statHighlightMinMatches)
+    .map(([playerId, agg]) => ({
+      name: playerIdToName.get(playerId) ?? "Unknown player",
+      ...agg,
+    }))
+
+  const topFlagHold =
+    [...qualifiedStatPlayers]
+      .filter((p) => p.flagHoldMs > 0)
+      .sort((a, b) => b.flagHoldMs - a.flagHoldMs)[0] || null
+
+  const topDbsKills =
+    [...qualifiedStatPlayers]
+      .filter((p) => p.dbsKills > 0)
+      .sort((a, b) => b.dbsKills - a.dbsKills)[0] || null
+
+  const topCapper =
+    [...qualifiedStatPlayers]
+      .filter((p) => p.captures > 0)
+      .sort((a, b) => b.captures - a.captures)[0] || null
+
+  const topReturner =
+    [...qualifiedStatPlayers]
+      .filter((p) => p.returns > 0)
+      .sort((a, b) => b.returns - a.returns)[0] || null
 
   // Algorithm vs Manual
   const algorithmMatches = matches.filter(m => m.match_type === "algorithm")
@@ -655,6 +730,116 @@ export function ReportsTab() {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+
+          {/* Top Flag Hold & Most DBS Kills Row (from match stats CSVs) */}
+          <div className="grid md:grid-cols-2 gap-4">
+            {/* Top Flag Hold */}
+            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
+              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
+                <Flag className="w-5 h-5 text-[#f39c12]" />
+                Top Flag Hold
+              </h3>
+              {topFlagHold ? (
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{topFlagHold.name}</div>
+                  <div className="text-2xl font-bold text-[#f39c12] mb-2">
+                    {formatFlagHold(topFlagHold.flagHoldMs)}
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)] italic">
+                    Most total flag hold time this month
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
+                    Players with {statHighlightMinMatches}+ stat-tracked matches
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
+                  No stats data this month
+                </p>
+              )}
+            </div>
+
+            {/* Most DBS Kills */}
+            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
+              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
+                <Skull className="w-5 h-5 text-[#ff4757]" />
+                Most DBS Kills
+              </h3>
+              {topDbsKills ? (
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{topDbsKills.name}</div>
+                  <div className="text-2xl font-bold text-[#ff4757] mb-2">
+                    {topDbsKills.dbsKills} DBS kills
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)] italic">
+                    Most total DBS kills this month
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
+                    Players with {statHighlightMinMatches}+ stat-tracked matches
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
+                  No stats data this month
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Top Capper & Top Returner Row (from match stats CSVs) */}
+          <div className="grid md:grid-cols-2 gap-4">
+            {/* Top Capper */}
+            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
+              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
+                <Crosshair className="w-5 h-5 text-[#27ae60]" />
+                Top Capper
+              </h3>
+              {topCapper ? (
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{topCapper.name}</div>
+                  <div className="text-2xl font-bold text-[#27ae60] mb-2">
+                    {topCapper.captures} caps
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)] italic">
+                    Most total captures this month
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
+                    Players with {statHighlightMinMatches}+ stat-tracked matches
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
+                  No stats data this month
+                </p>
+              )}
+            </div>
+
+            {/* Top Returner */}
+            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
+              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
+                <Shield className="w-5 h-5 text-[#00d4ff]" />
+                Top Returner
+              </h3>
+              {topReturner ? (
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{topReturner.name}</div>
+                  <div className="text-2xl font-bold text-[#00d4ff] mb-2">
+                    {topReturner.returns} returns
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)] italic">
+                    Most total returns this month
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
+                    Players with {statHighlightMinMatches}+ stat-tracked matches
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
+                  No stats data this month
+                </p>
+              )}
             </div>
           </div>
 
