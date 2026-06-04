@@ -119,6 +119,9 @@ importers:
       embla-carousel-react:
         specifier: 8.6.0
         version: 8.6.0(react@19.2.5)
+      fuse.js:
+        specifier: ^7.4.1
+        version: 7.4.1
       geist:
         specifier: ^1.3.1
         version: 1.7.0(next@16.2.0(react-dom@19.2.5(react@19.2.5))(react@19.2.5))
@@ -1582,6 +1585,10 @@ packages:
 
   fraction.js@5.3.4:
     resolution: {integrity: sha512-1X1NTtiJphryn/uLQz3whtY6jK3fTqoE3ohKs0tT+Ujr1W59oopxmoEh7Lu5p6vBaPbgoM0bzveAW4Qi5RyWDQ==}
+
+  fuse.js@7.4.1:
+    resolution: {integrity: sha512-AY7lKAXK71hi3WgUvDy6oZL67UEHOOtvCAwVdOXHyJd6ZzftBy7QqxuXt4HxmmAhYjmp/YCuOELZtIvAdlZ+fw==}
+    engines: {node: '>=10'}
 
   geist@1.7.0:
     resolution: {integrity: sha512-ZaoiZwkSf0DwwB1ncdLKp+ggAldqxl5L1+SXaNIBGkPAqcu+xjVJLxlf3/S8vLt9UHx1xu5fz3lbzKCj5iOVdQ==}
@@ -3268,6 +3275,8 @@ snapshots:
   fast-equals@5.4.0: {}
 
   fraction.js@5.3.4: {}
+
+  fuse.js@7.4.1: {}
 
   geist@1.7.0(next@16.2.0(react-dom@19.2.5(react@19.2.5))(react@19.2.5)):
     dependencies:

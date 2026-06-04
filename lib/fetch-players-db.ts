@@ -41,6 +41,7 @@ export async function fetchPlayersFromDB(): Promise<Player[]> {
 
     // Transform database format to app format
     return (data || []).map((dbPlayer) => ({
+      id: dbPlayer.id,
       name: dbPlayer.name,
       tierValue: dbPlayer.tier_value,
       mic: dbPlayer.mic,
