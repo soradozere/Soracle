@@ -25,6 +25,12 @@ import {
 } from "@/components/ui/command"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
 import { Check, ChevronsUpDown, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
@@ -75,6 +81,12 @@ const REQUIRED_COLUMNS = [
   "TIME-SUM",
 ] as const
 
+// Numeric counter columns summed when merging reconnect rows — every required
+// column except the two identity columns (team + name).
+const SUMMABLE_COLUMNS = REQUIRED_COLUMNS.filter(
+  (col) => col !== "LAST-NONSPEC-TEAM" && col !== "NAME-CLEAN",
+)
+
 // Fuzzy-matching tuning. Lower fuse score = better match.
 // THRESHOLD controls which matches fuse returns at all; CONFIDENCE_THRESHOLD
 // controls which of those are good enough to auto-prefill the dropdown.
@@ -95,6 +107,28 @@ interface ParseSummary {
   warnings: string[]
 }
 
+type SubResolution = "keep-both" | "keep-starter" | "keep-finisher"
+
+// A row as rendered in the review table: an original parsed row (optionally a
+// kept member of a resolved substitution), or a virtual row produced by merging
+// several reconnect rows of the same player.
+type DisplayRow =
+  | {
+      kind: "single"
+      rowIndex: number
+      data: CsvRow
+      team: TeamClass
+      partial: boolean
+      subResolutionIndex: number | null
+    }
+  | {
+      kind: "merged"
+      mergeIndex: number
+      originalRowIndices: number[]
+      data: CsvRow
+      team: TeamClass
+    }
+
 function toInt(value: string | undefined): number {
   const n = parseInt((value ?? "").trim(), 10)
   return Number.isFinite(n) ? n : 0
@@ -105,6 +139,16 @@ function classifyTeam(row: CsvRow): TeamClass {
   if (team === "Red") return "Red"
   if (team === "Blue") return "Blue"
   return "Other"
+}
+
+// Combine several rows of the same player into one virtual row: sum the numeric
+// counters, keep the first row's identity (name + team).
+function mergeRowData(rows: CsvRow[]): CsvRow {
+  const merged: CsvRow = { ...rows[0] }
+  for (const col of SUMMABLE_COLUMNS) {
+    merged[col] = String(rows.reduce((sum, r) => sum + toInt(r[col]), 0))
+  }
+  return merged
 }
 
 // Filename starts with YYYY-MM-DD<sep>HH_MM_SS, where <sep> is "_" or " " —
@@ -219,6 +263,22 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
   const [rowToPlayerId, setRowToPlayerId] = useState<Record<number, string | null>>({})
   // Sorted-row index -> player id that was auto-prefilled with high confidence.
   const [autoMatched, setAutoMatched] = useState<Record<number, string>>({})
+  // Sorted-row index -> merge/sub flag (null if unflagged). Same key as rowToPlayerId.
+  const [rowFlags, setRowFlags] = useState<Record<number, "merge" | "sub" | null>>({})
+  // Completed merges: each combines its constituent sorted-row indices into one
+  // summed virtual row. Resets with the rest of the parse state.
+  const [mergedRows, setMergedRows] = useState<
+    Array<{ originalRowIndices: number[]; mergedData: CsvRow }>
+  >([])
+  const [mergeError, setMergeError] = useState<string | null>(null)
+  // Resolved substitutions: each records its group's sorted-row indices, the
+  // chosen resolution, and which rows were dropped. Resets with the parse state.
+  const [substitutionResolutions, setSubstitutionResolutions] = useState<
+    Array<{ groupRowIndices: number[]; resolution: SubResolution; droppedRowIndices: number[] }>
+  >([])
+  const [showSubPanel, setShowSubPanel] = useState(false)
+  const [subChoices, setSubChoices] = useState<Record<string, SubResolution>>({})
+  const [subErrors, setSubErrors] = useState<Record<string, string | null>>({})
 
   // Fetch players the first time the modal opens; cache for the session.
   useEffect(() => {
@@ -284,12 +344,209 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
     setAutoMatched(auto)
   }, [summary, players, fuse, sortedRows])
 
+  // Rows as shown in the table: merged rows replace their constituents in place,
+  // substitution-dropped rows are removed, and kept "keep-both" rows are flagged
+  // partial. Everything else passes through in sorted order.
+  const displayRows = useMemo<DisplayRow[]>(() => {
+    const constituentToMerge = new Map<number, number>()
+    mergedRows.forEach((m, mi) => {
+      m.originalRowIndices.forEach((idx) => constituentToMerge.set(idx, mi))
+    })
+    const dropped = new Set<number>()
+    const partial = new Set<number>()
+    const keptToResolution = new Map<number, number>()
+    substitutionResolutions.forEach((r, ri) => {
+      r.droppedRowIndices.forEach((idx) => dropped.add(idx))
+      r.groupRowIndices.forEach((idx) => {
+        if (!r.droppedRowIndices.includes(idx)) {
+          keptToResolution.set(idx, ri)
+          if (r.resolution === "keep-both") partial.add(idx)
+        }
+      })
+    })
+    const out: DisplayRow[] = []
+    const placed = new Set<number>()
+    sortedRows.forEach(({ row, team }, i) => {
+      const mi = constituentToMerge.get(i)
+      if (mi !== undefined) {
+        if (!placed.has(mi)) {
+          placed.add(mi)
+          const m = mergedRows[mi]
+          out.push({
+            kind: "merged",
+            mergeIndex: mi,
+            originalRowIndices: m.originalRowIndices,
+            data: m.mergedData,
+            team: classifyTeam(m.mergedData),
+          })
+        }
+        return
+      }
+      if (dropped.has(i)) return
+      out.push({
+        kind: "single",
+        rowIndex: i,
+        data: row,
+        team,
+        partial: partial.has(i),
+        subResolutionIndex: keptToResolution.get(i) ?? null,
+      })
+    })
+    return out
+  }, [sortedRows, mergedRows, substitutionResolutions])
+
+  // Pending substitution groups: sub-flagged single rows grouped by team. Derived
+  // live from rowFlags so un-ticking an S re-groups immediately.
+  const pendingSubGroups = useMemo(() => {
+    const byTeam = new Map<TeamClass, number[]>()
+    displayRows.forEach((d) => {
+      if (d.kind === "single" && rowFlags[d.rowIndex] === "sub") {
+        const arr = byTeam.get(d.team) ?? []
+        arr.push(d.rowIndex)
+        byTeam.set(d.team, arr)
+      }
+    })
+    return Array.from(byTeam.entries()).map(([team, rowIndices]) => ({ team, rowIndices }))
+  }, [displayRows, rowFlags])
+
+  const playerName = (id: string) => players.find((p) => p.id === id)?.name ?? id
+
+  function handleMerge() {
+    const flagged = displayRows.filter(
+      (d): d is Extract<DisplayRow, { kind: "single" }> =>
+        d.kind === "single" && rowFlags[d.rowIndex] === "merge",
+    )
+    if (flagged.length < 2) return
+
+    const unmapped = flagged.filter((d) => !rowToPlayerId[d.rowIndex])
+    if (unmapped.length > 0) {
+      const positions = unmapped
+        .map((d) => displayRows.indexOf(d) + 1)
+        .sort((a, b) => a - b)
+      setMergeError(
+        `Merge requires all selected rows to be mapped to the same Soracle player. Please map row(s) [${positions.join(", ")}] first.`,
+      )
+      return
+    }
+
+    if (new Set(flagged.map((d) => rowToPlayerId[d.rowIndex])).size > 1) {
+      setMergeError("Merge requires all selected rows to be mapped to the same Soracle player.")
+      return
+    }
+
+    if (new Set(flagged.map((d) => d.team)).size > 1) {
+      setMergeError("Merge requires all selected rows to be on the same team.")
+      return
+    }
+
+    const indices = flagged.map((d) => d.rowIndex)
+    const mergedData = mergeRowData(flagged.map((d) => d.data))
+    setMergedRows((prev) => [...prev, { originalRowIndices: indices, mergedData }])
+    setRowFlags((prev) => {
+      const next = { ...prev }
+      indices.forEach((idx) => {
+        next[idx] = null
+      })
+      return next
+    })
+    setMergeError(null)
+  }
+
+  function handleUnmerge(mergeIndex: number) {
+    const target = mergedRows[mergeIndex]
+    setMergedRows((prev) => prev.filter((_, i) => i !== mergeIndex))
+    setRowFlags((prev) => {
+      const next = { ...prev }
+      target?.originalRowIndices.forEach((idx) => {
+        next[idx] = null
+      })
+      return next
+    })
+    setMergeError(null)
+  }
+
+  function handleApplySubstitution(
+    group: { team: TeamClass; rowIndices: number[] },
+    resolution: SubResolution,
+  ) {
+    const { team, rowIndices } = group
+
+    // Defensive: a row must never be both merged and subbed.
+    const mergedConstituents = new Set<number>()
+    mergedRows.forEach((m) => m.originalRowIndices.forEach((i) => mergedConstituents.add(i)))
+    if (rowIndices.some((i) => mergedConstituents.has(i))) {
+      setSubErrors((p) => ({
+        ...p,
+        [team]: "A row cannot be both merged and part of a substitution.",
+      }))
+      return
+    }
+
+    if (rowIndices.length < 2) return
+
+    if (rowIndices.some((i) => !rowToPlayerId[i])) {
+      setSubErrors((p) => ({
+        ...p,
+        [team]: "All rows in the group must be mapped to a Soracle player first.",
+      }))
+      return
+    }
+
+    if (new Set(rowIndices.map((i) => rowToPlayerId[i])).size !== rowIndices.length) {
+      setSubErrors((p) => ({
+        ...p,
+        [team]:
+          "Substitution rows must map to different players. Use Merge for reconnects of the same player.",
+      }))
+      return
+    }
+
+    // Starter/finisher only make sense for exactly two rows; otherwise force keep-both.
+    let effective = resolution
+    if (effective !== "keep-both" && rowIndices.length !== 2) effective = "keep-both"
+
+    let droppedRowIndices: number[] = []
+    if (effective === "keep-starter" || effective === "keep-finisher") {
+      const [a, b] = rowIndices
+      const ta = toInt(sortedRows[a].row["TIME-SUM"])
+      const tb = toInt(sortedRows[b].row["TIME-SUM"])
+      // Starter = more time played; finisher = less time played.
+      droppedRowIndices =
+        effective === "keep-starter" ? [ta >= tb ? b : a] : [ta >= tb ? a : b]
+    }
+
+    setSubstitutionResolutions((prev) => [
+      ...prev,
+      { groupRowIndices: rowIndices, resolution: effective, droppedRowIndices },
+    ])
+    setRowFlags((prev) => {
+      const next = { ...prev }
+      rowIndices.forEach((i) => {
+        next[i] = null
+      })
+      return next
+    })
+    setSubErrors((p) => ({ ...p, [team]: null }))
+  }
+
+  function handleUndoSubstitution(resolutionIndex: number) {
+    setSubstitutionResolutions((prev) => prev.filter((_, i) => i !== resolutionIndex))
+    setSubErrors({})
+  }
+
   function reset() {
     setSummary(null)
     setError(null)
     setMissingColumns([])
     setRowToPlayerId({})
     setAutoMatched({})
+    setRowFlags({})
+    setMergedRows([])
+    setMergeError(null)
+    setSubstitutionResolutions([])
+    setShowSubPanel(false)
+    setSubChoices({})
+    setSubErrors({})
   }
 
   function handleClose(nextOpen: boolean) {
@@ -408,15 +665,28 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
     return `Red ${s.redScore} - Blue ${s.blueScore}, ${winner}`
   }
 
-  const mappedCount = sortedRows.reduce(
-    (acc, _row, i) => acc + (rowToPlayerId[i] ? 1 : 0),
+  const totalRows = displayRows.length
+  const mappedCount = displayRows.reduce((acc, d) => {
+    const id =
+      d.kind === "merged"
+        ? rowToPlayerId[d.originalRowIndices[0]]
+        : rowToPlayerId[d.rowIndex]
+    return acc + (id ? 1 : 0)
+  }, 0)
+  const allMapped = totalRows > 0 && mappedCount === totalRows
+
+  const mergeCount = displayRows.reduce(
+    (acc, d) => acc + (d.kind === "single" && rowFlags[d.rowIndex] === "merge" ? 1 : 0),
     0,
   )
-  const allMapped = sortedRows.length > 0 && mappedCount === sortedRows.length
+  const subCount = displayRows.reduce(
+    (acc, d) => acc + (d.kind === "single" && rowFlags[d.rowIndex] === "sub" ? 1 : 0),
+    0,
+  )
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="bg-[var(--color-surface)]/95 backdrop-blur-md border-[#66fcf1]/30 text-white max-w-3xl max-h-[85vh] flex flex-col">
+      <DialogContent className="bg-[var(--color-surface)]/95 backdrop-blur-md border-[#66fcf1]/30 text-white sm:max-w-6xl max-h-[85vh] flex flex-col">
         <DialogHeader className="shrink-0">
           <DialogTitle className="text-xl" style={{ color: "var(--color-primary)" }}>
             Upload Match Stats CSV
@@ -513,6 +783,167 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                 </dl>
               </div>
 
+              {/* Flag action bar — only when at least one row is flagged */}
+              {(mergeCount > 0 || subCount > 0) && (
+                <div className="flex flex-wrap items-center gap-2 rounded-md border border-[#66fcf1]/40 bg-[#66fcf1]/5 px-3 py-2">
+                  {mergeCount > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={mergeCount < 2}
+                      onClick={handleMerge}
+                      className="h-7 border-[#66fcf1]/50 bg-transparent px-3 text-xs font-medium text-[#66fcf1] hover:bg-[#66fcf1]/10 disabled:opacity-40"
+                    >
+                      Merge Selected ({mergeCount})
+                    </Button>
+                  )}
+                  {subCount > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={subCount < 2}
+                      onClick={() => {
+                        setSubErrors({})
+                        setShowSubPanel(true)
+                      }}
+                      className="h-7 border-[#66fcf1]/50 bg-transparent px-3 text-xs font-medium text-[#66fcf1] hover:bg-[#66fcf1]/10 disabled:opacity-40"
+                    >
+                      Configure Substitution ({subCount})
+                    </Button>
+                  )}
+                </div>
+              )}
+
+              {/* Merge validation error */}
+              {mergeError && (
+                <div className="rounded-md border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-200">
+                  {mergeError}
+                </div>
+              )}
+
+              {/* Substitution configuration panel */}
+              {showSubPanel && pendingSubGroups.length > 0 && (
+                <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium text-amber-200">Configure Substitutions</p>
+                    <button
+                      type="button"
+                      onClick={() => setShowSubPanel(false)}
+                      className="text-xs text-amber-200/70 hover:text-amber-100"
+                    >
+                      Close
+                    </button>
+                  </div>
+                  {pendingSubGroups.map((group) => {
+                    const team = group.team
+                    const tooFew = group.rowIndices.length < 2
+                    const tooMany = group.rowIndices.length > 2
+                    const choice = tooMany ? "keep-both" : subChoices[team] ?? "keep-both"
+                    const groupErr = subErrors[team]
+                    const options: { value: SubResolution; label: string }[] = [
+                      { value: "keep-both", label: "Keep both as partial play" },
+                      { value: "keep-starter", label: "Keep starter only (more time played)" },
+                      { value: "keep-finisher", label: "Keep finisher only (less time played)" },
+                    ]
+                    return (
+                      <div
+                        key={team}
+                        className="rounded-md border border-amber-500/30 bg-black/20 p-3"
+                      >
+                        <p className="mb-2 font-medium text-amber-100">
+                          {team} Substitution Group
+                        </p>
+                        <ul className="mb-2 space-y-1 text-xs text-[#c5c6c7]">
+                          {group.rowIndices.map((ri) => {
+                            const r = sortedRows[ri].row
+                            const pid = rowToPlayerId[ri]
+                            return (
+                              <li key={ri} className="flex items-center justify-between gap-3">
+                                <span className="min-w-0 truncate font-medium">
+                                  {r["NAME-CLEAN"]}
+                                </span>
+                                <span className="shrink-0 text-[#8892a0]">
+                                  {pid ? (
+                                    playerName(pid)
+                                  ) : (
+                                    <span className="text-red-300">Unmapped</span>
+                                  )}
+                                </span>
+                                <span className="shrink-0 tabular-nums text-[#8892a0]">
+                                  time: {r["TIME-SUM"]}
+                                </span>
+                              </li>
+                            )
+                          })}
+                        </ul>
+                        {tooFew ? (
+                          <p className="text-xs text-amber-200/80">
+                            A substitution group needs at least 2 rows on the same team.
+                          </p>
+                        ) : (
+                          <>
+                            <div className="space-y-1 text-xs">
+                              {options.map((opt) => {
+                                const disabled = tooMany && opt.value !== "keep-both"
+                                return (
+                                  <label
+                                    key={opt.value}
+                                    className={cn(
+                                      "flex items-center gap-2",
+                                      disabled ? "opacity-40" : "cursor-pointer",
+                                    )}
+                                  >
+                                    <input
+                                      type="radio"
+                                      name={`sub-${team}`}
+                                      checked={choice === opt.value}
+                                      disabled={disabled}
+                                      onChange={() =>
+                                        setSubChoices((p) => ({ ...p, [team]: opt.value }))
+                                      }
+                                      className="accent-[#66fcf1]"
+                                    />
+                                    {opt.label}
+                                  </label>
+                                )
+                              })}
+                            </div>
+                            {tooMany && (
+                              <p className="mt-1 text-[11px] text-amber-200/70">
+                                Starter/finisher only apply to a 2-row substitution; this group
+                                has {group.rowIndices.length}.
+                              </p>
+                            )}
+                            {groupErr && <p className="mt-1 text-xs text-red-300">{groupErr}</p>}
+                            <div className="mt-2 flex gap-2">
+                              <Button
+                                type="button"
+                                size="sm"
+                                onClick={() => handleApplySubstitution(group, choice)}
+                                className="h-6 bg-[#66fcf1] px-3 text-[11px] font-medium text-black hover:bg-[#66fcf1]/80"
+                              >
+                                Apply
+                              </Button>
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setShowSubPanel(false)}
+                                className="h-6 border-[#66fcf1]/40 bg-transparent px-3 text-[11px] text-[#66fcf1] hover:bg-[#66fcf1]/10"
+                              >
+                                Cancel
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
               {/* Review table */}
               <div className="rounded-lg border border-[var(--color-border)] overflow-hidden">
                 <table className="w-full border-collapse text-left text-sm">
@@ -521,6 +952,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                       <th className="px-3 py-2 font-medium">In-game Name</th>
                       <th className="px-3 py-2 font-medium">Team</th>
                       <th className="px-3 py-2 font-medium">Soracle Player</th>
+                      <th className="px-2 py-2 text-center font-medium">Merge / Sub</th>
                       <th className="px-3 py-2 text-right font-medium">Caps</th>
                       <th className="px-3 py-2 text-right font-medium">Returns</th>
                       <th className="px-3 py-2 text-right font-medium">Kills</th>
@@ -528,23 +960,58 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedRows.map(({ row, team }, i) => {
-                      const teamChanged = i > 0 && sortedRows[i - 1].team !== team
+                    {displayRows.map((d, idx) => {
+                      const prev = idx > 0 ? displayRows[idx - 1] : null
+                      const teamChanged = prev !== null && prev.team !== d.team
+                      const team = d.team
+                      const row = d.data
                       const muted = team === "Other"
-                      // Green indicator: still showing the high-confidence auto-match.
+                      const isMerged = d.kind === "merged"
+                      const isPendingSub = d.kind === "single" && rowFlags[d.rowIndex] === "sub"
+                      const isPartial = d.kind === "single" && d.partial
+                      const playerValue =
+                        d.kind === "merged"
+                          ? rowToPlayerId[d.originalRowIndices[0]] ?? null
+                          : rowToPlayerId[d.rowIndex] ?? null
+                      // Green indicator: un-merged single row still showing its auto-match.
                       const isAutoMatched =
-                        autoMatched[i] !== undefined && rowToPlayerId[i] === autoMatched[i]
+                        d.kind === "single" &&
+                        autoMatched[d.rowIndex] !== undefined &&
+                        rowToPlayerId[d.rowIndex] === autoMatched[d.rowIndex]
                       return (
                         <tr
-                          key={i}
+                          key={d.kind === "merged" ? `m-${d.mergeIndex}` : `s-${d.rowIndex}`}
                           className={cn(
                             "border-t border-[var(--color-border)]/40",
                             teamChanged && "border-t-2 border-t-[#66fcf1]/25",
                             muted && "text-[#6b7280]",
                             isAutoMatched && "border-l-2 border-l-green-500/70 bg-green-500/5",
+                            isMerged && "border-l-2 border-l-[#66fcf1] bg-[#66fcf1]/5",
+                            (isPendingSub || isPartial) &&
+                              "border-l-2 border-l-amber-500/70 bg-amber-500/5",
                           )}
                         >
-                          <td className="px-3 py-1.5 font-medium">{row["NAME-CLEAN"]}</td>
+                          <td className="px-3 py-1.5 font-medium">
+                            <div className="flex items-center gap-2">
+                              <span>{row["NAME-CLEAN"]}</span>
+                              {d.kind === "merged" && (
+                                <Badge
+                                  variant="outline"
+                                  className="shrink-0 border-[#66fcf1]/50 bg-[#66fcf1]/10 px-1.5 py-0 text-[10px] text-[#66fcf1]"
+                                >
+                                  Merged ({d.originalRowIndices.length})
+                                </Badge>
+                              )}
+                              {d.kind === "single" && d.partial && (
+                                <Badge
+                                  variant="outline"
+                                  className="shrink-0 border-amber-500/50 bg-amber-500/10 px-1.5 py-0 text-[10px] text-amber-300"
+                                >
+                                  Partial
+                                </Badge>
+                              )}
+                            </div>
+                          </td>
                           <td className="px-3 py-1.5">
                             {team === "Red" && (
                               <Badge
@@ -567,11 +1034,87 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                           <td className="px-3 py-1.5">
                             <PlayerCombobox
                               players={sortedPlayers}
-                              value={rowToPlayerId[i] ?? null}
+                              value={playerValue}
                               onChange={(id) =>
-                                setRowToPlayerId((prev) => ({ ...prev, [i]: id }))
+                                setRowToPlayerId((prev) => {
+                                  if (d.kind === "merged") {
+                                    const next = { ...prev }
+                                    d.originalRowIndices.forEach((oi) => {
+                                      next[oi] = id
+                                    })
+                                    return next
+                                  }
+                                  return { ...prev, [d.rowIndex]: id }
+                                })
                               }
                             />
+                          </td>
+                          <td className="px-2 py-1.5">
+                            {d.kind === "merged" ? (
+                              <div className="flex items-center justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnmerge(d.mergeIndex)}
+                                  className="text-[11px] font-medium text-[#8892a0] underline-offset-2 hover:text-[#66fcf1] hover:underline"
+                                >
+                                  Unmerge
+                                </button>
+                              </div>
+                            ) : d.subResolutionIndex !== null ? (
+                              <div className="flex items-center justify-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleUndoSubstitution(d.subResolutionIndex!)}
+                                  className="text-[11px] font-medium text-[#8892a0] underline-offset-2 hover:text-amber-300 hover:underline"
+                                >
+                                  Undo
+                                </button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center justify-center gap-2">
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <label className="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-[#8892a0]">
+                                      <Checkbox
+                                        checked={rowFlags[d.rowIndex] === "merge"}
+                                        onCheckedChange={(c) =>
+                                          setRowFlags((prev) => ({
+                                            ...prev,
+                                            [d.rowIndex]: c ? "merge" : null,
+                                          }))
+                                        }
+                                        className="size-3.5 border-[#66fcf1]/40 data-[state=checked]:border-[#66fcf1] data-[state=checked]:bg-[#66fcf1] data-[state=checked]:text-black"
+                                      />
+                                      M
+                                    </label>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-white">
+                                    Flag this row as a reconnect of another row (Merge with another
+                                    row of the same player)
+                                  </TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <label className="flex cursor-pointer items-center gap-1 text-[11px] font-medium text-[#8892a0]">
+                                      <Checkbox
+                                        checked={rowFlags[d.rowIndex] === "sub"}
+                                        onCheckedChange={(c) =>
+                                          setRowFlags((prev) => ({
+                                            ...prev,
+                                            [d.rowIndex]: c ? "sub" : null,
+                                          }))
+                                        }
+                                        className="size-3.5 border-[#66fcf1]/40 data-[state=checked]:border-[#66fcf1] data-[state=checked]:bg-[#66fcf1] data-[state=checked]:text-black"
+                                      />
+                                      S
+                                    </label>
+                                  </TooltipTrigger>
+                                  <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-white">
+                                    Flag this row as part of a substitution (Sub in or out)
+                                  </TooltipContent>
+                                </Tooltip>
+                              </div>
+                            )}
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums">
                             {row["CAPTURES-CURRENT"]}
@@ -595,7 +1138,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                   allMapped ? "text-green-400" : "text-[#8892a0]",
                 )}
               >
-                {mappedCount} of {sortedRows.length} players mapped
+                {mappedCount} of {totalRows} players mapped
               </p>
             </div>
           )}
