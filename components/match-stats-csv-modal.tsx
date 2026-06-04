@@ -434,7 +434,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="bg-[var(--color-surface)]/95 backdrop-blur-md border-[#66fcf1]/30 text-white max-w-3xl max-h-[85vh] flex flex-col">
+      <DialogContent className="bg-[var(--color-surface)]/95 backdrop-blur-md border-[#66fcf1]/30 text-white max-w-5xl max-h-[85vh] flex flex-col">
         <DialogHeader className="shrink-0">
           <DialogTitle className="text-xl" style={{ color: "var(--color-primary)" }}>
             Upload Match Stats CSV
@@ -538,9 +538,10 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                     <Button
                       type="button"
                       size="sm"
+                      variant="outline"
                       disabled={mergeCount < 2}
                       onClick={() => console.log("merge clicked")}
-                      className="h-7 bg-[#66fcf1] px-3 text-xs font-medium text-black hover:bg-[#66fcf1]/80 disabled:opacity-40"
+                      className="h-7 border-[#66fcf1]/50 bg-transparent px-3 text-xs font-medium text-[#66fcf1] hover:bg-[#66fcf1]/10 disabled:opacity-40"
                     >
                       Merge Selected ({mergeCount})
                     </Button>
@@ -568,7 +569,7 @@ export function MatchStatsCsvModal({ open, onOpenChange }: MatchStatsCsvModalPro
                       <th className="px-3 py-2 font-medium">In-game Name</th>
                       <th className="px-3 py-2 font-medium">Team</th>
                       <th className="px-3 py-2 font-medium">Soracle Player</th>
-                      <th className="px-2 py-2 text-center font-medium">Flags</th>
+                      <th className="px-2 py-2 text-center font-medium">Merge / Sub</th>
                       <th className="px-3 py-2 text-right font-medium">Caps</th>
                       <th className="px-3 py-2 text-right font-medium">Returns</th>
                       <th className="px-3 py-2 text-right font-medium">Kills</th>
