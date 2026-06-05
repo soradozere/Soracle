@@ -47,12 +47,12 @@ const REQUIRED_COLUMNS = [
   "LAST-NONSPEC-TEAM",
   "NAME-CLEAN",
   "SCORE-SUM",
-  "CAPTURES-CURRENT",
-  "RETURNS-CURRENT",
-  "BC-CURRENT",
-  "ASSISTS-CURRENT",
-  "FLAGGRABS-CURRENT",
-  "FLAGHOLD-CURRENT",
+  "CAPTURES-SUM",
+  "RETURNS-SUM",
+  "BC-SUM",
+  "ASSISTS-SUM",
+  "FLAGGRABS-SUM",
+  "FLAGHOLD-SUM",
   "KILLS",
   "DEATHS",
   "RED-KILLS",
@@ -168,12 +168,12 @@ function buildMatchStat(
 
     score: toInt(row["SCORE-SUM"]),
 
-    captures: toInt(row["CAPTURES-CURRENT"]),
-    returns: toInt(row["RETURNS-CURRENT"]),
-    base_cleaner: toInt(row["BC-CURRENT"]),
-    assists: toInt(row["ASSISTS-CURRENT"]),
-    flag_grabs: toInt(row["FLAGGRABS-CURRENT"]),
-    flag_hold_ms: toInt(row["FLAGHOLD-CURRENT"]),
+    captures: toInt(row["CAPTURES-SUM"]),
+    returns: toInt(row["RETURNS-SUM"]),
+    base_cleaner: toInt(row["BC-SUM"]),
+    assists: toInt(row["ASSISTS-SUM"]),
+    flag_grabs: toInt(row["FLAGGRABS-SUM"]),
+    flag_hold_ms: toInt(row["FLAGHOLD-SUM"]),
 
     kills: toInt(row["KILLS"]),
     deaths: toInt(row["DEATHS"]),
@@ -381,7 +381,7 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
       .sort((a, b) => {
         const byTeam = rank[a.team] - rank[b.team]
         if (byTeam !== 0) return byTeam
-        return toInt(b.row["CAPTURES-CURRENT"]) - toInt(a.row["CAPTURES-CURRENT"])
+        return toInt(b.row["CAPTURES-SUM"]) - toInt(a.row["CAPTURES-SUM"])
       })
   }, [summary])
 
@@ -673,14 +673,14 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
             warnings.push("Could not parse timestamp from filename")
           }
 
-          // E. Final score = sum of CAPTURES-CURRENT per team.
+          // E. Final score = sum of CAPTURES-SUM per team.
           let redCount = 0
           let blueCount = 0
           let redScore = 0
           let blueScore = 0
           for (const row of nonSpec) {
             const team = (row["LAST-NONSPEC-TEAM"] ?? "").trim()
-            const captures = toInt(row["CAPTURES-CURRENT"])
+            const captures = toInt(row["CAPTURES-SUM"])
             if (team === "Red") {
               redCount += 1
               redScore += captures
@@ -770,7 +770,7 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
         d.kind === "merged" ? rowToPlayerId[d.originalRowIndices[0]] : rowToPlayerId[d.rowIndex]
       if (!playerId) return null
       const partial = d.kind === "single" && d.partial
-      const captures = toInt(d.data["CAPTURES-CURRENT"])
+      const captures = toInt(d.data["CAPTURES-SUM"])
       if (d.team === "Red") {
         redTeamNames.push(playerName(playerId))
         redScore += captures
@@ -1232,10 +1232,10 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
                             )}
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums">
-                            {row["CAPTURES-CURRENT"]}
+                            {row["CAPTURES-SUM"]}
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums">
-                            {row["RETURNS-CURRENT"]}
+                            {row["RETURNS-SUM"]}
                           </td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{row["KILLS"]}</td>
                           <td className="px-3 py-1.5 text-right tabular-nums">{row["DEATHS"]}</td>
