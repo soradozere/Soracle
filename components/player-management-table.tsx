@@ -302,7 +302,7 @@ export function PlayerManagementTable() {
       </div>
 
       <div className="border rounded-lg overflow-hidden">
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow>
               <TableHead className="w-[180px]">Name</TableHead>
@@ -313,8 +313,8 @@ export function PlayerManagementTable() {
               <TableHead className="w-[90px]">Camp</TableHead>
               <TableHead className="w-[90px]">Cleaner</TableHead>
               <TableHead className="w-[90px]">Support</TableHead>
-              <TableHead className="w-[200px]">Tooltip</TableHead>
-              <TableHead className="w-[200px]">Discord IDs</TableHead>
+              <TableHead className="w-[180px]">Tooltip</TableHead>
+              <TableHead className="w-[180px]">Discord IDs</TableHead>
               <TableHead className="w-[100px]">Inactive</TableHead>
               <TableHead className="w-[120px]">Actions</TableHead>
             </TableRow>
