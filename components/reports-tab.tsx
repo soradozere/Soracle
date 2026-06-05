@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { getMatchesByMonth, getMatchStatsByMonth } from "@/app/admin/actions"
-import { ChevronLeft, ChevronRight, Trophy, Target, BarChart3, Zap, Swords, Star, Flag, Skull, Crosshair, Shield } from "lucide-react"
+import { ChevronLeft, ChevronRight, Trophy, Target, BarChart3, Zap, Swords, Star, Flag, Skull, Crosshair, Shield, Sword, Gauge } from "lucide-react"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import type { Player } from "@/lib/types"
 import { Button } from "@/components/ui/button"
@@ -50,6 +50,7 @@ interface MatchStatRow {
   dbs_kills: number
   captures: number
   returns: number
+  kills: number
 }
 
 const MONTH_NAMES = [
@@ -331,17 +332,18 @@ export function ReportsTab() {
 
   const statAgg = new Map<
     string,
-    { flagHoldMs: number; dbsKills: number; captures: number; returns: number; matches: number }
+    { flagHoldMs: number; dbsKills: number; captures: number; returns: number; kills: number; matches: number }
   >()
   for (const row of matchStats) {
     if (!statAgg.has(row.player_id)) {
-      statAgg.set(row.player_id, { flagHoldMs: 0, dbsKills: 0, captures: 0, returns: 0, matches: 0 })
+      statAgg.set(row.player_id, { flagHoldMs: 0, dbsKills: 0, captures: 0, returns: 0, kills: 0, matches: 0 })
     }
     const agg = statAgg.get(row.player_id)!
     agg.flagHoldMs += row.flag_hold_ms || 0
     agg.dbsKills += row.dbs_kills || 0
     agg.captures += row.captures || 0
     agg.returns += row.returns || 0
+    agg.kills += row.kills || 0
     agg.matches += 1
   }
 
@@ -374,6 +376,22 @@ export function ReportsTab() {
     [...qualifiedStatPlayers]
       .filter((p) => p.returns > 0)
       .sort((a, b) => b.returns - a.returns)[0] || null
+
+  const topKiller =
+    [...qualifiedStatPlayers]
+      .filter((p) => p.kills > 0)
+      .sort((a, b) => b.kills - a.kills)[0] || null
+
+  // Most Caps per Run — efficiency (minutes of flag hold per cap; lower = better).
+  // To avoid low-volume flukes, only "regular cappers" qualify: caps >= 40% of the
+  // month's highest individual cap total (on top of the min-match threshold).
+  const maxMonthlyCaps = qualifiedStatPlayers.reduce((max, p) => Math.max(max, p.captures), 0)
+  const regularCapperFloor = maxMonthlyCaps * 0.4
+  const mostCapsPerRun =
+    qualifiedStatPlayers
+      .filter((p) => p.captures >= regularCapperFloor && p.flagHoldMs > 0 && p.captures > 0)
+      .map((p) => ({ ...p, minutesPerCap: p.flagHoldMs / 60000 / p.captures }))
+      .sort((a, b) => a.minutesPerCap - b.minutesPerCap)[0] || null
 
   // Algorithm vs Manual
   const algorithmMatches = matches.filter(m => m.match_type === "algorithm")
@@ -833,6 +851,64 @@ export function ReportsTab() {
                   </div>
                   <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
                     Players with {statHighlightMinMatches}+ stat-tracked matches
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
+                  No stats data this month
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Top Killer & Most Caps per Run Row (from match stats CSVs) */}
+          <div className="grid md:grid-cols-2 gap-4">
+            {/* Top Killer */}
+            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
+              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
+                <Sword className="w-5 h-5 text-[#ff4757]" />
+                Top Killer
+              </h3>
+              {topKiller ? (
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{topKiller.name}</div>
+                  <div className="text-2xl font-bold text-[#ff4757] mb-2">
+                    {topKiller.kills} kills
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)] italic">
+                    Most total kills this month
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
+                    Players with {statHighlightMinMatches}+ stat-tracked matches
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
+                  No stats data this month
+                </p>
+              )}
+            </div>
+
+            {/* Most Caps per Run */}
+            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
+              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
+                <Gauge className="w-5 h-5 text-[#f39c12]" />
+                Most Caps per Run
+              </h3>
+              {mostCapsPerRun ? (
+                <div className="text-center">
+                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{mostCapsPerRun.name}</div>
+                  <div className="text-2xl font-bold text-[#f39c12] mb-1">
+                    1 cap / {mostCapsPerRun.minutesPerCap.toFixed(1)} min
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)] mb-2">
+                    {mostCapsPerRun.captures} caps · {formatFlagHold(mostCapsPerRun.flagHoldMs)} hold
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)] italic">
+                    Fewest minutes of flag hold per cap
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
+                    Regular cappers only (≥40% of the top cap total)
                   </div>
                 </div>
               ) : (
