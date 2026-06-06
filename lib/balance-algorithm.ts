@@ -22,6 +22,16 @@ const CONFIG = {
     BALANCE_WEIGHT: 0.8,
     VIABLE_THRESHOLD: 4,
   },
+  // Capper is the most crucial and scarcest role. Balancing role *sums* alone lets the
+  // algorithm stack the elite cappers on one team (e.g. two 9s) and offset them with
+  // several mid cappers on the other. These terms balance the TOP of each team's capper
+  // pool so the best cappers get split across teams.
+  capper: {
+    ELITE_THRESHOLD: 8, // a capper rated 8+ is elite and scarce
+    BEST_WEIGHT: 5.0, // balance each team's single best capper
+    TOP_2_WEIGHT: 2.5, // balance each team's top-2 capper pool
+    STACK_PENALTY: 1200, // flat penalty when both elite cappers land on one team
+  },
   cluster: {
     TOP_TWO_PENALTY: 8000,
   },
@@ -82,6 +92,32 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
     const r2 = team2.reduce((s, p) => s + Math.max(p.roles[role], 0), 0)
     score += Math.pow(r1 - r2, 2) * CONFIG.roles.BALANCE_WEIGHT
   })
+
+  // 3b. Capper top-end balance — split the elite cappers across teams.
+  // Sum-balancing (section 3) treats two 9-cappers + filler the same as several mid
+  // cappers, so the strongest cappers can pile onto one team. These terms compare the
+  // top of each team's capper pool, not just the total.
+  const cappers1 = team1.map((p) => Math.max(p.roles.Capper, 0)).sort((a, b) => b - a)
+  const cappers2 = team2.map((p) => Math.max(p.roles.Capper, 0)).sort((a, b) => b - a)
+
+  const bestCapperDiff = Math.abs(cappers1[0] - cappers2[0])
+  score += Math.pow(bestCapperDiff, 2) * CONFIG.capper.BEST_WEIGHT
+
+  const top2Capper1 = cappers1.slice(0, 2).reduce((a, b) => a + b, 0)
+  const top2Capper2 = cappers2.slice(0, 2).reduce((a, b) => a + b, 0)
+  score += Math.pow(top2Capper1 - top2Capper2, 2) * CONFIG.capper.TOP_2_WEIGHT
+
+  // Flat penalty when the two best cappers in the lobby are stacked on one team — but
+  // only when both are genuinely elite (and thus scarce). Mid-tier pairs are handled by
+  // the weighted terms above without forcing a split.
+  const rankedCappers = [...team1, ...team2]
+    .map((p) => ({ name: p.name, capper: Math.max(p.roles.Capper, 0), team: team1.includes(p) ? 1 : 2 }))
+    .sort((a, b) => b.capper - a.capper)
+  if (rankedCappers.length >= 2 && rankedCappers[1].capper >= CONFIG.capper.ELITE_THRESHOLD) {
+    if (rankedCappers[0].team === rankedCappers[1].team) {
+      score += CONFIG.capper.STACK_PENALTY
+    }
+  }
 
   // 4a. Top-tier distribution (dynamic threshold)
   const allTiers = [...team1, ...team2].map((p) => p.tierValue).sort((a, b) => b - a)

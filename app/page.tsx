@@ -766,10 +766,10 @@ export default function TeamBalancer() {
               <section>
                 <h3 className="text-xl font-bold text-text-bright mb-3">How It Works</h3>
                 <p className="leading-relaxed mb-4">
-                  The balancer checks all 924 possible team splits and picks the most balanced one. Each split gets a penalty score — lower is better.
+                  The balancer evaluates every one of the 924 ways to split 12 players into two teams of six. Each split earns a penalty score for how unbalanced it is — lower is better — and the lowest-scoring split wins.
                 </p>
                 <p className="leading-relaxed mb-4">
-                  Here&apos;s what it&apos;s checking:
+                  Here&apos;s what each split is graded on:
                 </p>
                 <ul className="space-y-3">
                   <li className="flex items-start gap-3">
@@ -777,7 +777,7 @@ export default function TeamBalancer() {
                     <div>
                       <strong className="text-text-bright">Tier balance</strong>
                       <p className="text-sm text-text-dim mt-1">
-                        Both teams should add up to roughly the same total tier. This is the main check.
+                        Both teams should add up to roughly the same total tier rank. This is the heaviest-weighted check.
                       </p>
                     </div>
                   </li>
@@ -786,34 +786,16 @@ export default function TeamBalancer() {
                     <div>
                       <strong className="text-text-bright">Role coverage</strong>
                       <p className="text-sm text-text-dim mt-1">
-                        Each team needs at least one Capper and one Chaser. Missing either = broken match.
+                        Every team needs at least one viable Capper and one viable Chaser. Missing either makes the match unplayable.
                       </p>
                     </div>
                   </li>
                   <li className="flex items-start gap-3">
                     <span className="text-primary font-mono font-bold">•</span>
                     <div>
-                      <strong className="text-text-bright">Top-3 vs Top-3</strong>
+                      <strong className="text-text-bright">Cappers split fairly</strong>
                       <p className="text-sm text-text-dim mt-1">
-                        The three best players on each team should be roughly equal in strength.
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">•</span>
-                    <div>
-                      <strong className="text-text-bright">Bottom-3 vs Bottom-3</strong>
-                      <p className="text-sm text-text-dim mt-1">
-                        Same idea, but for the three weakest. Stops one team having a much lower floor.
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">•</span>
-                    <div>
-                      <strong className="text-text-bright">No stacking elites</strong>
-                      <p className="text-sm text-text-dim mt-1">
-                        If one team gets three or more tier 8+ players and the other doesn&apos;t, that&apos;s a problem.
+                        Capper is the most crucial and scarcest role, so the balancer spreads the best cappers across both teams rather than just matching capper totals. The two elite cappers won&apos;t end up on the same side.
                       </p>
                     </div>
                   </li>
@@ -822,16 +804,43 @@ export default function TeamBalancer() {
                     <div>
                       <strong className="text-text-bright">Even role spread</strong>
                       <p className="text-sm text-text-dim mt-1">
-                        Each team should have similar total ratings in every role, not just overall.
+                        Beyond capping, each team should have similar total ratings in every other role (Chase, Camp, Cleaner, Support) — not just a matching overall score.
                       </p>
                     </div>
                   </li>
                   <li className="flex items-start gap-3">
                     <span className="text-primary font-mono font-bold">•</span>
                     <div>
-                      <strong className="text-text-bright">Don&apos;t stack the top player</strong>
+                      <strong className="text-text-bright">Top-3 vs Top-3</strong>
                       <p className="text-sm text-text-dim mt-1">
-                        The #1 player shouldn&apos;t be teamed up with too many other top-tier players.
+                        The three strongest players on each team should be close in combined strength.
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-primary font-mono font-bold">•</span>
+                    <div>
+                      <strong className="text-text-bright">Bottom-3 vs Bottom-3</strong>
+                      <p className="text-sm text-text-dim mt-1">
+                        Same idea for the three weakest, so one team doesn&apos;t get a much lower floor.
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-primary font-mono font-bold">•</span>
+                    <div>
+                      <strong className="text-text-bright">No stacked elites</strong>
+                      <p className="text-sm text-text-dim mt-1">
+                        One team shouldn&apos;t hoard the tier 8+ players while the other goes without.
+                      </p>
+                    </div>
+                  </li>
+                  <li className="flex items-start gap-3">
+                    <span className="text-primary font-mono font-bold">•</span>
+                    <div>
+                      <strong className="text-text-bright">Don&apos;t stack the #1</strong>
+                      <p className="text-sm text-text-dim mt-1">
+                        The single best player shouldn&apos;t be surrounded by too many other top-tier teammates.
                       </p>
                     </div>
                   </li>
@@ -840,13 +849,13 @@ export default function TeamBalancer() {
                     <div>
                       <strong className="text-text-bright">Mic balance</strong>
                       <p className="text-sm text-text-dim mt-1">
-                        Light tiebreaker. Tries to spread mic users evenly.
+                        A light tiebreaker that spreads mic users evenly.
                       </p>
                     </div>
                   </li>
                 </ul>
                 <p className="leading-relaxed mt-4">
-                  The balancer weighs all of these together and picks the split with the lowest combined penalty.
+                  The balancer combines all of these into one score and returns the split with the lowest total penalty — plus a couple of close alternatives in case the top pick doesn&apos;t feel right.
                 </p>
               </section>
 
