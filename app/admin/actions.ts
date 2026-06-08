@@ -435,7 +435,7 @@ export async function getMatchStatsByMonth(year: number, month: number) {
 
     const { data, error } = await supabase
       .from("match_stats")
-      .select("match_id, player_id, flag_hold_ms, dbs_kills, captures, returns, kills")
+      .select("match_id, player_id, flag_hold_ms, dbs_kills, captures, returns, kills, deaths, time_played")
       .in("match_id", matchIds)
 
     if (error) {
