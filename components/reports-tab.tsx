@@ -8,6 +8,7 @@ import type { Player } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
 import { TierChangelog } from "@/components/tier-changelog"
+import { EloLeaderboard } from "@/components/elo-leaderboard"
 import {
   LineChart,
   Line,
@@ -74,7 +75,7 @@ export function ReportsTab() {
   const [matchStats, setMatchStats] = useState<MatchStatRow[]>([])
   const [players, setPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
-  const [currentView, setCurrentView] = useState<"stats" | "leaderboard">("stats")
+  const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "elo">("stats")
   const [isAdmin, setIsAdmin] = useState(false)
 
   // Check if user is admin
@@ -107,12 +108,15 @@ export function ReportsTab() {
   const isCurrentMonth = selectedYear === now.getFullYear() && selectedMonth === now.getMonth() + 1
   const showLeaderboard = !isCurrentMonth || isAdmin
 
-  // Force view back to stats if leaderboard becomes unavailable
+  // Force view back to stats if the selected view becomes unavailable to this user.
   useEffect(() => {
     if (!showLeaderboard && currentView === "leaderboard") {
       setCurrentView("stats")
     }
-  }, [showLeaderboard, currentView])
+    if (!isAdmin && currentView === "elo") {
+      setCurrentView("stats")
+    }
+  }, [showLeaderboard, isAdmin, currentView])
 
   const canGoNext = !(selectedYear === now.getFullYear() && selectedMonth === now.getMonth() + 1)
 
@@ -569,6 +573,18 @@ export function ReportsTab() {
             Leaderboard
           </button>
         )}
+        {isAdmin && (
+          <button
+            onClick={() => setCurrentView("elo")}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              currentView === "elo"
+                ? "bg-[var(--color-primary)] text-[var(--color-background)]"
+                : "bg-[var(--color-surface)] text-[var(--color-text-dim)] hover:bg-[var(--color-border)]/50"
+            }`}
+          >
+            ELO
+          </button>
+        )}
       </div>
 
       {/* Admin preview notice */}
@@ -578,7 +594,11 @@ export function ReportsTab() {
         </div>
       )}
 
-      {totalMatches === 0 ? (
+      {currentView === "elo" ? (
+        // ELO is a running, all-time rating — render it regardless of the selected month.
+        // The month selector above drives the ELO view's own All-time / Monthly toggle.
+        <EloLeaderboard year={selectedYear} month={selectedMonth} />
+      ) : totalMatches === 0 ? (
         <div className="text-center py-12 text-[var(--color-text-dim)]">
           <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-50" />
           <p>No matches logged in {MONTH_NAMES[selectedMonth - 1]} {selectedYear}</p>
