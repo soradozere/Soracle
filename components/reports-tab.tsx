@@ -52,6 +52,8 @@ interface MatchStatRow {
   captures: number
   returns: number
   kills: number
+  deaths: number
+  time_played: number | null
 }
 
 const MONTH_NAMES = [
@@ -336,11 +338,11 @@ export function ReportsTab() {
 
   const statAgg = new Map<
     string,
-    { flagHoldMs: number; dbsKills: number; captures: number; returns: number; kills: number; matches: number }
+    { flagHoldMs: number; dbsKills: number; captures: number; returns: number; kills: number; deaths: number; timePlayed: number; matches: number }
   >()
   for (const row of matchStats) {
     if (!statAgg.has(row.player_id)) {
-      statAgg.set(row.player_id, { flagHoldMs: 0, dbsKills: 0, captures: 0, returns: 0, kills: 0, matches: 0 })
+      statAgg.set(row.player_id, { flagHoldMs: 0, dbsKills: 0, captures: 0, returns: 0, kills: 0, deaths: 0, timePlayed: 0, matches: 0 })
     }
     const agg = statAgg.get(row.player_id)!
     agg.flagHoldMs += row.flag_hold_ms || 0
@@ -348,6 +350,8 @@ export function ReportsTab() {
     agg.captures += row.captures || 0
     agg.returns += row.returns || 0
     agg.kills += row.kills || 0
+    agg.deaths += row.deaths || 0
+    agg.timePlayed += row.time_played || 0
     agg.matches += 1
   }
 
@@ -376,15 +380,19 @@ export function ReportsTab() {
       .filter((p) => p.captures > 0)
       .sort((a, b) => b.captures - a.captures)[0] || null
 
-  const topReturner =
+  // Returns per minute of play (TIME-SUM is already in minutes), not raw return count.
+  const topRetsPerMin =
     [...qualifiedStatPlayers]
-      .filter((p) => p.returns > 0)
-      .sort((a, b) => b.returns - a.returns)[0] || null
+      .filter((p) => p.returns > 0 && p.timePlayed > 0)
+      .map((p) => ({ ...p, retsPerMin: p.returns / p.timePlayed }))
+      .sort((a, b) => b.retsPerMin - a.retsPerMin)[0] || null
 
-  const topKiller =
+  // Highest kill/death ratio (needs at least one death for a meaningful ratio).
+  const highestKd =
     [...qualifiedStatPlayers]
-      .filter((p) => p.kills > 0)
-      .sort((a, b) => b.kills - a.kills)[0] || null
+      .filter((p) => p.kills > 0 && p.deaths > 0)
+      .map((p) => ({ ...p, kd: p.kills / p.deaths }))
+      .sort((a, b) => b.kd - a.kd)[0] || null
 
   // Most Caps per Run — efficiency (minutes of flag hold per cap; lower = better).
   // To avoid low-volume flukes, only "regular cappers" qualify: caps >= 40% of the
@@ -858,16 +866,19 @@ export function ReportsTab() {
             <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
               <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
                 <Shield className="w-5 h-5 text-[#00d4ff]" />
-                Top Returner
+                Rets / Min
               </h3>
-              {topReturner ? (
+              {topRetsPerMin ? (
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{topReturner.name}</div>
-                  <div className="text-2xl font-bold text-[#00d4ff] mb-2">
-                    {topReturner.returns} returns
+                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{topRetsPerMin.name}</div>
+                  <div className="text-2xl font-bold text-[#00d4ff] mb-1">
+                    {topRetsPerMin.retsPerMin.toFixed(2)} rets/min
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)] mb-2">
+                    {topRetsPerMin.returns} returns · {topRetsPerMin.timePlayed} min
                   </div>
                   <div className="text-xs text-[var(--color-text-dim)] italic">
-                    Most total returns this month
+                    Most returns per minute played this month
                   </div>
                   <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
                     Players with {statHighlightMinMatches}+ stat-tracked matches
@@ -887,16 +898,19 @@ export function ReportsTab() {
             <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
               <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
                 <Sword className="w-5 h-5 text-[#ff4757]" />
-                Top Killer
+                Highest K/D
               </h3>
-              {topKiller ? (
+              {highestKd ? (
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{topKiller.name}</div>
-                  <div className="text-2xl font-bold text-[#ff4757] mb-2">
-                    {topKiller.kills} kills
+                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{highestKd.name}</div>
+                  <div className="text-2xl font-bold text-[#ff4757] mb-1">
+                    {highestKd.kd.toFixed(2)} K/D
+                  </div>
+                  <div className="text-xs text-[var(--color-text-dim)] mb-2">
+                    {highestKd.kills} kills · {highestKd.deaths} deaths
                   </div>
                   <div className="text-xs text-[var(--color-text-dim)] italic">
-                    Most total kills this month
+                    Highest kill/death ratio this month
                   </div>
                   <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
                     Players with {statHighlightMinMatches}+ stat-tracked matches
