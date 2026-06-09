@@ -25,6 +25,10 @@ export interface BalanceResult {
   blueMic: number
   redTierTotal: number
   blueTierTotal: number
+  // Present only for the admin-only "Balance by ELO" mode — team average ELO. When set,
+  // the balance UI shows ELO totals instead of tier totals.
+  redEloTotal?: number
+  blueEloTotal?: number
   swapText: string
   wasRandomized: boolean
 }

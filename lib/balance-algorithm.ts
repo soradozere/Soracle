@@ -30,7 +30,7 @@ const CONFIG = {
     ELITE_THRESHOLD: 8, // a capper rated 8+ is elite and scarce
     BEST_WEIGHT: 5.0, // balance each team's single best capper
     TOP_2_WEIGHT: 2.5, // balance each team's top-2 capper pool
-    STACK_PENALTY: 1200, // flat penalty when both elite cappers land on one team
+    CONCENTRATION_WEIGHT: 300, // squared diff in elite-capper COUNT per team (2-v-0 ≈ 1200)
   },
   cluster: {
     TOP_TWO_PENALTY: 8000,
@@ -107,17 +107,15 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const top2Capper2 = cappers2.slice(0, 2).reduce((a, b) => a + b, 0)
   score += Math.pow(top2Capper1 - top2Capper2, 2) * CONFIG.capper.TOP_2_WEIGHT
 
-  // Flat penalty when the two best cappers in the lobby are stacked on one team — but
-  // only when both are genuinely elite (and thus scarce). Mid-tier pairs are handled by
-  // the weighted terms above without forcing a split.
-  const rankedCappers = [...team1, ...team2]
-    .map((p) => ({ name: p.name, capper: Math.max(p.roles.Capper, 0), team: team1.includes(p) ? 1 : 2 }))
-    .sort((a, b) => b.capper - a.capper)
-  if (rankedCappers.length >= 2 && rankedCappers[1].capper >= CONFIG.capper.ELITE_THRESHOLD) {
-    if (rankedCappers[0].team === rankedCappers[1].team) {
-      score += CONFIG.capper.STACK_PENALTY
-    }
-  }
+  // Elite-capper concentration. Cappers are the scarcest role, so the elite ones (8+)
+  // must be split across teams. We count them per side rather than checking whether the
+  // top two individuals share a team: counting is order-independent and graduated, so it
+  // catches 2-v-0, 3-v-1 and 4-v-2 monopolies alike. The old top-two check silently
+  // failed whenever the second-best capper rating tied across teams — the search would
+  // keep the argument order in which the flat penalty didn't fire.
+  const eliteCappers1 = team1.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
+  const eliteCappers2 = team2.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
+  score += Math.pow(eliteCappers1 - eliteCappers2, 2) * CONFIG.capper.CONCENTRATION_WEIGHT
 
   // 4a. Top-tier distribution (dynamic threshold)
   const allTiers = [...team1, ...team2].map((p) => p.tierValue).sort((a, b) => b - a)
@@ -419,6 +417,218 @@ export function evaluateTeams(
 
   const result = evaluateSplit(redTeam, blueTeam, topPlayer, topCluster)
   return { score: result.score, tierDiff: result.tierDiff }
+}
+
+// Fallback for any selected player missing from the ELO map (computeMonthlyEloMap seeds
+// every roster player, so this only hits truly unknown names). Neutral mid-tier (tier 5
+// → 1000 + 5×100), matching NEUTRAL_SEED / DEFAULT_ELO in lib/elo.ts.
+const DEFAULT_ELO = 1500
+
+// Weights for the admin-only "Balance by ELO" mode. ELO (in raw points) is the primary
+// strength signal; the role terms below are layered on so the split still respects the
+// same coverage / role-balance rules as the tier balancer. These are deliberately on the
+// same order of magnitude as the ELO gap (team-average ELO differences are typically
+// 0–100) so roles meaningfully break ties between ELO-close splits without overriding a
+// genuinely large ELO gap — except coverage, which is treated as a near-constraint.
+// Calibrated by eye; tune once there's real match data on how it performs.
+const ELO_CONFIG = {
+  TOP3_WEIGHT: 0.5, // light penalty for stacking the strongest players by ELO
+  COVERAGE_PENALTY: 100, // per critical role (Capper, Chase) a team can't field at all
+  ROLE_BALANCE_WEIGHT: 0.6, // per-role sum difference, keeps every role even across teams
+  CAPPER_BEST_WEIGHT: 2.0, // split each team's single best capper (scarcest role)
+  CAPPER_STACK_PENALTY: 50, // both elite cappers (8+) landing on one team
+  MIC_WEIGHT: 0.3,
+}
+
+/**
+ * Score one 6v6 split for ELO mode. Primary term is the team-average ELO gap; the rest
+ * mirror the tier balancer's role logic (critical-role coverage, per-role strength
+ * balance, capper top-end split + elite-capper stack penalty, mic). Returns the full
+ * score (used for ranking and the confidence %) plus avgDiff (the raw ELO gap, shown on
+ * the card) and the team ELO sums.
+ */
+function evaluateEloSplit(team1: Player[], team2: Player[], eloOf: (p: Player) => number) {
+  const sum1 = team1.reduce((s, p) => s + eloOf(p), 0)
+  const sum2 = team2.reduce((s, p) => s + eloOf(p), 0)
+  const avgDiff = Math.abs(sum1 - sum2) / 6
+
+  let score = avgDiff
+
+  // Top-3 ELO balance — don't pile the strongest players on one side.
+  const top3 = (team: Player[]) =>
+    team
+      .map(eloOf)
+      .sort((a, b) => b - a)
+      .slice(0, 3)
+      .reduce((a, b) => a + b, 0)
+  score += (Math.abs(top3(team1) - top3(team2)) / 3) * ELO_CONFIG.TOP3_WEIGHT
+
+  // Critical role coverage — every team needs a viable Capper and Chaser, or it's
+  // unplayable no matter how even the ELO is. Heavy flat penalty per missing role.
+  const criticalRoles = ["Capper", "Chase"] as const
+  criticalRoles.forEach((role) => {
+    const viable1 = team1.filter((p) => p.roles[role] >= CONFIG.roles.VIABLE_THRESHOLD).length
+    const viable2 = team2.filter((p) => p.roles[role] >= CONFIG.roles.VIABLE_THRESHOLD).length
+    if (viable1 === 0 || viable2 === 0) score += ELO_CONFIG.COVERAGE_PENALTY
+  })
+
+  // Role strength balance — keep each role's total close across teams.
+  ROLES.forEach((role) => {
+    const r1 = team1.reduce((s, p) => s + Math.max(p.roles[role], 0), 0)
+    const r2 = team2.reduce((s, p) => s + Math.max(p.roles[role], 0), 0)
+    score += Math.abs(r1 - r2) * ELO_CONFIG.ROLE_BALANCE_WEIGHT
+  })
+
+  // Capper top-end split — balance each team's best capper, and flat-penalise stacking
+  // both elite cappers on one side (mirrors the tier balancer's capper handling).
+  const cappers1 = team1.map((p) => Math.max(p.roles.Capper, 0)).sort((a, b) => b - a)
+  const cappers2 = team2.map((p) => Math.max(p.roles.Capper, 0)).sort((a, b) => b - a)
+  score += Math.abs(cappers1[0] - cappers2[0]) * ELO_CONFIG.CAPPER_BEST_WEIGHT
+
+  const rankedCappers = [...team1, ...team2]
+    .map((p) => ({ capper: Math.max(p.roles.Capper, 0), team: team1.includes(p) ? 1 : 2 }))
+    .sort((a, b) => b.capper - a.capper)
+  if (
+    rankedCappers.length >= 2 &&
+    rankedCappers[1].capper >= CONFIG.capper.ELITE_THRESHOLD &&
+    rankedCappers[0].team === rankedCappers[1].team
+  ) {
+    score += ELO_CONFIG.CAPPER_STACK_PENALTY
+  }
+
+  // Mic balance — light tiebreaker.
+  const mic1 = team1.filter((p) => p.mic).length
+  const mic2 = team2.filter((p) => p.mic).length
+  score += Math.abs(mic1 - mic2) * ELO_CONFIG.MIC_WEIGHT
+
+  return { score, avgDiff, sum1, sum2 }
+}
+
+/**
+ * Admin-only "Balance by ELO" mode. Splits exactly 12 players into two teams of six,
+ * balancing primarily on this month's ELO while still honouring role coverage and role
+ * balance (see evaluateEloSplit). Tiers are not used for strength — ELO replaces them —
+ * but role ranks fully count, and disabled roles / Off-Role are respected via
+ * applyDisabledRoles. Returns 3 options in the same shape as balanceTeamsWithOptions.
+ */
+export function balanceTeamsByElo(
+  selectedNames: string[],
+  allPlayers: Player[],
+  eloMap: Map<string, number>,
+): BalanceOption[] {
+  const players = selectedNames
+    .map((name) => allPlayers.find((p) => p.name === name))
+    .filter((p): p is Player => p !== undefined)
+    .map(applyDisabledRoles)
+
+  if (players.length !== 12) {
+    throw new Error("Must select exactly 12 players")
+  }
+
+  const eloOf = (p: Player) => eloMap.get(p.name) ?? DEFAULT_ELO
+  const evaluate = (team1: Player[], team2: Player[]) => evaluateEloSplit(team1, team2, eloOf)
+
+  const allSplits = getCombinations(players, 6)
+  const results = allSplits.map((team1) => {
+    const team2 = players.filter((p) => !team1.includes(p))
+    return { ...evaluate(team1, team2), team1: [...team1], team2 }
+  })
+
+  results.sort((a, b) => a.score - b.score)
+
+  // Always take the best, then fill up to 3 with non-mirror alternatives.
+  const unique: typeof results = [results[0]]
+  for (let i = 1; i < results.length && unique.length < 3; i++) {
+    const candidate = results[i]
+    if (!unique.some((u) => areTeamsSwapped(candidate.team1, candidate.team2, u.team1, u.team2))) {
+      unique.push(candidate)
+    }
+  }
+  while (unique.length < 3 && unique.length < results.length) unique.push(results[unique.length])
+
+  return unique.map((result, index) => {
+    let [redTeam, blueTeam] = [result.team1, result.team2].map((team) =>
+      [...team].sort((a, b) => eloOf(b) - eloOf(a)),
+    )
+
+    const tierTotal = (team: Player[]) => team.reduce((s, p) => s + p.tierValue, 0)
+    const eloAvg = (team: Player[]) => Math.round(team.reduce((s, p) => s + eloOf(p), 0) / team.length)
+    const micCount = (team: Player[]) => team.filter((p) => p.mic).length
+
+    // Suggested swap: the single red/blue exchange that most reduces the ELO gap.
+    let swapText = "No swap suggested"
+    let bestSwap: { red: string; blue: string; newDiff: number } | null = null
+    let bestScore = result.score
+    redTeam.forEach((r) => {
+      blueTeam.forEach((b) => {
+        const newRed = redTeam.filter((p) => p.name !== r.name).concat([b])
+        const newBlue = blueTeam.filter((p) => p.name !== b.name).concat([r])
+        const e = evaluate(newRed, newBlue)
+        if (e.score < bestScore) {
+          bestScore = e.score
+          bestSwap = { red: r.name, blue: b.name, newDiff: e.avgDiff }
+        }
+      })
+    })
+    if (bestSwap) {
+      const s = bestSwap as { red: string; blue: string; newDiff: number }
+      swapText = `Suggested Swap: ${s.red} ↔ ${s.blue} (ELO gap: ${result.avgDiff.toFixed(0)} → ${s.newDiff.toFixed(0)})`
+    }
+
+    let redEloTotal = eloAvg(redTeam)
+    let blueEloTotal = eloAvg(blueTeam)
+    let redTierTotal = tierTotal(redTeam)
+    let blueTierTotal = tierTotal(blueTeam)
+    let redMic = micCount(redTeam)
+    let blueMic = micCount(blueTeam)
+
+    // Weaker (lower ELO) team takes Blue — same handicap rule as the tier balancer.
+    let wasRandomized = false
+    let flip = false
+    if (redEloTotal === blueEloTotal) {
+      wasRandomized = true
+      flip = Math.random() < 0.5
+    } else {
+      flip = redEloTotal < blueEloTotal
+    }
+    if (flip) {
+      ;[redTeam, blueTeam] = [blueTeam, redTeam]
+      ;[redEloTotal, blueEloTotal] = [blueEloTotal, redEloTotal]
+      ;[redTierTotal, blueTierTotal] = [blueTierTotal, redTierTotal]
+      ;[redMic, blueMic] = [blueMic, redMic]
+    }
+
+    const balanceResult: BalanceResult = {
+      teamRed: redTeam.map((p) => p.name),
+      teamBlue: blueTeam.map((p) => p.name),
+      redMic,
+      blueMic,
+      redTierTotal,
+      blueTierTotal,
+      redEloTotal,
+      blueEloTotal,
+      swapText,
+      wasRandomized,
+    }
+
+    let label = "Slight Wildcard"
+    let description = "Shuffled for variety"
+    if (index === 0) {
+      label = "Perfect Balance"
+      description = "Closest ELO match"
+    } else if (result.avgDiff < 40) {
+      label = "Fair Fight"
+      description = `Teams within ${result.avgDiff.toFixed(0)} avg ELO`
+    } else {
+      label = "Slight Edge"
+      description = "Playable, but one side's a bit stronger"
+    }
+
+    // Full score (ELO gap + role penalties) drives the confidence % — same curve and
+    // scale as the tier balancer — while the label/description above reflect the raw ELO
+    // gap so the card still reads as an ELO balance.
+    return { result: balanceResult, score: result.score, label, description }
+  })
 }
 
 // Keep original function for backward compatibility
