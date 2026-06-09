@@ -64,6 +64,13 @@ export const BalanceOptions = memo(function BalanceOptions({
           const blueTier = option.result.blueTierTotal
           const tierDiff = Math.abs(redTier - blueTier)
 
+          // ELO mode (admin "Balance by ELO") carries team average ELO; show that
+          // instead of tier totals so the numbers match how the split was scored.
+          const isElo = option.result.redEloTotal !== undefined
+          const redElo = option.result.redEloTotal ?? 0
+          const blueElo = option.result.blueEloTotal ?? 0
+          const eloDiff = Math.abs(redElo - blueElo)
+
           return (
             <button
               key={index}
@@ -91,24 +98,49 @@ export const BalanceOptions = memo(function BalanceOptions({
               </div>
 
               <div className="space-y-2 text-sm">
-                <div className="flex justify-between items-center">
-                  <span className="text-[#c5c6c7]">Tier Difference:</span>
-                  <span
-                    className={`font-mono font-bold ${
-                      tierDiff <= 1 ? "text-[#27ae60]" : tierDiff <= 2 ? "text-[#f39c12]" : "text-[#ff4757]"
-                    }`}
-                  >
-                    {tierDiff.toFixed(1)}
-                  </span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-[#c5c6c7]">Red Tier:</span>
-                  <span className="font-mono text-[#ff4757]">{redTier}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-[#c5c6c7]">Blue Tier:</span>
-                  <span className="font-mono text-[#62d6e8]">{blueTier}</span>
-                </div>
+                {isElo ? (
+                  <>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#c5c6c7]">ELO Difference:</span>
+                      <span
+                        className={`font-mono font-bold ${
+                          eloDiff <= 25 ? "text-[#27ae60]" : eloDiff <= 60 ? "text-[#f39c12]" : "text-[#ff4757]"
+                        }`}
+                      >
+                        {eloDiff}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#c5c6c7]">Red ELO:</span>
+                      <span className="font-mono text-[#ff4757]">{redElo}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#c5c6c7]">Blue ELO:</span>
+                      <span className="font-mono text-[#62d6e8]">{blueElo}</span>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#c5c6c7]">Tier Difference:</span>
+                      <span
+                        className={`font-mono font-bold ${
+                          tierDiff <= 1 ? "text-[#27ae60]" : tierDiff <= 2 ? "text-[#f39c12]" : "text-[#ff4757]"
+                        }`}
+                      >
+                        {tierDiff.toFixed(1)}
+                      </span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#c5c6c7]">Red Tier:</span>
+                      <span className="font-mono text-[#ff4757]">{redTier}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                      <span className="text-[#c5c6c7]">Blue Tier:</span>
+                      <span className="font-mono text-[#62d6e8]">{blueTier}</span>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-between items-center">
                   <span className="text-[#c5c6c7]">Balance:</span>
                   {(() => {
