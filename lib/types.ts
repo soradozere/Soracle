@@ -29,7 +29,6 @@ export interface BalanceResult {
   // the balance UI shows ELO totals instead of tier totals.
   redEloTotal?: number
   blueEloTotal?: number
-  swapText: string
   wasRandomized: boolean
 }
 

@@ -41,10 +41,9 @@ export const TeamDisplay = memo(function TeamDisplay({ result, players, onCopy, 
 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
-      {/* Swap Suggestion - Added glass effect */}
+      {/* Action bar - Added glass effect */}
       <div className="bg-[#1f2833]/50 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
-        <div className="flex items-center justify-between">
-          <p className="text-[#c5c6c7] text-sm">{result.swapText}</p>
+        <div className="flex items-center justify-end">
           <div className="flex gap-2">
             <button
               onClick={onCopy}
