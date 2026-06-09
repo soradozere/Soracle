@@ -30,7 +30,7 @@ const CONFIG = {
     ELITE_THRESHOLD: 8, // a capper rated 8+ is elite and scarce
     BEST_WEIGHT: 5.0, // balance each team's single best capper
     TOP_2_WEIGHT: 2.5, // balance each team's top-2 capper pool
-    STACK_PENALTY: 1200, // flat penalty when both elite cappers land on one team
+    CONCENTRATION_WEIGHT: 300, // squared diff in elite-capper COUNT per team (2-v-0 ≈ 1200)
   },
   cluster: {
     TOP_TWO_PENALTY: 8000,
@@ -107,17 +107,15 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const top2Capper2 = cappers2.slice(0, 2).reduce((a, b) => a + b, 0)
   score += Math.pow(top2Capper1 - top2Capper2, 2) * CONFIG.capper.TOP_2_WEIGHT
 
-  // Flat penalty when the two best cappers in the lobby are stacked on one team — but
-  // only when both are genuinely elite (and thus scarce). Mid-tier pairs are handled by
-  // the weighted terms above without forcing a split.
-  const rankedCappers = [...team1, ...team2]
-    .map((p) => ({ name: p.name, capper: Math.max(p.roles.Capper, 0), team: team1.includes(p) ? 1 : 2 }))
-    .sort((a, b) => b.capper - a.capper)
-  if (rankedCappers.length >= 2 && rankedCappers[1].capper >= CONFIG.capper.ELITE_THRESHOLD) {
-    if (rankedCappers[0].team === rankedCappers[1].team) {
-      score += CONFIG.capper.STACK_PENALTY
-    }
-  }
+  // Elite-capper concentration. Cappers are the scarcest role, so the elite ones (8+)
+  // must be split across teams. We count them per side rather than checking whether the
+  // top two individuals share a team: counting is order-independent and graduated, so it
+  // catches 2-v-0, 3-v-1 and 4-v-2 monopolies alike. The old top-two check silently
+  // failed whenever the second-best capper rating tied across teams — the search would
+  // keep the argument order in which the flat penalty didn't fire.
+  const eliteCappers1 = team1.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
+  const eliteCappers2 = team2.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
+  score += Math.pow(eliteCappers1 - eliteCappers2, 2) * CONFIG.capper.CONCENTRATION_WEIGHT
 
   // 4a. Top-tier distribution (dynamic threshold)
   const allTiers = [...team1, ...team2].map((p) => p.tierValue).sort((a, b) => b - a)
