@@ -87,7 +87,7 @@ export const TeamDisplay = memo(function TeamDisplay({ result, players, onCopy, 
               <h3 className="text-2xl font-bold text-[#ff4757] font-mono">RED TEAM</h3>
             </div>
             <div className="bg-[#ff4757] text-white px-3 py-1 rounded-md font-bold font-mono">
-              Tier: {result.redTierTotal}
+              {result.redEloTotal !== undefined ? `ELO: ${result.redEloTotal}` : `Tier: ${result.redTierTotal}`}
             </div>
           </div>
 
@@ -134,7 +134,7 @@ export const TeamDisplay = memo(function TeamDisplay({ result, players, onCopy, 
               <h3 className="text-2xl font-bold text-[#62d6e8] font-mono">BLUE TEAM</h3>
             </div>
             <div className="bg-[#62d6e8] text-[#0b0c10] px-3 py-1 rounded-md font-bold font-mono">
-              Tier: {result.blueTierTotal}
+              {result.blueEloTotal !== undefined ? `ELO: ${result.blueEloTotal}` : `Tier: ${result.blueTierTotal}`}
             </div>
           </div>
 
