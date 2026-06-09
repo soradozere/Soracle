@@ -487,19 +487,13 @@ export function PlayerManagementTable() {
               return (
                 <TableRow key={player.id}>
                   <TableCell>
-                    {isEditing ? (
-                      <Input
-                        value={editingPlayer.name || ""}
-                        onChange={(e) =>
-                          setEditingPlayer({
-                            ...editingPlayer,
-                            name: e.target.value,
-                          })
-                        }
-                      />
-                    ) : (
-                      player.name
-                    )}
+                    {/* Name is intentionally NOT editable: matches store player names in
+                        red_team/blue_team arrays, so renaming here would orphan a player's
+                        match history + ELO. Use the rename_player() SQL helper
+                        (scripts/009_add_rename_player_helper.sql) to rename safely. */}
+                    <span title={isEditing ? "Name can't be edited here — use the rename_player() SQL helper" : undefined}>
+                      {player.name}
+                    </span>
                   </TableCell>
                   <TableCell>
                     {isEditing ? (
