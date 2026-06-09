@@ -21,7 +21,8 @@ import {
 //   • Monthly  — replays only the selected month's matches, re-seeded from tier. This
 //                resets on the 1st of each month, exactly like the wins/losses stats.
 // Both are seeded from tier and use the same maths; they differ only in which matches
-// are replayed. Suggestions are an all-time judgment, so they use the all-time rating.
+// are replayed. Each scope has its own rank suggestions, computed from that scope's
+// rating — all-time placement vs over/under-ranked for the month.
 
 // Seed each player from their CURRENT tier so day-one ELO order mirrors tier order
 // (Tier 10 = strongest = highest seed). Real W/L results then pull ratings away from
@@ -105,7 +106,8 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
   const [monthBoard, setMonthBoard] = useState<BoardRow[]>([])
   const [monthMinMatches, setMonthMinMatches] = useState(0)
   const [monthMatchCount, setMonthMatchCount] = useState(0)
-  const [suggestions, setSuggestions] = useState<EloSuggestion[]>([])
+  const [allSuggestions, setAllSuggestions] = useState<EloSuggestion[]>([])
+  const [monthSuggestions, setMonthSuggestions] = useState<EloSuggestion[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -309,54 +311,60 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
       setMonthMinMatches(minMonth)
       setMonthMatchCount(monthCount)
 
-      // Histogram-preserving relative suggestions (all-time): re-deal qualified players
-      // into the SAME tier slots they currently occupy, ordered by ELO. The top ELOs
-      // fill the Tier 10 slots, the next batch Tier 9, etc. A player whose ELO would
-      // land them in a different tier than they sit in today is over/under-ranked.
-      // This can never inflate the league — it's a reshuffle, not a ratchet.
-      const qualified = allBoard.filter((p) => p.matches >= MIN_MATCHES_THRESHOLD)
+      // Histogram-preserving relative suggestions: re-deal the board's players into the
+      // SAME tier slots they currently occupy, ordered by ELO. The top ELOs fill the
+      // Tier 10 slots, the next batch Tier 9, etc. A player whose ELO would land them in
+      // a different tier than they sit in today is over/under-ranked. This can never
+      // inflate the league — it's a reshuffle, not a ratchet. The board is already gated
+      // (5+ all-time matches, or 30% of the month) so we treat every row as qualified.
+      const buildSuggestions = (board: BoardRow[]): EloSuggestion[] => {
+        const histogram = new Map<number, number>()
+        for (const p of board) histogram.set(p.tier, (histogram.get(p.tier) || 0) + 1)
 
-      const histogram = new Map<number, number>()
-      for (const p of qualified) histogram.set(p.tier, (histogram.get(p.tier) || 0) + 1)
-
-      const sortedByElo = [...qualified].sort((a, b) => b.elo - a.elo)
-      const impliedTier = new Map<string, number>()
-      let idx = 0
-      for (let tier = 10; tier >= 1; tier--) {
-        const count = histogram.get(tier) || 0
-        for (let i = 0; i < count; i++) {
-          const p = sortedByElo[idx++]
-          if (!p) break
-          impliedTier.set(p.name, tier)
+        const sortedByElo = [...board].sort((a, b) => b.elo - a.elo)
+        const impliedTier = new Map<string, number>()
+        let idx = 0
+        for (let tier = 10; tier >= 1; tier--) {
+          const count = histogram.get(tier) || 0
+          for (let i = 0; i < count; i++) {
+            const p = sortedByElo[idx++]
+            if (!p) break
+            impliedTier.set(p.name, tier)
+          }
         }
-      }
 
-      const newSuggestions: EloSuggestion[] = []
-      for (const p of qualified) {
-        const implied = impliedTier.get(p.name)
-        if (implied === undefined || implied === p.tier) continue
-        // Move at most one tier per cycle (mirrors the wins-based tool).
-        const direction = implied > p.tier ? 1 : -1
-        const suggestedTier = Math.max(1, Math.min(10, p.tier + direction))
-        if (suggestedTier === p.tier) continue
-        newSuggestions.push({
-          playerName: p.name,
-          currentTier: p.tier,
-          suggestedTier,
-          impliedTier: implied,
-          elo: p.elo,
-          matches: p.matches,
-          isPromotion: direction > 0,
+        const result: EloSuggestion[] = []
+        for (const p of board) {
+          const implied = impliedTier.get(p.name)
+          if (implied === undefined || implied === p.tier) continue
+          // Move at most one tier per cycle (mirrors the wins-based tool).
+          const direction = implied > p.tier ? 1 : -1
+          const suggestedTier = Math.max(1, Math.min(10, p.tier + direction))
+          if (suggestedTier === p.tier) continue
+          result.push({
+            playerName: p.name,
+            currentTier: p.tier,
+            suggestedTier,
+            impliedTier: implied,
+            elo: p.elo,
+            matches: p.matches,
+            isPromotion: direction > 0,
+          })
+        }
+
+        result.sort((a, b) => {
+          const gapA = Math.abs(a.impliedTier - a.currentTier)
+          const gapB = Math.abs(b.impliedTier - b.currentTier)
+          if (gapB !== gapA) return gapB - gapA
+          return b.elo - a.elo
         })
+        return result
       }
 
-      newSuggestions.sort((a, b) => {
-        const gapA = Math.abs(a.impliedTier - a.currentTier)
-        const gapB = Math.abs(b.impliedTier - b.currentTier)
-        if (gapB !== gapA) return gapB - gapA
-        return b.elo - a.elo
-      })
-      setSuggestions(newSuggestions)
+      // All-time uses the tier-anchored rating; monthly uses this month's flat-seeded
+      // form, so the monthly board flags who's over/under-ranked for the month.
+      setAllSuggestions(buildSuggestions(allBoard))
+      setMonthSuggestions(buildSuggestions(mBoard))
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to calculate ELO")
     }
@@ -391,6 +399,7 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
   }
 
   const board = scope === "alltime" ? allTimeBoard : monthBoard
+  const suggestions = scope === "alltime" ? allSuggestions : monthSuggestions
   const monthLabel = `${MONTH_NAMES[month - 1]} ${year}`
 
   return (
@@ -483,11 +492,12 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
                 <div>
                   <h4 className="font-bold text-[var(--color-text)] mb-1">Rank suggestions</h4>
                   <p className="text-[var(--color-text-dim)]">
-                    Among players with {MIN_MATCHES_THRESHOLD}+ matches, everyone is re-sorted by ELO and dealt back
-                    into the <em>same</em> tier slots that exist today — the highest ELOs take the Tier 10 spots, and
-                    so on. If your ELO would land you in a different tier than you currently hold, you get a
-                    promote/demote suggestion (capped to one tier at a time). It re-shuffles the existing tiers, so
-                    it can never inflate the league.
+                    Qualifying players are re-sorted by ELO and dealt back into the <em>same</em> tier slots that
+                    exist today — the highest ELOs take the Tier 10 spots, and so on. If your ELO would land you in a
+                    different tier than you currently hold, you get a promote/demote suggestion (capped to one tier at
+                    a time). It re-shuffles the existing tiers, so it can never inflate the league. The all-time view
+                    judges this on your all-time rating; the monthly view judges it on this month&apos;s form, so it
+                    flags who&apos;s over- or under-ranked <em>for the month</em>.
                   </p>
                 </div>
                 <div>
@@ -497,7 +507,7 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
                     replays only that month&apos;s matches and starts <em>everyone level</em> — so it&apos;s pure
                     this-month form, not tier order, and high-tier players don&apos;t auto-sit at the top. It resets
                     on the 1st of each month, like the wins/losses stats, and requires 30%+ of the month&apos;s
-                    matches. Suggestions are an all-time judgment, so they only appear in the all-time view.
+                    matches. Each view has its own rank suggestions — all-time vs monthly form.
                   </p>
                 </div>
                 <div>
@@ -623,22 +633,27 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
         )}
       </div>
 
-      {/* ELO Rank Suggestions — all-time only */}
-      {scope === "alltime" && (
+      {/* ELO Rank Suggestions — all-time uses the tier-anchored rating; monthly flags
+          who's over/under-ranked based on this month's form. */}
+      {(
         <div>
           <h3 className="text-lg font-bold text-[var(--color-primary)] mb-1 flex items-center gap-2">
             <TrendingUp className="w-5 h-5" />
-            ELO Rank Suggestions
+            {scope === "alltime" ? "ELO Rank Suggestions" : `Rank Suggestions — ${monthLabel}`}
           </h3>
           <p className="text-sm text-[var(--color-text-dim)] mb-4">
-            Players whose ELO position places them in a different tier than they currently hold (capped to one tier per cycle).
+            {scope === "alltime"
+              ? "Players whose all-time ELO places them in a different tier than they currently hold (capped to one tier per cycle)."
+              : `Players whose ${monthLabel} form places them in a different tier than they currently hold — i.e. over- or under-ranked for the month (capped to one tier per cycle).`}
           </p>
 
           {suggestions.length === 0 ? (
             <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-8 text-center">
               <p className="text-[var(--color-text-dim)] mb-1">No ELO-based suggestions.</p>
               <p className="text-[var(--color-text-dim)] text-sm">
-                Everyone with {MIN_MATCHES_THRESHOLD}+ matches sits in the tier their ELO implies.
+                {scope === "alltime"
+                  ? `Everyone with ${MIN_MATCHES_THRESHOLD}+ matches sits in the tier their ELO implies.`
+                  : `Everyone qualifying for ${monthLabel} sits in the tier their form implies.`}
               </p>
             </div>
           ) : (
