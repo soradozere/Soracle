@@ -300,38 +300,6 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
     let redTierTotal = result.tier1
     let blueTierTotal = result.tier2
 
-    // Generate swap suggestion by re-running full evaluateSplit on each candidate swap.
-    // This ensures the suggestion respects role coverage, elite concentration, variance etc.
-    // rather than only tier diff + top-3.
-    let swapText = "No swap suggested"
-    let bestSwap: { red: string; blue: string; newDiff: number } | null = null
-
-    const topPlayer = [...redTeam, ...blueTeam].reduce((a, b) => (a.tierValue >= b.tierValue ? a : b))
-    let bestSwapScore = result.score
-
-    redTeam.forEach((r) => {
-      blueTeam.forEach((b) => {
-        // Simulate the swap
-        const newRedTeam = redTeam.filter((p) => p.name !== r.name).concat([b])
-        const newBlueTeam = blueTeam.filter((p) => p.name !== b.name).concat([r])
-
-        const evaluation = evaluateSplit(newRedTeam, newBlueTeam, topPlayer, topCluster)
-
-        if (evaluation.score < bestSwapScore) {
-          bestSwapScore = evaluation.score
-          bestSwap = {
-            red: r.name,
-            blue: b.name,
-            newDiff: evaluation.tierDiff,
-          }
-        }
-      })
-    })
-
-    if (bestSwap) {
-      swapText = `Suggested Swap: ${bestSwap.red} ↔ ${bestSwap.blue} (tier difference: ${result.tierDiff.toFixed(1)} → ${bestSwap.newDiff.toFixed(1)})`
-    }
-
     // Colour assignment: the weaker team (lower tier total) takes Blue, since the
     // Blue base is easier to hold and that handicap nudges a skewed match back toward
     // even. Only when the tier totals are exactly equal is red/blue randomised.
@@ -360,7 +328,6 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
       blueMic: blueMicCount,
       redTierTotal,
       blueTierTotal,
-      swapText,
       wasRandomized,
     }
 
@@ -436,7 +403,7 @@ const ELO_CONFIG = {
   COVERAGE_PENALTY: 100, // per critical role (Capper, Chase) a team can't field at all
   ROLE_BALANCE_WEIGHT: 0.6, // per-role sum difference, keeps every role even across teams
   CAPPER_BEST_WEIGHT: 2.0, // split each team's single best capper (scarcest role)
-  CAPPER_STACK_PENALTY: 50, // both elite cappers (8+) landing on one team
+  CAPPER_STACK_PENALTY: 50, // per elite-capper (8+) count difference between teams
   MIC_WEIGHT: 0.3,
 }
 
@@ -479,22 +446,19 @@ function evaluateEloSplit(team1: Player[], team2: Player[], eloOf: (p: Player) =
     score += Math.abs(r1 - r2) * ELO_CONFIG.ROLE_BALANCE_WEIGHT
   })
 
-  // Capper top-end split — balance each team's best capper, and flat-penalise stacking
-  // both elite cappers on one side (mirrors the tier balancer's capper handling).
+  // Capper top-end split — balance each team's best capper, and penalise stacking the
+  // elite cappers on one side (mirrors the tier balancer's capper handling).
   const cappers1 = team1.map((p) => Math.max(p.roles.Capper, 0)).sort((a, b) => b - a)
   const cappers2 = team2.map((p) => Math.max(p.roles.Capper, 0)).sort((a, b) => b - a)
   score += Math.abs(cappers1[0] - cappers2[0]) * ELO_CONFIG.CAPPER_BEST_WEIGHT
 
-  const rankedCappers = [...team1, ...team2]
-    .map((p) => ({ capper: Math.max(p.roles.Capper, 0), team: team1.includes(p) ? 1 : 2 }))
-    .sort((a, b) => b.capper - a.capper)
-  if (
-    rankedCappers.length >= 2 &&
-    rankedCappers[1].capper >= CONFIG.capper.ELITE_THRESHOLD &&
-    rankedCappers[0].team === rankedCappers[1].team
-  ) {
-    score += ELO_CONFIG.CAPPER_STACK_PENALTY
-  }
+  // Count elite cappers per team rather than checking whether the top two share a side.
+  // Counting is order-independent and graduated, so it catches 2-v-0 and 3-v-1 monopolies
+  // alike and doesn't silently fail when capper ratings tie across teams (see the tier
+  // balancer's matching fix in evaluateSplit).
+  const eliteCappers1 = team1.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
+  const eliteCappers2 = team2.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
+  score += Math.abs(eliteCappers1 - eliteCappers2) * ELO_CONFIG.CAPPER_STACK_PENALTY
 
   // Mic balance — light tiebreaker.
   const mic1 = team1.filter((p) => p.mic).length
@@ -555,26 +519,6 @@ export function balanceTeamsByElo(
     const eloAvg = (team: Player[]) => Math.round(team.reduce((s, p) => s + eloOf(p), 0) / team.length)
     const micCount = (team: Player[]) => team.filter((p) => p.mic).length
 
-    // Suggested swap: the single red/blue exchange that most reduces the ELO gap.
-    let swapText = "No swap suggested"
-    let bestSwap: { red: string; blue: string; newDiff: number } | null = null
-    let bestScore = result.score
-    redTeam.forEach((r) => {
-      blueTeam.forEach((b) => {
-        const newRed = redTeam.filter((p) => p.name !== r.name).concat([b])
-        const newBlue = blueTeam.filter((p) => p.name !== b.name).concat([r])
-        const e = evaluate(newRed, newBlue)
-        if (e.score < bestScore) {
-          bestScore = e.score
-          bestSwap = { red: r.name, blue: b.name, newDiff: e.avgDiff }
-        }
-      })
-    })
-    if (bestSwap) {
-      const s = bestSwap as { red: string; blue: string; newDiff: number }
-      swapText = `Suggested Swap: ${s.red} ↔ ${s.blue} (ELO gap: ${result.avgDiff.toFixed(0)} → ${s.newDiff.toFixed(0)})`
-    }
-
     let redEloTotal = eloAvg(redTeam)
     let blueEloTotal = eloAvg(blueTeam)
     let redTierTotal = tierTotal(redTeam)
@@ -607,7 +551,6 @@ export function balanceTeamsByElo(
       blueTierTotal,
       redEloTotal,
       blueEloTotal,
-      swapText,
       wasRandomized,
     }
 

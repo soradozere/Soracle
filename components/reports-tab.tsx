@@ -7,6 +7,7 @@ import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import type { Player } from "@/lib/types"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
+import { checkIsAdmin } from "@/lib/is-admin"
 import { TierChangelog } from "@/components/tier-changelog"
 import { EloLeaderboard } from "@/components/elo-leaderboard"
 import {
@@ -80,14 +81,9 @@ export function ReportsTab() {
   const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "elo">("stats")
   const [isAdmin, setIsAdmin] = useState(false)
 
-  // Check if user is admin
+  // Check if user is admin (server-side allowlist, RLS-enforced)
   useEffect(() => {
-    const checkAdmin = async () => {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      setIsAdmin(!!user)
-    }
-    checkAdmin()
+    checkIsAdmin().then(setIsAdmin)
   }, [])
 
   useEffect(() => {

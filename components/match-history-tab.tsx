@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { getMatches, deleteMatch, updateMatchDate, getMatchStats } from "@/app/admin/actions"
 import { createClient } from "@/lib/supabase/client"
+import { checkIsAdmin } from "@/lib/is-admin"
 import { Trophy, Clock, Trash2, Pencil, Check, X, BarChart3, ChevronDown, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -141,13 +142,8 @@ export function MatchHistoryTab() {
   const [statsErrors, setStatsErrors] = useState<Record<string, string>>({})
 
   useEffect(() => {
-    // Check if user is authenticated (admin)
-    const checkAdmin = async () => {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      setIsAdmin(!!user)
-    }
-    checkAdmin()
+    // Check admin against the server-side allowlist (RLS-enforced)
+    checkIsAdmin().then(setIsAdmin)
 
     getMatches().then((result) => {
       if (result.success) {
