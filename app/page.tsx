@@ -13,11 +13,13 @@ import { TutorialDialog } from "@/components/tutorial-dialog"
 import { MatchHistoryTab } from "@/components/match-history-tab"
 import { ReportsTab } from "@/components/reports-tab"
 import { getMonthlyPlayerStats } from "@/app/admin/actions"
-import { balanceTeamsWithOptions, balanceTeamsCompetitive } from "@/lib/balance-algorithm"
+import { balanceTeamsWithOptions, balanceTeamsCompetitive, balanceTeamsByElo } from "@/lib/balance-algorithm"
+import { computeMonthlyEloMap } from "@/lib/elo"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
+import { createClient } from "@/lib/supabase/client"
 import { themes, applyTheme, type ThemeName } from "@/lib/themes"
 import type { Player, BalanceOption, BalanceHistoryEntry } from "@/lib/types"
-import { Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, HelpCircle, History, BarChart3 } from "lucide-react"
+import { Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, HelpCircle, History, BarChart3, TrendingUp } from "lucide-react"
 import Image from "next/image"
 import { useToast } from "@/hooks/use-toast"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -43,6 +45,8 @@ export default function TeamBalancer() {
   const [playerStats, setPlayerStats] = useState<Record<string, { wins: number; losses: number; draws: number }>>({})
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<"balancer" | "history" | "reports" | "info">("balancer")
+  const [isAdmin, setIsAdmin] = useState(false)
+  const [eloBalancing, setEloBalancing] = useState(false)
 
   const particlesRef = useRef<BackgroundParticlesRef>(null)
   const balanceOptionsRef = useRef<HTMLDivElement>(null)
@@ -58,6 +62,17 @@ export default function TeamBalancer() {
         setPlayerStats(result.data as Record<string, { wins: number; losses: number; draws: number }>)
       }
     })
+  }, [])
+
+  // Admin gate for the hidden "Balance by ELO" mode — any signed-in user is treated as
+  // admin, matching the Reports tab's check.
+  useEffect(() => {
+    const checkAdmin = async () => {
+      const supabase = createClient()
+      const { data: { user } } = await supabase.auth.getUser()
+      setIsAdmin(!!user)
+    }
+    checkAdmin()
   }, [])
 
   useEffect(() => {
@@ -250,6 +265,48 @@ export default function TeamBalancer() {
       } catch (error) {
         console.error(error)
       }
+    }
+  }
+
+  // Admin-only test mode: balance the 12 selected players purely on this month's ELO.
+  const handleBalanceByElo = async () => {
+    if (selectedPlayers.length !== 12) {
+      alert("Balance by ELO requires exactly 12 selected players")
+      return
+    }
+    setEloBalancing(true)
+    try {
+      const allRoles = ["Capper", "Chase", "Camp", "Cleaner", "Support"]
+      const playersWithDisabledRoles = players.map((p) => ({
+        ...p,
+        disabledRoles: globalOffRole ? allRoles : playerDisabledRoles.get(p.name) || [],
+      }))
+
+      const now = new Date()
+      const eloMap = await computeMonthlyEloMap(now.getFullYear(), now.getMonth() + 1)
+      const options = balanceTeamsByElo(selectedPlayers, playersWithDisabledRoles, eloMap)
+      setBalanceOptions(options)
+      setSelectedOptionIndex(0)
+      setCutPlayers([])
+      setPlayerDisabledRoles(new Map())
+      setGlobalOffRole(false)
+
+      const newEntry: BalanceHistoryEntry = {
+        id: Date.now().toString(),
+        result: options[0].result,
+        timestamp: new Date(),
+        selectedPlayers,
+      }
+      setBalanceHistory((prev) => [newEntry, ...prev.slice(0, 9)])
+
+      setTimeout(() => {
+        balanceOptionsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+      }, 100)
+    } catch (error) {
+      console.error(error)
+      alert("Failed to compute ELO balance")
+    } finally {
+      setEloBalancing(false)
     }
   }
 
@@ -589,6 +646,19 @@ export default function TeamBalancer() {
                   <span className="hidden md:inline">BALANCE TEAMS</span>
                   <span className="md:hidden">BALANCE</span>
                 </button>
+                {isAdmin && (
+                  <button
+                    onClick={handleBalanceByElo}
+                    disabled={selectedPlayers.length !== 12 || eloBalancing}
+                    style={{ backgroundColor: "#9b59b6", color: "#ffffff" }}
+                    className="px-4 md:px-6 py-1.5 font-bold rounded-md disabled:opacity-40 disabled:cursor-not-allowed transition-all text-sm hover-glow"
+                    title="Admin: balance the 12 selected players by this month's ELO"
+                  >
+                    <TrendingUp className="w-4 h-4 inline mr-1" />
+                    <span className="hidden md:inline">{eloBalancing ? "BALANCING…" : "BALANCE BY ELO"}</span>
+                    <span className="md:hidden">ELO</span>
+                  </button>
+                )}
               </div>
             </div>
 
