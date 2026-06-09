@@ -16,7 +16,7 @@ import { getMonthlyPlayerStats } from "@/app/admin/actions"
 import { balanceTeamsWithOptions, balanceTeamsCompetitive, balanceTeamsByElo } from "@/lib/balance-algorithm"
 import { computeMonthlyEloMap } from "@/lib/elo"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
-import { createClient } from "@/lib/supabase/client"
+import { checkIsAdmin } from "@/lib/is-admin"
 import { themes, applyTheme, type ThemeName } from "@/lib/themes"
 import type { Player, BalanceOption, BalanceHistoryEntry } from "@/lib/types"
 import { Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, HelpCircle, History, BarChart3, TrendingUp } from "lucide-react"
@@ -64,15 +64,10 @@ export default function TeamBalancer() {
     })
   }, [])
 
-  // Admin gate for the hidden "Balance by ELO" mode — any signed-in user is treated as
-  // admin, matching the Reports tab's check.
+  // Admin gate for the hidden "Balance by ELO" mode — checks the server-side allowlist
+  // (RLS-enforced), matching the Reports tab's check.
   useEffect(() => {
-    const checkAdmin = async () => {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      setIsAdmin(!!user)
-    }
-    checkAdmin()
+    checkIsAdmin().then(setIsAdmin)
   }, [])
 
   useEffect(() => {
