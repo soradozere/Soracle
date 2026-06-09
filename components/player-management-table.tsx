@@ -645,8 +645,15 @@ export function PlayerManagementTable() {
                           })
                         }
                       />
+                    ) : player.tooltip ? (
+                      <div
+                        className="max-w-[180px] whitespace-normal break-words text-sm line-clamp-3"
+                        title={player.tooltip}
+                      >
+                        {player.tooltip}
+                      </div>
                     ) : (
-                      player.tooltip || "-"
+                      "-"
                     )}
                   </TableCell>
                   <TableCell>
