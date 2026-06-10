@@ -64,5 +64,19 @@ export async function POST(request: Request) {
   }
 
   const options = balanceTeamsWithOptions(names, allPlayers)
-  return NextResponse.json({ options })
+
+  // The bot needs to map team members back to Discord users, so attach the
+  // Discord IDs (as resolved for this request) alongside the name arrays.
+  const discordIdByName = new Map<string, string>()
+  for (const player of allPlayers) {
+    const claimed = claimedBy.get(player.id)
+    if (claimed) discordIdByName.set(player.name, claimed)
+  }
+  const enriched = options.map((option) => ({
+    ...option,
+    teamRedDiscordIds: option.result.teamRed.map((name) => discordIdByName.get(name) ?? null),
+    teamBlueDiscordIds: option.result.teamBlue.map((name) => discordIdByName.get(name) ?? null),
+  }))
+
+  return NextResponse.json({ options: enriched })
 }
