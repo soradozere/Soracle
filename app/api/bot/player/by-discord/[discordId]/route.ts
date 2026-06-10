@@ -20,5 +20,5 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
     return NextResponse.json({ error: "unlinked" }, { status: 404 })
   }
 
-  return NextResponse.json({ name: player.name, tier: player.tierValue, roles: player.roles })
+  return NextResponse.json({ name: player.name, tier: player.tierValue, roles: player.roles, tooltip: player.tooltip ?? null })
 }
