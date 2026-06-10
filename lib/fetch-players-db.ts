@@ -39,27 +39,32 @@ export async function fetchPlayersFromDB(): Promise<Player[]> {
       return []
     }
 
-    // Transform database format to app format
-    return (data || []).map((dbPlayer) => ({
-      id: dbPlayer.id,
-      name: dbPlayer.name,
-      tierValue: dbPlayer.tier_value,
-      mic: dbPlayer.mic,
-      roles: {
-        Capper: dbPlayer.capper_rating,
-        Chase: dbPlayer.chase_rating,
-        Camp: dbPlayer.camp_rating,
-        Cleaner: dbPlayer.cleaner_rating,
-        Support: dbPlayer.support_rating,
-      },
-      tooltip: dbPlayer.tooltip || undefined,
-      is_active: dbPlayer.is_active ?? true,
-      last_match_at: dbPlayer.last_match_at ?? null,
-      manually_inactive: dbPlayer.manually_inactive ?? false,
-      discord_ids: dbPlayer.discord_ids ?? [],
-    }))
+    return (data || []).map(mapDbPlayer)
   } catch (error) {
     console.error("Failed to fetch players from database:", error)
     return []
+  }
+}
+
+// Transform a players-table row into the app's Player shape. Shared with the
+// bot API routes so there is exactly one definition of the row mapping.
+export function mapDbPlayer(dbPlayer: any): Player {
+  return {
+    id: dbPlayer.id,
+    name: dbPlayer.name,
+    tierValue: dbPlayer.tier_value,
+    mic: dbPlayer.mic,
+    roles: {
+      Capper: dbPlayer.capper_rating,
+      Chase: dbPlayer.chase_rating,
+      Camp: dbPlayer.camp_rating,
+      Cleaner: dbPlayer.cleaner_rating,
+      Support: dbPlayer.support_rating,
+    },
+    tooltip: dbPlayer.tooltip || undefined,
+    is_active: dbPlayer.is_active ?? true,
+    last_match_at: dbPlayer.last_match_at ?? null,
+    manually_inactive: dbPlayer.manually_inactive ?? false,
+    discord_ids: dbPlayer.discord_ids ?? [],
   }
 }
