@@ -181,6 +181,74 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   return { score, tier1, tier2, tierDiff, mic1, mic2 }
 }
 
+// Role-blind evaluation for the "Off-Role" option: all the tier-derived terms from
+// evaluateSplit (tier diff, top/bottom-3 strength, variance, elite spread, mic balance,
+// top-player separation) with the role and capper terms switched off. For nights when
+// players are off-role or swapping roles, the role ratings carry no signal.
+function evaluateOffRoleSplit(team1: Player[], team2: Player[], topPlayer: Player, topCluster: Player[]) {
+  const tier1 = team1.reduce((s, p) => s + p.tierValue, 0)
+  const tier2 = team2.reduce((s, p) => s + p.tierValue, 0)
+  const tierDiff = Math.abs(tier1 - tier2)
+
+  let score = Math.pow(tierDiff, 2) * CONFIG.tier.WEIGHT
+  if (tierDiff > CONFIG.tier.MAX_DIFF) {
+    score += Math.pow(tierDiff - CONFIG.tier.MAX_DIFF, 2) * CONFIG.tier.OVER_MAX_PENALTY
+  }
+
+  const allTiers = [...team1, ...team2].map((p) => p.tierValue).sort((a, b) => b - a)
+  const eliteThreshold = allTiers[Math.floor(allTiers.length * 0.25) - 1]
+  const top1 = team1.filter((p) => p.tierValue >= eliteThreshold).length
+  const top2 = team2.filter((p) => p.tierValue >= eliteThreshold).length
+  score += Math.pow(top1 - top2, 2) * CONFIG.elite.TOP_TIER_WEIGHT
+
+  const sortedTier1 = team1.map((p) => p.tierValue).sort((a, b) => b - a)
+  const sortedTier2 = team2.map((p) => p.tierValue).sort((a, b) => b - a)
+  const top3Diff = sortedTier1.slice(0, 3).reduce((a, b) => a + b, 0) - sortedTier2.slice(0, 3).reduce((a, b) => a + b, 0)
+  score += Math.pow(top3Diff, 2) * CONFIG.tier.TOP_3_WEIGHT
+  const bottom3Diff =
+    sortedTier1.slice(-3).reduce((a, b) => a + b, 0) - sortedTier2.slice(-3).reduce((a, b) => a + b, 0)
+  score += Math.pow(bottom3Diff, 2) * CONFIG.tier.BOTTOM_3_WEIGHT
+
+  const variance = (tiers: number[]) => {
+    const mean = tiers.reduce((a, b) => a + b, 0) / tiers.length
+    return Math.sqrt(tiers.reduce((sum, t) => sum + Math.pow(t - mean, 2), 0) / tiers.length)
+  }
+  score += Math.pow(variance(sortedTier1) - variance(sortedTier2), 2) * CONFIG.tier.VARIANCE_WEIGHT
+
+  const elites1 = team1.filter((p) => p.tierValue >= CONFIG.elite.THRESHOLD).length
+  const elites2 = team2.filter((p) => p.tierValue >= CONFIG.elite.THRESHOLD).length
+  score += Math.pow(elites1 - elites2, 2) * CONFIG.elite.CONCENTRATION_WEIGHT
+  if ((elites1 >= 3 && elites2 < elites1 - 1) || (elites2 >= 3 && elites1 < elites2 - 1)) {
+    score += CONFIG.elite.STACK_PENALTY
+  }
+
+  const mic1 = team1.filter((p) => p.mic).length
+  const mic2 = team2.filter((p) => p.mic).length
+  score += Math.pow(mic1 - mic2, 2) * CONFIG.mic.WEIGHT
+
+  const totalPlayers = team1.length + team2.length
+  if (topCluster.length < totalPlayers / 2) {
+    const topPlayerTeam = team1.includes(topPlayer) ? team1 : team2
+    const otherTeam = team1.includes(topPlayer) ? team2 : team1
+    const clusterWithTop = topPlayerTeam.filter((p) => topCluster.includes(p)).length
+    const clusterWithOther = otherTeam.filter((p) => topCluster.includes(p)).length
+    if (clusterWithTop > clusterWithOther) {
+      score += (clusterWithTop - clusterWithOther) * CONFIG.cluster.TOP_TWO_PENALTY * 0.5
+    }
+  }
+
+  return { score, tier1, tier2, tierDiff, mic1, mic2 }
+}
+
+// Same split regardless of orientation (identical or red/blue-swapped).
+function isSameSplit(a1: Player[], a2: Player[], b1: Player[], b2: Player[]): boolean {
+  const key = (t: Player[]) => JSON.stringify(t.map((p) => p.name).sort())
+  return (
+    (key(a1) === key(b1) && key(a2) === key(b2)) ||
+    (key(a1) === key(b2) && key(a2) === key(b1))
+  )
+}
+
 function areTeamsSwapped(team1: Player[], team2: Player[], otherTeam1: Player[], otherTeam2: Player[]): boolean {
   const names1 = team1.map((p) => p.name).sort()
   const names2 = team2.map((p) => p.name).sort()
@@ -289,8 +357,38 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
     uniqueResults.push(results[uniqueResults.length])
   }
 
+  // Option line-up: the best split, then the THIRD-best unique split (the old
+  // runner-up was always a near-clone of option 1 and never got picked), then the
+  // best off-role split — tier balance only, role ratings ignored.
+  const chosen: Array<{ result: (typeof results)[number]; kind: "best" | "alt" | "offrole" }> = [
+    { result: uniqueResults[0], kind: "best" },
+    { result: uniqueResults[2] ?? uniqueResults[1] ?? uniqueResults[0], kind: "alt" },
+  ]
+
+  const offRoleResults: typeof results = []
+  allSplits.forEach((team1) => {
+    const team2 = players.filter((p) => !team1.includes(p))
+    const evaluation = evaluateOffRoleSplit(team1, team2, players[0], topCluster)
+    offRoleResults.push({
+      score: evaluation.score,
+      team1: [...team1],
+      team2,
+      tier1: evaluation.tier1,
+      tier2: evaluation.tier2,
+      tierDiff: evaluation.tierDiff,
+      mic1: evaluation.mic1,
+      mic2: evaluation.mic2,
+    })
+  })
+  offRoleResults.sort((a, b) => a.score - b.score)
+  const offRolePick =
+    offRoleResults.find((candidate) =>
+      chosen.every(({ result }) => !isSameSplit(candidate.team1, candidate.team2, result.team1, result.team2)),
+    ) ?? offRoleResults[0]
+  chosen.push({ result: offRolePick, kind: "offrole" })
+
   // Convert to BalanceOption format
-  return uniqueResults.map((result, index) => {
+  return chosen.map(({ result, kind }) => {
     // Sort teams by tier
     let [redTeam, blueTeam] = [result.team1, result.team2].map((team) =>
       team.sort((a, b) => b.tierValue - a.tierValue),
@@ -334,9 +432,12 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
     let label = "Slight Wildcard"
     let description = "Shuffled for variety"
 
-    if (index === 0) {
+    if (kind === "best") {
       label = "Perfect Balance"
       description = "Closest possible match"
+    } else if (kind === "offrole") {
+      label = "Off-Role"
+      description = "Tier balance only — roles ignored"
     } else if (result.tierDiff < 1.5) {
       label = "Fair Fight"
       description = `Teams within ${result.tierDiff.toFixed(1)} tier points`
