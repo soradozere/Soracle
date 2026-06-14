@@ -30,7 +30,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
 
   const { data: monthMatches, error: matchError } = await supabase
     .from("matches")
-    .select("id, red_team, blue_team, red_score, blue_score")
+    .select("id, red_team, blue_team, red_score, blue_score, created_at")
     .gte("created_at", monthStart.toISOString())
   if (matchError) {
     console.error(matchError)
@@ -71,6 +71,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
   let wins = 0
   let losses = 0
   let draws = 0
+  const results: { at: string; r: "W" | "L" | "D" }[] = []
 
   for (const row of statRows) {
     totals.score += row.score ?? 0
@@ -89,10 +90,23 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
     const onRed = match.red_team?.includes(player.name)
     const onBlue = match.blue_team?.includes(player.name)
     if (!onRed && !onBlue) continue
-    if (match.red_score === match.blue_score) draws += 1
-    else if ((match.red_score > match.blue_score) === !!onRed) wins += 1
-    else losses += 1
+    let r: "W" | "L" | "D"
+    if (match.red_score === match.blue_score) {
+      draws += 1
+      r = "D"
+    } else if ((match.red_score > match.blue_score) === !!onRed) {
+      wins += 1
+      r = "W"
+    } else {
+      losses += 1
+      r = "L"
+    }
+    results.push({ at: match.created_at, r })
   }
+
+  // Chronological W/L/D form (oldest -> newest), capped for the bot's display.
+  results.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
+  const form = results.map((x) => x.r).slice(-20)
 
   return NextResponse.json({
     name: player.name,
@@ -103,6 +117,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
     wins,
     losses,
     draws,
+    form,
     totals,
   })
 }
