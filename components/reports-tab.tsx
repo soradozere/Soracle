@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client"
 import { checkIsAdmin } from "@/lib/is-admin"
 import { TierChangelog } from "@/components/tier-changelog"
 import { EloLeaderboard } from "@/components/elo-leaderboard"
+import { TrueSkillLeaderboard } from "@/components/trueskill-leaderboard"
 import {
   LineChart,
   Line,
@@ -78,7 +79,7 @@ export function ReportsTab() {
   const [matchStats, setMatchStats] = useState<MatchStatRow[]>([])
   const [players, setPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
-  const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "elo">("stats")
+  const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "elo" | "trueskill">("stats")
   const [isAdmin, setIsAdmin] = useState(false)
 
   // Check if user is admin (server-side allowlist, RLS-enforced)
@@ -111,7 +112,7 @@ export function ReportsTab() {
     if (!showLeaderboard && currentView === "leaderboard") {
       setCurrentView("stats")
     }
-    if (!isAdmin && currentView === "elo") {
+    if (!isAdmin && (currentView === "elo" || currentView === "trueskill")) {
       setCurrentView("stats")
     }
   }, [showLeaderboard, isAdmin, currentView])
@@ -600,6 +601,18 @@ export function ReportsTab() {
             ELO
           </button>
         )}
+        {isAdmin && (
+          <button
+            onClick={() => setCurrentView("trueskill")}
+            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
+              currentView === "trueskill"
+                ? "bg-[var(--color-primary)] text-[var(--color-background)]"
+                : "bg-[var(--color-surface)] text-[var(--color-text-dim)] hover:bg-[var(--color-border)]/50"
+            }`}
+          >
+            TrueSkill
+          </button>
+        )}
       </div>
 
       {/* Admin preview notice */}
@@ -613,6 +626,10 @@ export function ReportsTab() {
         // ELO is a running, all-time rating — render it regardless of the selected month.
         // The month selector above drives the ELO view's own All-time / Monthly toggle.
         <EloLeaderboard year={selectedYear} month={selectedMonth} />
+      ) : currentView === "trueskill" ? (
+        // TrueSkill is likewise a running rating replayed fresh; the month selector drives
+        // its own All-time / Monthly toggle.
+        <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} />
       ) : totalMatches === 0 ? (
         <div className="text-center py-12 text-[var(--color-text-dim)]">
           <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-50" />
