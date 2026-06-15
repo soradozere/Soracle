@@ -32,6 +32,14 @@ const CONFIG = {
     TOP_2_WEIGHT: 2.5, // balance each team's top-2 capper pool
     CONCENTRATION_WEIGHT: 300, // squared diff in elite-capper COUNT per team (2-v-0 ≈ 1200)
   },
+  // Capper and Chase are the two critical roles. The capper terms above split the elite
+  // cappers across teams, but nothing stops the single best capper and the single best
+  // chase returner from landing together — a frequent complaint, since that one team then
+  // owns both pivotal duels. This flat penalty fires when one side holds BOTH and the other
+  // holds NEITHER, nudging the search to break the pair apart.
+  split: {
+    CAPPER_CHASE_PENALTY: 1200,
+  },
   cluster: {
     TOP_TWO_PENALTY: 8000,
   },
@@ -116,6 +124,26 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const eliteCappers1 = team1.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
   const eliteCappers2 = team2.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
   score += Math.pow(eliteCappers1 - eliteCappers2, 2) * CONFIG.capper.CONCENTRATION_WEIGHT
+
+  // 3c. Best-capper / best-chaser separation — keep one team from owning BOTH the single
+  // strongest capper and the single strongest chase returner, the two pivotal duel roles.
+  // We compare by rating value (not identity) so role ties are handled order-independently,
+  // mirroring the elite-capper count fix above: the penalty only fires when one side has
+  // BOTH and the other has NEITHER. If a role is tied across both teams, each side already
+  // holds one and nothing trips. If the same lone player is both the best capper and best
+  // chaser, they can't be split — but then the penalty is constant across every split and
+  // can't change the ranking.
+  const bestCapperVal = Math.max(...[...team1, ...team2].map((p) => Math.max(p.roles.Capper, 0)))
+  const bestChaseVal = Math.max(...[...team1, ...team2].map((p) => Math.max(p.roles.Chase, 0)))
+  const hasTopCapper = (team: Player[]) => team.some((p) => p.roles.Capper === bestCapperVal)
+  const hasTopChase = (team: Player[]) => team.some((p) => p.roles.Chase === bestChaseVal)
+  const team1Both = hasTopCapper(team1) && hasTopChase(team1)
+  const team2Both = hasTopCapper(team2) && hasTopChase(team2)
+  const team1Neither = !hasTopCapper(team1) && !hasTopChase(team1)
+  const team2Neither = !hasTopCapper(team2) && !hasTopChase(team2)
+  if ((team1Both && team2Neither) || (team2Both && team1Neither)) {
+    score += CONFIG.split.CAPPER_CHASE_PENALTY
+  }
 
   // 4a. Top-tier distribution (dynamic threshold)
   const allTiers = [...team1, ...team2].map((p) => p.tierValue).sort((a, b) => b - a)
@@ -505,6 +533,7 @@ const ELO_CONFIG = {
   ROLE_BALANCE_WEIGHT: 0.6, // per-role sum difference, keeps every role even across teams
   CAPPER_BEST_WEIGHT: 2.0, // split each team's single best capper (scarcest role)
   CAPPER_STACK_PENALTY: 50, // per elite-capper (8+) count difference between teams
+  CAPPER_CHASE_PENALTY: 80, // flat: one side holds both the best capper and best chaser
   MIC_WEIGHT: 0.3,
 }
 
@@ -560,6 +589,21 @@ function evaluateEloSplit(team1: Player[], team2: Player[], eloOf: (p: Player) =
   const eliteCappers1 = team1.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
   const eliteCappers2 = team2.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
   score += Math.abs(eliteCappers1 - eliteCappers2) * ELO_CONFIG.CAPPER_STACK_PENALTY
+
+  // Best-capper / best-chaser separation — keep one side from owning both pivotal duel
+  // roles (mirrors the tier balancer's 3c). Compare by rating value so role ties are
+  // order-independent; only fires when one team has both and the other has neither.
+  const bestCapperVal = Math.max(...[...team1, ...team2].map((p) => Math.max(p.roles.Capper, 0)))
+  const bestChaseVal = Math.max(...[...team1, ...team2].map((p) => Math.max(p.roles.Chase, 0)))
+  const hasTopCapper = (team: Player[]) => team.some((p) => p.roles.Capper === bestCapperVal)
+  const hasTopChase = (team: Player[]) => team.some((p) => p.roles.Chase === bestChaseVal)
+  const team1Both = hasTopCapper(team1) && hasTopChase(team1)
+  const team2Both = hasTopCapper(team2) && hasTopChase(team2)
+  const team1Neither = !hasTopCapper(team1) && !hasTopChase(team1)
+  const team2Neither = !hasTopCapper(team2) && !hasTopChase(team2)
+  if ((team1Both && team2Neither) || (team2Both && team1Neither)) {
+    score += ELO_CONFIG.CAPPER_CHASE_PENALTY
+  }
 
   // Mic balance — light tiebreaker.
   const mic1 = team1.filter((p) => p.mic).length
