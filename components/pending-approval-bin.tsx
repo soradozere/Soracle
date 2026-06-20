@@ -42,15 +42,15 @@ function formatDate(iso: string | null): string {
   })
 }
 
-// Admin-only "Approval needed" queue at the top of Match History. Lists games the
-// Discord bot uploaded; Review opens the same CSV modal (pending mode) for name
-// editing + approval, Reject discards duplicates/junk. Renders nothing for
-// non-admins or when the queue is empty.
+// "Approval needed" queue at the top of Match History, for admins + match admins.
+// Lists games the Discord bot uploaded; Review opens the same CSV modal (pending
+// mode) for name editing + approval, Reject discards duplicates/junk. Renders
+// nothing for users who can't manage matches or when the queue is empty.
 export function PendingApprovalBin({
-  isAdmin,
+  canManage,
   onApproved,
 }: {
-  isAdmin: boolean
+  canManage: boolean
   onApproved: () => void
 }) {
   const [pending, setPending] = useState<PendingMatch[]>([])
@@ -64,7 +64,7 @@ export function PendingApprovalBin({
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    if (!isAdmin) {
+    if (!canManage) {
       setLoading(false)
       return
     }
@@ -72,9 +72,9 @@ export function PendingApprovalBin({
       if (result.success) setPending(result.data as PendingMatch[])
       setLoading(false)
     })
-  }, [isAdmin])
+  }, [canManage])
 
-  if (!isAdmin || loading || pending.length === 0) return null
+  if (!canManage || loading || pending.length === 0) return null
 
   const startReview = async (p: PendingMatch) => {
     setError(null)
