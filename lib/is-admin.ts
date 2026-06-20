@@ -24,3 +24,26 @@ export async function checkIsAdmin(): Promise<boolean> {
     return false
   }
 }
+
+/**
+ * Whether the current user may manage matches — a full admin OR a scoped "match
+ * admin" (e.g. a captain), per scripts/013_create_match_admins.sql. Gates the Match
+ * History tab's approval bin, "Log a Match" button, and match edit/delete controls.
+ * Full admin powers (roster, tiers, settings, the /admin panel) still use
+ * checkIsAdmin().
+ */
+export async function checkCanLogMatches(): Promise<boolean> {
+  try {
+    const supabase = createClient()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return false
+
+    const { data, error } = await supabase.rpc("can_log_matches")
+    if (error) return false
+    return data === true
+  } catch {
+    return false
+  }
+}

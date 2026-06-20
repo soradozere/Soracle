@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { getMatches, deleteMatch, updateMatchDate, getMatchStats } from "@/app/admin/actions"
 import { createClient } from "@/lib/supabase/client"
-import { checkIsAdmin } from "@/lib/is-admin"
+import { checkCanLogMatches } from "@/lib/is-admin"
 import { Trophy, Clock, Trash2, Pencil, Check, X, BarChart3, ChevronDown, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -132,7 +132,7 @@ function MatchScoreboard({ rows }: { rows: ScoreboardRow[] }) {
 export function MatchHistoryTab() {
   const [matches, setMatches] = useState<Match[]>([])
   const [loading, setLoading] = useState(true)
-  const [isAdmin, setIsAdmin] = useState(false)
+  const [canManage, setCanManage] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [editDateId, setEditDateId] = useState<string | null>(null)
@@ -152,8 +152,8 @@ export function MatchHistoryTab() {
   }
 
   useEffect(() => {
-    // Check admin against the server-side allowlist (RLS-enforced)
-    checkIsAdmin().then(setIsAdmin)
+    // Match-management gate: full admins OR match admins (captains).
+    checkCanLogMatches().then(setCanManage)
 
     loadMatches().finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -228,8 +228,8 @@ export function MatchHistoryTab() {
   if (matches.length === 0) {
     return (
       <div className="space-y-4">
-        <PendingApprovalBin isAdmin={isAdmin} onApproved={loadMatches} />
-        {isAdmin && (
+        <PendingApprovalBin canManage={canManage} onApproved={loadMatches} />
+        {canManage && (
           <div className="flex justify-end">
             <ManualMatchLogButton onLogged={loadMatches} />
           </div>
@@ -245,7 +245,7 @@ export function MatchHistoryTab() {
 
   return (
     <div className="space-y-4">
-      <PendingApprovalBin isAdmin={isAdmin} onApproved={loadMatches} />
+      <PendingApprovalBin canManage={canManage} onApproved={loadMatches} />
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-lg font-bold text-[var(--color-primary)] flex items-center gap-2">
           <Trophy className="w-5 h-5" />
@@ -253,7 +253,7 @@ export function MatchHistoryTab() {
         </h3>
         <div className="flex items-center gap-3">
           <span className="text-sm text-[var(--color-text-dim)]">{matches.length} match{matches.length !== 1 ? "es" : ""}</span>
-          {isAdmin && <ManualMatchLogButton onLogged={loadMatches} />}
+          {canManage && <ManualMatchLogButton onLogged={loadMatches} />}
         </div>
       </div>
 
@@ -269,7 +269,7 @@ export function MatchHistoryTab() {
               className="bg-[var(--color-surface)]/60 backdrop-blur-md border border-[var(--color-border)] rounded-lg p-4 group relative"
             >
               {/* Delete Confirmation Dialog - only for admins */}
-              {isAdmin && deleteConfirm === match.id && (
+              {canManage && deleteConfirm === match.id && (
                 <div className="absolute inset-0 bg-[var(--color-surface)]/95 backdrop-blur-sm rounded-lg flex items-center justify-center z-10">
                   <div className="text-center p-4">
                     <p className="text-[var(--color-text)] mb-4">Delete this match? This cannot be undone.</p>
@@ -296,7 +296,7 @@ export function MatchHistoryTab() {
               )}
 
               {/* Edit Date Dialog - only for admins */}
-              {isAdmin && editDateId === match.id && (
+              {canManage && editDateId === match.id && (
                 <div className="absolute inset-0 bg-[var(--color-surface)]/95 backdrop-blur-sm rounded-lg flex items-center justify-center z-10">
                   <div className="text-center p-4 w-full max-w-xs">
                     <p className="text-[var(--color-text)] font-medium mb-3">Edit match date &amp; time</p>
@@ -377,7 +377,7 @@ export function MatchHistoryTab() {
                     <Clock className="w-3 h-3" />
                     {date.toLocaleDateString()} {date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                   </div>
-                  {isAdmin && (
+                  {canManage && (
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => openEditDate(match)}

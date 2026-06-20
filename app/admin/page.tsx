@@ -20,6 +20,13 @@ export default async function AdminPage() {
     redirect("/auth/login")
   }
 
+  // Full-admin only. Match admins (captains) can sign in but must not reach the
+  // admin panel — bounce them to the main app (their tools live on Match History).
+  const { data: isAdmin } = await supabase.rpc("is_admin")
+  if (isAdmin !== true) {
+    redirect("/")
+  }
+
   async function handleLogout() {
     "use server"
     const supabase = await createClient()

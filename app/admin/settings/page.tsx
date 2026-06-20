@@ -17,6 +17,12 @@ export default async function SettingsPage() {
     redirect("/auth/login")
   }
 
+  // Full-admin only (match admins have no business in settings).
+  const { data: isAdmin } = await supabase.rpc("is_admin")
+  if (isAdmin !== true) {
+    redirect("/")
+  }
+
   return (
     <div className="min-h-screen bg-background">
       <header className="border-b">

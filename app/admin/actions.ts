@@ -1,12 +1,39 @@
 "use server"
 
+import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { normalizeName } from "@/lib/name-match"
 
-type AuthedClient = Awaited<ReturnType<typeof createClient>>
-
 const PENDING_BUCKET = "pending-scoreboards"
+
+// Authorize a match-management action: the caller must be a full admin OR a match
+// admin (can_log_matches()). On success the writes are performed with the
+// service-role client, so match admins never need direct table grants — they can
+// do exactly what these actions allow and nothing more. Returns the user id.
+async function requireMatchManager(): Promise<
+  { ok: true; userId: string } | { ok: false; error: string }
+> {
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return { ok: false, error: "Unauthorized - please sign in" }
+
+  const { data: allowed, error } = await supabase.rpc("can_log_matches")
+  if (!error) {
+    return allowed === true
+      ? { ok: true, userId: user.id }
+      : { ok: false, error: "Not authorized to manage matches" }
+  }
+
+  // Fallback if can_log_matches() isn't present yet (migration 013 not applied):
+  // keep full admins working so a deploy can't outrun the migration.
+  const { data: isAdmin } = await supabase.rpc("is_admin")
+  return isAdmin === true
+    ? { ok: true, userId: user.id }
+    : { ok: false, error: "Not authorized to manage matches" }
+}
 
 export async function uploadCSV(formData: FormData) {
   const file = formData.get("file") as File
@@ -200,7 +227,7 @@ type MatchWithStatsPayload = {
 // move CSV. Returns the new match id. Used by both the manual log flow and the
 // pending-match approval flow, so the two paths can never drift apart.
 async function persistMatchWithStats(
-  supabase: AuthedClient,
+  supabase: SupabaseClient,
   payload: MatchWithStatsPayload,
   file: File,
 ): Promise<{ success: true; matchId: string } | { success: false; error: string }> {
@@ -307,9 +334,11 @@ export async function logMatchWithStats(formData: FormData) {
     return { success: false, error: "Malformed match payload" }
   }
 
+  const authz = await requireMatchManager()
+  if (!authz.ok) return { success: false, error: authz.error }
+
   try {
-    const supabase = await createClient()
-    const result = await persistMatchWithStats(supabase, payload, file)
+    const result = await persistMatchWithStats(createServiceClient(), payload, file)
     return result.success ? { success: true } : { success: false, error: result.error }
   } catch (error) {
     return {
@@ -321,12 +350,14 @@ export async function logMatchWithStats(formData: FormData) {
 
 // ── Pending match approval (Discord-uploaded scoreboards) ────────────────────
 
-// List the games awaiting admin approval. RLS restricts pending_matches to admins,
-// so a non-admin simply gets an empty list.
+// List the games awaiting approval. Restricted to admins + match admins; anyone
+// else gets an empty list. Reads with the service role after the authz check
+// (pending_matches RLS is admin-only, so match admins couldn't read it directly).
 export async function getPendingMatches() {
+  const authz = await requireMatchManager()
+  if (!authz.ok) return { success: false, error: authz.error, data: [] }
   try {
-    const supabase = await createClient()
-    const { data, error } = await supabase
+    const { data, error } = await createServiceClient()
       .from("pending_matches")
       .select("*")
       .eq("status", "pending")
@@ -342,21 +373,22 @@ export async function getPendingMatches() {
   }
 }
 
-// Fetch a pending match's raw CSV text for the review modal. The pending row is
-// read with the RLS-gated client first (so only an admin who can see the row gets
-// this far); the private-bucket object is then read with the service role.
+// Fetch a pending match's raw CSV text for the review modal. Authorized to admins
+// + match admins; the row and the private-bucket object are then read with the
+// service role.
 export async function getPendingCsv(pendingId: string) {
+  const authz = await requireMatchManager()
+  if (!authz.ok) return { success: false, error: authz.error }
   try {
-    const supabase = await createClient()
-    const { data: pending, error } = await supabase
+    const admin = createServiceClient()
+    const { data: pending, error } = await admin
       .from("pending_matches")
       .select("csv_path, csv_filename")
       .eq("id", pendingId)
       .maybeSingle()
     if (error) return { success: false, error: error.message }
-    if (!pending) return { success: false, error: "Pending match not found or not authorized" }
+    if (!pending) return { success: false, error: "Pending match not found" }
 
-    const admin = createServiceClient()
     const { data: blob, error: dlError } = await admin.storage
       .from(PENDING_BUCKET)
       .download(pending.csv_path)
@@ -377,7 +409,7 @@ export async function getPendingCsv(pendingId: string) {
 // learning a name that belongs to a real player (the namefake case) or that is
 // redundant / already known.
 async function learnAliasesFromApproval(
-  supabase: AuthedClient,
+  supabase: SupabaseClient,
   matchStats: Array<Record<string, unknown>>,
 ) {
   const pairs = matchStats
@@ -443,34 +475,32 @@ export async function approvePendingMatch(formData: FormData) {
     return { success: false, error: "Malformed match payload" }
   }
 
-  try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return { success: false, error: "Unauthorized - admin authentication required" }
+  const authz = await requireMatchManager()
+  if (!authz.ok) return { success: false, error: authz.error }
 
-    const { data: pending } = await supabase
+  try {
+    const admin = createServiceClient()
+    const { data: pending } = await admin
       .from("pending_matches")
       .select("csv_path, status")
       .eq("id", pendingId)
       .maybeSingle()
-    if (!pending) return { success: false, error: "Pending match not found or not authorized" }
+    if (!pending) return { success: false, error: "Pending match not found" }
     if (pending.status !== "pending") {
       return { success: false, error: "This match has already been reviewed" }
     }
 
     // 1. Log the match (shared with the manual flow).
-    const result = await persistMatchWithStats(supabase, payload, file)
+    const result = await persistMatchWithStats(admin, payload, file)
     if (!result.success) return { success: false, error: result.error }
 
     // 2. Mark the pending row approved (non-fatal: the match is already logged).
-    const { error: updateError } = await supabase
+    const { error: updateError } = await admin
       .from("pending_matches")
       .update({
         status: "approved",
         match_id: result.matchId,
-        reviewed_by: user.id,
+        reviewed_by: authz.userId,
         reviewed_at: new Date().toISOString(),
       })
       .eq("id", pendingId)
@@ -481,11 +511,10 @@ export async function approvePendingMatch(formData: FormData) {
     }
 
     // 3. Learn aliases from corrected mappings (non-fatal).
-    await learnAliasesFromApproval(supabase, payload.match_stats)
+    await learnAliasesFromApproval(admin, payload.match_stats)
 
     // 4. Purge the pending CSV — it now lives in match-csvs (best effort).
     try {
-      const admin = createServiceClient()
       await admin.storage.from(PENDING_BUCKET).remove([pending.csv_path])
     } catch (error) {
       console.warn(`Failed to purge pending CSV ${pending.csv_path}:`, error)
@@ -503,28 +532,25 @@ export async function approvePendingMatch(formData: FormData) {
 // Reject a pending match (soft delete): mark it rejected for audit and purge its
 // CSV. Mainly used to discard duplicate re-posts.
 export async function rejectPendingMatch(pendingId: string) {
-  try {
-    const supabase = await createClient()
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return { success: false, error: "Unauthorized - admin authentication required" }
+  const authz = await requireMatchManager()
+  if (!authz.ok) return { success: false, error: authz.error }
 
-    const { data: pending } = await supabase
+  try {
+    const admin = createServiceClient()
+    const { data: pending } = await admin
       .from("pending_matches")
       .select("csv_path")
       .eq("id", pendingId)
       .maybeSingle()
-    if (!pending) return { success: false, error: "Pending match not found or not authorized" }
+    if (!pending) return { success: false, error: "Pending match not found" }
 
-    const { error } = await supabase
+    const { error } = await admin
       .from("pending_matches")
-      .update({ status: "rejected", reviewed_by: user.id, reviewed_at: new Date().toISOString() })
+      .update({ status: "rejected", reviewed_by: authz.userId, reviewed_at: new Date().toISOString() })
       .eq("id", pendingId)
     if (error) return { success: false, error: error.message }
 
     try {
-      const admin = createServiceClient()
       await admin.storage.from(PENDING_BUCKET).remove([pending.csv_path])
     } catch (purgeError) {
       console.warn(`Failed to purge rejected CSV ${pending.csv_path}:`, purgeError)
@@ -563,15 +589,10 @@ export async function getMatches() {
 }
 
 export async function updateMatchDate(matchId: string, newDate: string) {
+  const authz = await requireMatchManager()
+  if (!authz.ok) return { success: false, error: authz.error }
   try {
-    const supabase = await createClient()
-
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return { success: false, error: "Unauthorized - admin authentication required" }
-    }
-
-    const { error } = await supabase
+    const { error } = await createServiceClient()
       .from("matches")
       .update({ created_at: newDate })
       .eq("id", matchId)
@@ -590,16 +611,10 @@ export async function updateMatchDate(matchId: string, newDate: string) {
 }
 
 export async function deleteMatch(matchId: string) {
+  const authz = await requireMatchManager()
+  if (!authz.ok) return { success: false, error: authz.error }
   try {
-    const supabase = await createClient()
-
-    // Verify admin authentication
-    const { data: { user }, error: authError } = await supabase.auth.getUser()
-    if (authError || !user) {
-      return { success: false, error: "Unauthorized - admin authentication required" }
-    }
-
-    const { error } = await supabase
+    const { error } = await createServiceClient()
       .from("matches")
       .delete()
       .eq("id", matchId)
