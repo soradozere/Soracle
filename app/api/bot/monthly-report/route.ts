@@ -20,14 +20,19 @@ export async function GET(request: Request) {
   const tierByName = new Map(players.map((p) => [p.name, p.tierValue]))
 
   const supabase = await createClient()
-  const now = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
-  const monthLabel = now.toLocaleString("en-GB", { month: "long", year: "numeric" })
+  const url = new URL(request.url)
+  const yearParam = url.searchParams.get("year")
+  const monthParam = url.searchParams.get("month")
+  const target = yearParam && monthParam ? new Date(Number(yearParam), Number(monthParam) - 1, 1) : new Date()
+  const monthStart = new Date(target.getFullYear(), target.getMonth(), 1)
+  const monthEnd = new Date(target.getFullYear(), target.getMonth() + 1, 1)
+  const monthLabel = target.toLocaleString("en-GB", { month: "long", year: "numeric" })
 
   const { data: matchesRaw, error } = await supabase
     .from("matches")
     .select("red_team, blue_team, red_score, blue_score, created_at")
     .gte("created_at", monthStart.toISOString())
+    .lt("created_at", monthEnd.toISOString())
   if (error) {
     console.error(error)
     return NextResponse.json({ error: "Failed to fetch matches" }, { status: 500 })
