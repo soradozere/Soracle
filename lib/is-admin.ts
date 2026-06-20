@@ -41,8 +41,12 @@ export async function checkCanLogMatches(): Promise<boolean> {
     if (!user) return false
 
     const { data, error } = await supabase.rpc("can_log_matches")
-    if (error) return false
-    return data === true
+    if (!error) return data === true
+
+    // Fallback if can_log_matches() isn't present yet (migration 013 not applied):
+    // keep full admins working so the UI doesn't disappear before the migration.
+    const { data: isAdmin } = await supabase.rpc("is_admin")
+    return isAdmin === true
   } catch {
     return false
   }
