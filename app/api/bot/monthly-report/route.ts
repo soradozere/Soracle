@@ -26,7 +26,7 @@ export async function GET(request: Request) {
 
   const { data: matchesRaw, error } = await supabase
     .from("matches")
-    .select("red_team, blue_team, red_score, blue_score")
+    .select("red_team, blue_team, red_score, blue_score, created_at")
     .gte("created_at", monthStart.toISOString())
   if (error) {
     console.error(error)
@@ -98,7 +98,44 @@ export async function GET(request: Request) {
   const rivalries = Array.from(pairs.values())
     .filter((p) => p.count >= 2)
     .sort((a, b) => b.count - a.count)
-    .slice(0, 3)
+    .slice(0, 5)
+
+  // --- Longest win streaks of the month (chronological) ---
+  const sortedMatches = [...matches].sort(
+    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+  )
+  const wonHistory = new Map<string, boolean[]>()
+  for (const match of sortedMatches) {
+    const redWon = match.red_score > match.blue_score
+    const blueWon = match.blue_score > match.red_score
+    for (const [team, won] of [
+      [match.red_team, redWon] as const,
+      [match.blue_team, blueWon] as const,
+    ]) {
+      for (const name of team || []) {
+        if (!wonHistory.has(name)) wonHistory.set(name, [])
+        wonHistory.get(name)!.push(won)
+      }
+    }
+  }
+  const streaks = Array.from(wonHistory.entries())
+    .map(([name, history]) => {
+      let cur = 0
+      let max = 0
+      for (const won of history) {
+        cur = won ? cur + 1 : 0
+        if (cur > max) max = cur
+      }
+      return { name, streak: max }
+    })
+    .filter((p) => p.streak > 1)
+    .sort((a, b) => b.streak - a.streak)
+    .slice(0, 5)
+
+  // --- Red vs Blue ---
+  const redWins = matches.filter((m) => m.red_score > m.blue_score).length
+  const blueWins = matches.filter((m) => m.blue_score > m.red_score).length
+  const draws = matches.filter((m) => m.red_score === m.blue_score).length
 
   return NextResponse.json({
     month: monthLabel,
@@ -112,5 +149,7 @@ export async function GET(request: Request) {
         }
       : null,
     rivalries,
+    streaks,
+    redBlue: { redWins, blueWins, draws, total: totalMatches },
   })
 }
