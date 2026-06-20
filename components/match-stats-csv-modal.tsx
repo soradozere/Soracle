@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Papa from "papaparse"
-import Fuse from "fuse.js"
 import {
   Dialog,
   DialogContent,
@@ -33,80 +32,35 @@ import {
 } from "@/components/ui/tooltip"
 import { Check, ChevronsUpDown, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
+import { fetchAliasesFromDB, fetchPlayersFromDB } from "@/lib/fetch-players-db"
+import {
+  buildMatchStat,
+  classifyTeam,
+  mergeRowData,
+  parseScoreboardCsvText,
+  summarizeParsedRows,
+  toInt,
+  type CsvRow,
+  type ParseSummary,
+  type TeamClass,
+} from "@/lib/scoreboard-csv"
+import { createNameResolver, type PlayerAlias } from "@/lib/name-match"
 import type { CsvMatchData, MatchStatInsert, Player } from "@/lib/types"
 
 interface MatchStatsCsvModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onCsvDataReady: (data: CsvMatchData) => void
-}
-
-// Required CSV column headers. Parsing is aborted if any are missing.
-const REQUIRED_COLUMNS = [
-  "LAST-NONSPEC-TEAM",
-  "NAME-CLEAN",
-  "SCORE-SUM",
-  "CAPTURES-SUM",
-  "RETURNS-SUM",
-  "BC-SUM",
-  "ASSISTS-SUM",
-  "FLAGGRABS-SUM",
-  "FLAGHOLD-SUM",
-  "KILLS",
-  "DEATHS",
-  "RED-KILLS",
-  "YEL-KILLS",
-  "BLU-KILLS",
-  "DFA-KILLS",
-  "YDFA-KILLS",
-  "BS-KILLS",
-  "DBS-KILLS",
-  "BLUBS-KILLS",
-  "UPCUT-KILLS",
-  "RED-RETURNS",
-  "YEL-RETURNS",
-  "BLU-RETURNS",
-  "DFA-RETURNS",
-  "YDFA-RETURNS",
-  "BS-RETURNS",
-  "DBS-RETURNS",
-  "BLUBS-RETURNS",
-  "UPCUT-RETURNS",
-  "MINE-KILLS",
-  "MINE-RETURNS",
-  "DOOM-KILLS",
-  "TUR-KILLS",
-  "IDLE-KILLS",
-  "MINEGRABS-REDBASE",
-  "MINEGRABS-BLUEBASE",
-  "TIME-SUM",
-] as const
-
-// Numeric counter columns summed when merging reconnect rows — every required
-// column except the two identity columns (team + name).
-const SUMMABLE_COLUMNS = REQUIRED_COLUMNS.filter(
-  (col) => col !== "LAST-NONSPEC-TEAM" && col !== "NAME-CLEAN",
-)
-
-// Fuzzy-matching tuning. Lower fuse score = better match.
-// THRESHOLD controls which matches fuse returns at all; CONFIDENCE_THRESHOLD
-// controls which of those are good enough to auto-prefill the dropdown.
-const FUZZY_THRESHOLD = 0.4
-const FUZZY_CONFIDENCE_THRESHOLD = 0.3
-
-type CsvRow = Record<string, string>
-type TeamClass = "Red" | "Blue" | "Other"
-
-interface ParseSummary {
-  filename: string
-  timestampIso: string | null
-  rows: CsvRow[]
-  redCount: number
-  blueCount: number
-  redScore: number
-  blueScore: number
-  warnings: string[]
+  // Pending-review mode: when a CSV is supplied directly (from an approval-bin
+  // entry), the file picker is hidden, the CSV is parsed on open, and the footer
+  // gains a Manual/Algorithm toggle + an "Approve & Log" action. Absent for the
+  // normal manual-upload flow.
+  pendingCsvText?: string
+  pendingCsvFilename?: string
+  // Log mode: admin uploads a CSV (picker shown) and logs the match directly,
+  // with the same Manual/Algorithm toggle. The consumer's onCsvDataReady should
+  // call logMatchWithStats. Distinct from the default "prefill a form" flow.
+  logMode?: boolean
 }
 
 type SubResolution = "keep-both" | "keep-starter" | "keep-finisher"
@@ -130,109 +84,6 @@ type DisplayRow =
       data: CsvRow
       team: TeamClass
     }
-
-function toInt(value: string | undefined): number {
-  const n = parseInt((value ?? "").trim(), 10)
-  return Number.isFinite(n) ? n : 0
-}
-
-function classifyTeam(row: CsvRow): TeamClass {
-  const team = (row["LAST-NONSPEC-TEAM"] ?? "").trim()
-  if (team === "Red") return "Red"
-  if (team === "Blue") return "Blue"
-  return "Other"
-}
-
-// Combine several rows of the same player into one virtual row: sum the numeric
-// counters, keep the first row's identity (name + team).
-function mergeRowData(rows: CsvRow[]): CsvRow {
-  const merged: CsvRow = { ...rows[0] }
-  for (const col of SUMMABLE_COLUMNS) {
-    merged[col] = String(rows.reduce((sum, r) => sum + toInt(r[col]), 0))
-  }
-  return merged
-}
-
-// Map a finished display row to a match_stats insert payload. CSV counter columns
-// map 1:1 to DB fields; player_id, team and played_partial come from the review UI.
-function buildMatchStat(
-  row: CsvRow,
-  playerId: string,
-  team: "Red" | "Blue",
-  partial: boolean,
-): MatchStatInsert {
-  return {
-    player_id: playerId,
-    team,
-    played_partial: partial,
-
-    score: toInt(row["SCORE-SUM"]),
-
-    captures: toInt(row["CAPTURES-SUM"]),
-    returns: toInt(row["RETURNS-SUM"]),
-    base_cleaner: toInt(row["BC-SUM"]),
-    assists: toInt(row["ASSISTS-SUM"]),
-    flag_grabs: toInt(row["FLAGGRABS-SUM"]),
-    flag_hold_ms: toInt(row["FLAGHOLD-SUM"]),
-
-    kills: toInt(row["KILLS"]),
-    deaths: toInt(row["DEATHS"]),
-
-    red_kills: toInt(row["RED-KILLS"]),
-    yellow_kills: toInt(row["YEL-KILLS"]),
-    blue_kills: toInt(row["BLU-KILLS"]),
-    dfa_kills: toInt(row["DFA-KILLS"]),
-    ydfa_kills: toInt(row["YDFA-KILLS"]),
-    bs_kills: toInt(row["BS-KILLS"]),
-    dbs_kills: toInt(row["DBS-KILLS"]),
-    blubs_kills: toInt(row["BLUBS-KILLS"]),
-    upcut_kills: toInt(row["UPCUT-KILLS"]),
-
-    red_returns: toInt(row["RED-RETURNS"]),
-    yellow_returns: toInt(row["YEL-RETURNS"]),
-    blue_returns: toInt(row["BLU-RETURNS"]),
-    dfa_returns: toInt(row["DFA-RETURNS"]),
-    ydfa_returns: toInt(row["YDFA-RETURNS"]),
-    bs_returns: toInt(row["BS-RETURNS"]),
-    dbs_returns: toInt(row["DBS-RETURNS"]),
-    blubs_returns: toInt(row["BLUBS-RETURNS"]),
-    upcut_returns: toInt(row["UPCUT-RETURNS"]),
-
-    mine_kills: toInt(row["MINE-KILLS"]),
-    mine_returns: toInt(row["MINE-RETURNS"]),
-    doom_kills: toInt(row["DOOM-KILLS"]),
-    turret_kills: toInt(row["TUR-KILLS"]),
-    idle_kills: toInt(row["IDLE-KILLS"]),
-
-    mine_grabs_red: toInt(row["MINEGRABS-REDBASE"]),
-    mine_grabs_blue: toInt(row["MINEGRABS-BLUEBASE"]),
-
-    time_played: toInt(row["TIME-SUM"]),
-  }
-}
-
-// Filename starts with YYYY-MM-DD<sep>HH_MM_SS, where <sep> is "_" or " " —
-// convert to an ISO 8601 UTC string.
-function parseTimestampFromFilename(filename: string): string | null {
-  const match = filename.match(/^(\d{4})-(\d{2})-(\d{2})[_ ](\d{2})_(\d{2})_(\d{2})/)
-  if (!match) return null
-  const [, year, month, day, hour, minute, second] = match.map(Number) as unknown as number[]
-  const ms = Date.UTC(year, month - 1, day, hour, minute, second)
-  if (Number.isNaN(ms)) return null
-  // Guard against rollover (e.g. month 13) that Date.UTC would silently accept.
-  const d = new Date(ms)
-  if (
-    d.getUTCFullYear() !== year ||
-    d.getUTCMonth() !== month - 1 ||
-    d.getUTCDate() !== day ||
-    d.getUTCHours() !== hour ||
-    d.getUTCMinutes() !== minute ||
-    d.getUTCSeconds() !== second
-  ) {
-    return null
-  }
-  return d.toISOString()
-}
 
 // Searchable player dropdown (Popover + Command combobox). Manages its own
 // open state so each row's dropdown is independent.
@@ -309,14 +160,36 @@ function PlayerCombobox({
   )
 }
 
-export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: MatchStatsCsvModalProps) {
+// Render an in-game name, with a clear placeholder for the legal-but-blank JK2
+// name so the row is obviously present (and still needs mapping).
+function inGameNameNode(raw: string | undefined) {
+  const name = (raw ?? "").trim()
+  return name !== "" ? name : <span className="italic text-[#6b7280]">(no name)</span>
+}
+
+export function MatchStatsCsvModal({
+  open,
+  onOpenChange,
+  onCsvDataReady,
+  pendingCsvText,
+  pendingCsvFilename,
+  logMode = false,
+}: MatchStatsCsvModalProps) {
+  const isPendingMode = pendingCsvText !== undefined
+  // Both pending review and log mode record the Manual/Algorithm pick and "log on
+  // confirm"; only pending hides the file picker.
+  const showMatchType = isPendingMode || logMode
+
   const [summary, setSummary] = useState<ParseSummary | null>(null)
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [missingColumns, setMissingColumns] = useState<string[]>([])
+  // Manual vs algorithm pick — only used (and shown) in pending-review mode.
+  const [matchType, setMatchType] = useState<"manual" | "algorithm">("manual")
 
-  // Soracle players, fetched once and cached for the session.
+  // Soracle players + known aliases, fetched once and cached for the session.
   const [players, setPlayers] = useState<Player[]>([])
+  const [aliases, setAliases] = useState<PlayerAlias[]>([])
   const [playersLoading, setPlayersLoading] = useState(false)
   const [playersLoaded, setPlayersLoaded] = useState(false)
 
@@ -341,13 +214,14 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
   const [subChoices, setSubChoices] = useState<Record<string, SubResolution>>({})
   const [subErrors, setSubErrors] = useState<Record<string, string | null>>({})
 
-  // Fetch players the first time the modal opens; cache for the session.
+  // Fetch players + aliases the first time the modal opens; cache for the session.
   useEffect(() => {
     if (!open || playersLoaded || playersLoading) return
     setPlayersLoading(true)
-    fetchPlayersFromDB()
-      .then((p) => {
+    Promise.all([fetchPlayersFromDB(), fetchAliasesFromDB()])
+      .then(([p, a]) => {
         setPlayers(p)
+        setAliases(a)
         setPlayersLoaded(true)
       })
       .finally(() => setPlayersLoading(false))
@@ -359,18 +233,10 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
     [players],
   )
 
-  // Single fuse instance, rebuilt only when the player list changes.
-  const fuse = useMemo(
-    () =>
-      new Fuse(players, {
-        keys: ["name"],
-        threshold: FUZZY_THRESHOLD,
-        includeScore: true,
-        shouldSort: true,
-        minMatchCharLength: 2,
-      }),
-    [players],
-  )
+  // Single alias-aware name resolver, rebuilt only when the roster/aliases change.
+  // Both flows benefit: any learned aliases resolve here too, so re-reviewing a
+  // pending game picks up names taught by earlier approvals.
+  const resolver = useMemo(() => createNameResolver(players, aliases), [players, aliases])
 
   // Sort rows: Red first, then Blue, then unexpected teams — Caps descending within each group.
   const sortedRows = useMemo(() => {
@@ -385,25 +251,24 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
       })
   }, [summary])
 
-  // Run fuzzy matching once per file selection (and once when players first load).
-  // Deps are stable per (summary, players), so this never clobbers manual edits.
+  // Auto-match once per file selection (and once when players first load). Deps
+  // are stable per (summary, players), so this never clobbers manual edits.
   useEffect(() => {
     if (!summary || players.length === 0) return
     const mapping: Record<number, string | null> = {}
     const auto: Record<number, string> = {}
     sortedRows.forEach(({ row }, i) => {
-      const name = (row["NAME-CLEAN"] ?? "").trim()
-      const best = name ? fuse.search(name)[0] : undefined
-      if (best && best.score !== undefined && best.score <= FUZZY_CONFIDENCE_THRESHOLD) {
-        mapping[i] = best.item.id
-        auto[i] = best.item.id
+      const match = resolver.resolve(row["NAME-CLEAN"] ?? "")
+      if (match) {
+        mapping[i] = match.playerId
+        auto[i] = match.playerId
       } else {
         mapping[i] = null
       }
     })
     setRowToPlayerId(mapping)
     setAutoMatched(auto)
-  }, [summary, players, fuse, sortedRows])
+  }, [summary, players, resolver, sortedRows])
 
   // Rows as shown in the table: merged rows replace their constituents in place,
   // substitution-dropped rows are removed, and kept "keep-both" rows are flagged
@@ -600,6 +465,7 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
     setCsvFile(null)
     setError(null)
     setMissingColumns([])
+    setMatchType("manual")
     setRowToPlayerId({})
     setAutoMatched({})
     setRowFlags({})
@@ -616,6 +482,29 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
     onOpenChange(nextOpen)
   }
 
+  // Pending-review mode: parse the supplied CSV text on open (no file picker).
+  // Re-runs if a different pending entry is opened. The synthesized File rides
+  // along in csvData so approval can store it exactly like a manual upload.
+  useEffect(() => {
+    if (!open || pendingCsvText === undefined) return
+    reset()
+    const filename = pendingCsvFilename || "scoreboard.csv"
+    setCsvFile(new File([pendingCsvText], filename, { type: "text/csv" }))
+    try {
+      const result = parseScoreboardCsvText(pendingCsvText, filename)
+      if (!result.ok) {
+        if (result.missingColumns.length > 0) setMissingColumns(result.missingColumns)
+        if (result.error) setError(result.error)
+        return
+      }
+      setSummary(result.summary)
+    } catch {
+      setError("Something went wrong while reading the CSV.")
+    }
+    // reset is stable enough for this purpose; re-run only on open/text change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, pendingCsvText, pendingCsvFilename])
+
   function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
     reset()
     const file = event.target.files?.[0]
@@ -627,86 +516,17 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
       skipEmptyLines: true,
       complete: (results) => {
         try {
-          const fields = results.meta.fields ?? []
-
-          // B. Validate required columns.
-          const missing = REQUIRED_COLUMNS.filter((col) => !fields.includes(col))
-          if (missing.length > 0) {
-            setMissingColumns(missing)
+          const result = summarizeParsedRows(
+            results.data,
+            results.meta.fields ?? [],
+            file.name,
+          )
+          if (!result.ok) {
+            if (result.missingColumns.length > 0) setMissingColumns(result.missingColumns)
+            if (result.error) setError(result.error)
             return
           }
-
-          const allRows = results.data.filter(
-            (row) => row && Object.keys(row).length > 0,
-          )
-          if (allRows.length === 0) {
-            setError("The CSV has no data rows. Try another file.")
-            return
-          }
-
-          const warnings: string[] = []
-
-          // C. Filter out spectator rows.
-          const nonSpec = allRows.filter(
-            (row) => (row["LAST-NONSPEC-TEAM"] ?? "").trim() !== "Spectator",
-          )
-
-          // Surface any unexpected team values (not Red/Blue/Spectator).
-          const unexpected = new Map<string, number>()
-          for (const row of nonSpec) {
-            const team = (row["LAST-NONSPEC-TEAM"] ?? "").trim()
-            if (team !== "Red" && team !== "Blue") {
-              const label = team === "" ? "(empty)" : team
-              unexpected.set(label, (unexpected.get(label) ?? 0) + 1)
-            }
-          }
-          if (unexpected.size > 0) {
-            const parts = Array.from(unexpected.entries())
-              .map(([value, count]) => `"${value}" (${count} row${count === 1 ? "" : "s"})`)
-              .join(", ")
-            warnings.push(`Unexpected team value(s) found: ${parts}. Continuing anyway.`)
-          }
-
-          // D. Timestamp from filename.
-          const timestampIso = parseTimestampFromFilename(file.name)
-          if (!timestampIso) {
-            warnings.push("Could not parse timestamp from filename")
-          }
-
-          // E. Final score = sum of CAPTURES-SUM per team.
-          let redCount = 0
-          let blueCount = 0
-          let redScore = 0
-          let blueScore = 0
-          for (const row of nonSpec) {
-            const team = (row["LAST-NONSPEC-TEAM"] ?? "").trim()
-            const captures = toInt(row["CAPTURES-SUM"])
-            if (team === "Red") {
-              redCount += 1
-              redScore += captures
-            } else if (team === "Blue") {
-              blueCount += 1
-              blueScore += captures
-            }
-          }
-
-          // F. Low-row-count warning.
-          if (nonSpec.length < 12) {
-            warnings.push(
-              `Only ${nonSpec.length} non-spectator rows found — expected at least 12. Continuing anyway.`,
-            )
-          }
-
-          setSummary({
-            filename: file.name,
-            timestampIso,
-            rows: nonSpec,
-            redCount,
-            blueCount,
-            redScore,
-            blueScore,
-            warnings,
-          })
+          setSummary(result.summary)
         } catch {
           setError("Something went wrong while reading the CSV. Try another file.")
         }
@@ -789,6 +609,7 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
       matchPlayedAtIso: summary.timestampIso,
       matchStats,
       csvFile,
+      ...(showMatchType ? { matchType } : {}),
     }
   }
 
@@ -804,18 +625,20 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
       <DialogContent className="bg-[var(--color-surface)]/95 backdrop-blur-md border-[#66fcf1]/30 text-white sm:max-w-6xl max-h-[85vh] flex flex-col">
         <DialogHeader className="shrink-0">
           <DialogTitle className="text-xl" style={{ color: "var(--color-primary)" }}>
-            Upload Match Stats CSV
+            {isPendingMode ? "Review Pending Match" : logMode ? "Log a Match" : "Upload Match Stats CSV"}
           </DialogTitle>
         </DialogHeader>
 
         {/* Scrollable content area — the modal frame itself never overflows the viewport. */}
         <div className="flex-1 min-h-0 overflow-y-auto space-y-3 pr-1">
-          <input
-            type="file"
-            accept=".csv"
-            onChange={handleFileChange}
-            className="block w-full text-sm text-[#c5c6c7] file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-[#66fcf1]/40 file:bg-transparent file:px-3 file:py-1.5 file:text-sm file:text-[#66fcf1] hover:file:bg-[#66fcf1]/10"
-          />
+          {!isPendingMode && (
+            <input
+              type="file"
+              accept=".csv"
+              onChange={handleFileChange}
+              className="block w-full text-sm text-[#c5c6c7] file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-[#66fcf1]/40 file:bg-transparent file:px-3 file:py-1.5 file:text-sm file:text-[#66fcf1] hover:file:bg-[#66fcf1]/10"
+            />
+          )}
 
           {playersLoading && (
             <p className="flex items-center gap-2 text-xs text-[#8892a0]">
@@ -977,7 +800,7 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
                             return (
                               <li key={ri} className="flex items-center justify-between gap-3">
                                 <span className="min-w-0 truncate font-medium">
-                                  {r["NAME-CLEAN"]}
+                                  {inGameNameNode(r["NAME-CLEAN"])}
                                 </span>
                                 <span className="shrink-0 text-[#8892a0]">
                                   {pid ? (
@@ -1108,7 +931,7 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
                         >
                           <td className="px-3 py-1.5 font-medium">
                             <div className="flex items-center gap-2">
-                              <span>{row["NAME-CLEAN"]}</span>
+                              <span>{inGameNameNode(row["NAME-CLEAN"])}</span>
                               {d.kind === "merged" && (
                                 <Badge
                                   variant="outline"
@@ -1259,22 +1082,52 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
           )}
 
           {!summary && missingColumns.length === 0 && !error && (
-            <p className="text-xs text-[#8892a0]">
-              Select a stats CSV to parse and validate it. Saving and player mapping arrive in a
-              later phase.
+            <p className="flex items-center gap-2 text-xs text-[#8892a0]">
+              {isPendingMode ? (
+                <>
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Loading match…
+                </>
+              ) : (
+                "Select a stats CSV to parse, validate and map players."
+              )}
             </p>
           )}
         </div>
 
         <DialogFooter className="shrink-0 sm:justify-between">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={() => handleClose(false)}
-            className="border-[var(--color-border)] bg-transparent text-white hover:bg-[var(--color-border)]"
-          >
-            Cancel
-          </Button>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => handleClose(false)}
+              className="border-[var(--color-border)] bg-transparent text-white hover:bg-[var(--color-border)]"
+            >
+              Cancel
+            </Button>
+            {/* Manual vs algorithm pick — recorded on the match (pending + log modes). */}
+            {showMatchType && (
+              <div className="flex items-center gap-1">
+                {(["manual", "algorithm"] as const).map((t) => (
+                  <Button
+                    key={t}
+                    type="button"
+                    size="sm"
+                    variant={matchType === t ? "default" : "outline"}
+                    onClick={() => setMatchType(t)}
+                    className={cn(
+                      "h-8 px-3 text-xs font-medium capitalize",
+                      matchType === t
+                        ? "bg-[#66fcf1] text-black hover:bg-[#66fcf1]/80"
+                        : "border-[var(--color-border)] bg-transparent text-[#c5c6c7] hover:bg-[var(--color-border)]",
+                    )}
+                  >
+                    {t}
+                  </Button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="flex flex-col items-end gap-1">
             <Button
               type="button"
@@ -1282,7 +1135,11 @@ export function MatchStatsCsvModal({ open, onOpenChange, onCsvDataReady }: Match
               onClick={handleConfirm}
               className="bg-[#66fcf1] px-4 font-medium text-black hover:bg-[#66fcf1]/80 disabled:opacity-40"
             >
-              Confirm and Pre-fill Form
+              {isPendingMode
+                ? "Approve & Log Match"
+                : logMode
+                  ? "Log Match"
+                  : "Confirm and Pre-fill Form"}
             </Button>
             {summary && !canConfirm && (
               <p className="text-[11px] text-[#8892a0]">

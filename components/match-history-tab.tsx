@@ -7,6 +7,8 @@ import { checkIsAdmin } from "@/lib/is-admin"
 import { Trophy, Clock, Trash2, Pencil, Check, X, BarChart3, ChevronDown, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { PendingApprovalBin } from "@/components/pending-approval-bin"
+import { ManualMatchLogButton } from "@/components/manual-match-log-button"
 
 interface Match {
   id: string
@@ -141,16 +143,20 @@ export function MatchHistoryTab() {
   const [statsLoadingId, setStatsLoadingId] = useState<string | null>(null)
   const [statsErrors, setStatsErrors] = useState<Record<string, string>>({})
 
+  const loadMatches = () => {
+    return getMatches().then((result) => {
+      if (result.success) {
+        setMatches(result.data as Match[])
+      }
+    })
+  }
+
   useEffect(() => {
     // Check admin against the server-side allowlist (RLS-enforced)
     checkIsAdmin().then(setIsAdmin)
 
-    getMatches().then((result) => {
-      if (result.success) {
-        setMatches(result.data as Match[])
-      }
-      setLoading(false)
-    })
+    loadMatches().finally(() => setLoading(false))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const toDatetimeLocal = (isoString: string) => {
@@ -221,22 +227,34 @@ export function MatchHistoryTab() {
 
   if (matches.length === 0) {
     return (
-      <div className="text-center py-12 text-[var(--color-text-dim)]">
-        <Trophy className="w-12 h-12 mx-auto mb-4 opacity-50" />
-        <p>No matches have been logged yet.</p>
-        <p className="text-sm mt-2">Balance teams and log your first match result!</p>
+      <div className="space-y-4">
+        <PendingApprovalBin isAdmin={isAdmin} onApproved={loadMatches} />
+        {isAdmin && (
+          <div className="flex justify-end">
+            <ManualMatchLogButton onLogged={loadMatches} />
+          </div>
+        )}
+        <div className="text-center py-12 text-[var(--color-text-dim)]">
+          <Trophy className="w-12 h-12 mx-auto mb-4 opacity-50" />
+          <p>No matches have been logged yet.</p>
+          <p className="text-sm mt-2">Balance teams and log your first match result!</p>
+        </div>
       </div>
     )
   }
 
   return (
     <div className="space-y-4">
+      <PendingApprovalBin isAdmin={isAdmin} onApproved={loadMatches} />
       <div className="flex items-center justify-between mb-6">
         <h3 className="text-lg font-bold text-[var(--color-primary)] flex items-center gap-2">
           <Trophy className="w-5 h-5" />
           Match History
         </h3>
-        <span className="text-sm text-[var(--color-text-dim)]">{matches.length} match{matches.length !== 1 ? "es" : ""}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-[var(--color-text-dim)]">{matches.length} match{matches.length !== 1 ? "es" : ""}</span>
+          {isAdmin && <ManualMatchLogButton onLogged={loadMatches} />}
+        </div>
       </div>
 
       <div className="space-y-3">

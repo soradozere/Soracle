@@ -53,6 +53,10 @@ export interface MatchStats {
   team: "Red" | "Blue"
   played_partial: boolean
 
+  // Raw in-game scoreboard name (NAME-CLEAN). Null for rows logged before
+  // migration 012, when the name wasn't persisted.
+  in_game_name: string | null
+
   // In-game scoreboard score (SCORE-SUM)
   score: number
 
@@ -119,4 +123,7 @@ export interface CsvMatchData {
   matchPlayedAtIso: string | null
   matchStats: MatchStatInsert[]
   csvFile: File
+  // Manual vs algorithm pick, set only in pending-review mode (the manual upload
+  // flow carries its own match-type control); the approval handler reads it.
+  matchType?: "manual" | "algorithm"
 }

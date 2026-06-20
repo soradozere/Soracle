@@ -2,6 +2,7 @@ import { timingSafeEqual } from "crypto"
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { mapDbPlayer } from "@/lib/fetch-players-db"
+import type { PlayerAlias } from "@/lib/name-match"
 import type { Player } from "@/lib/types"
 
 /**
@@ -43,4 +44,20 @@ export async function fetchPlayersForBot(): Promise<Player[]> {
   }
 
   return (data || []).map(mapDbPlayer)
+}
+
+/**
+ * Known player aliases for server-side name resolution (the bot ingest endpoint).
+ * Public-readable via the player_aliases_select_all RLS policy, so the anon-backed
+ * server client suffices. Throws on query failure.
+ */
+export async function fetchAliasesForBot(): Promise<PlayerAlias[]> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.from("player_aliases").select("player_id, alias")
+
+  if (error) {
+    throw new Error(`Failed to fetch player aliases from database: ${error.message}`)
+  }
+
+  return data ?? []
 }
