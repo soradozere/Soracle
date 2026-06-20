@@ -19,13 +19,18 @@ export async function GET(request: Request) {
   const nameById = new Map(allPlayers.map((p) => [p.id, p.name]))
 
   const supabase = await createClient()
-  const now = new Date()
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1)
+  const url = new URL(request.url)
+  const yearParam = url.searchParams.get("year")
+  const monthParam = url.searchParams.get("month")
+  const target = yearParam && monthParam ? new Date(Number(yearParam), Number(monthParam) - 1, 1) : new Date()
+  const monthStart = new Date(target.getFullYear(), target.getMonth(), 1)
+  const monthEnd = new Date(target.getFullYear(), target.getMonth() + 1, 1)
 
   const { data: monthMatches, error: matchError } = await supabase
     .from("matches")
     .select("id, red_team, blue_team, red_score, blue_score")
     .gte("created_at", monthStart.toISOString())
+    .lt("created_at", monthEnd.toISOString())
   if (matchError) {
     console.error(matchError)
     return NextResponse.json({ error: "Failed to fetch matches" }, { status: 500 })
@@ -33,7 +38,7 @@ export async function GET(request: Request) {
 
   const matchById = new Map((monthMatches || []).map((m) => [m.id, m]))
   const matchIds = [...matchById.keys()]
-  const monthLabel = now.toLocaleString("en-GB", { month: "long", year: "numeric" })
+  const monthLabel = target.toLocaleString("en-GB", { month: "long", year: "numeric" })
 
   if (matchIds.length === 0) {
     return NextResponse.json({ month: monthLabel, matchCount: 0, players: [] })
