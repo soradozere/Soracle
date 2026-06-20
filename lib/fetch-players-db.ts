@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client"
+import type { PlayerAlias } from "./name-match"
 import type { Player } from "./types"
 
 // Number of days of inactivity before a player is considered inactive
@@ -42,6 +43,24 @@ export async function fetchPlayersFromDB(): Promise<Player[]> {
     return (data || []).map(mapDbPlayer)
   } catch (error) {
     console.error("Failed to fetch players from database:", error)
+    return []
+  }
+}
+
+// Known player aliases for client-side name resolution (the CSV review modal).
+// Public-readable via the player_aliases_select_all RLS policy. Returns [] on
+// failure so name matching degrades to name-only rather than breaking.
+export async function fetchAliasesFromDB(): Promise<PlayerAlias[]> {
+  try {
+    const supabase = createClient()
+    const { data, error } = await supabase.from("player_aliases").select("player_id, alias")
+    if (error) {
+      console.error("Failed to fetch player aliases from database:", error)
+      return []
+    }
+    return data ?? []
+  } catch (error) {
+    console.error("Failed to fetch player aliases from database:", error)
     return []
   }
 }
