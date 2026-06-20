@@ -6,6 +6,7 @@ import { fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
 // leaderboards like =dbs. Only allow-listed stat columns are queryable.
 const ALLOWED_STATS: Record<string, string> = {
   dbs_kills: "DBS kills",
+  dfa_kills: "DFA kills",
   captures: "captures",
   returns: "returns",
   base_cleaner: "base cleans",
