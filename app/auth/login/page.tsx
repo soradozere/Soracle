@@ -11,6 +11,10 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
 
+// Plain usernames (no "@") map to this domain, so a shared account like
+// "captains" signs in as captains@soracle.local. Full emails pass through.
+const USERNAME_DOMAIN = "soracle.local"
+
 export default function LoginPage() {
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -24,9 +28,14 @@ export default function LoginPage() {
     setIsLoading(true)
     setError(null)
 
+    const identifier = email.trim()
+    const loginEmail = identifier.includes("@")
+      ? identifier
+      : `${identifier.toLowerCase()}@${USERNAME_DOMAIN}`
+
     try {
       const { error } = await supabase.auth.signInWithPassword({
-        email,
+        email: loginEmail,
         password,
         options: {
           emailRedirectTo: process.env.NEXT_PUBLIC_DEV_SUPABASE_REDIRECT_URL || `${window.location.origin}/admin`,
@@ -54,11 +63,14 @@ export default function LoginPage() {
               <form onSubmit={handleLogin}>
                 <div className="flex flex-col gap-6">
                   <div className="grid gap-2">
-                    <Label htmlFor="email">Email</Label>
+                    <Label htmlFor="email">Username or email</Label>
                     <Input
                       id="email"
-                      type="email"
-                      placeholder="admin@example.com"
+                      type="text"
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                      placeholder="captains or admin@example.com"
                       required
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
