@@ -100,9 +100,15 @@ export async function GET(request: Request) {
     }
   }
 
+  // Rivalry = the most-contested *even* matchup, not just the most-played pair.
+  // Among pairs with enough meetings, rank by how close the head-to-head is to
+  // 50/50; ties broken by more meetings (a longer even rivalry is more intense).
+  const RIVALRY_MIN_MEETINGS = 4
+  const closeness = (p: { count: number; player1Wins: number }) =>
+    Math.abs(0.5 - p.player1Wins / p.count)
   const rivalries = Array.from(pairs.values())
-    .filter((p) => p.count >= 2)
-    .sort((a, b) => b.count - a.count)
+    .filter((p) => p.count >= RIVALRY_MIN_MEETINGS)
+    .sort((a, b) => (closeness(a) !== closeness(b) ? closeness(a) - closeness(b) : b.count - a.count))
     .slice(0, 5)
 
   // --- Longest win streaks of the month (chronological) ---
