@@ -8,6 +8,7 @@ import { BackgroundParticles, type BackgroundParticlesRef } from "@/components/b
 import { BalanceOptions } from "@/components/balance-options"
 import { BalanceHistory } from "@/components/balance-history"
 import { ThemeSelector } from "@/components/theme-selector"
+import { AdminNavButton } from "@/components/admin-nav-button"
 import { TierListView } from "@/components/tier-list-view"
 import { TutorialDialog } from "@/components/tutorial-dialog"
 import { MatchHistoryTab } from "@/components/match-history-tab"
@@ -515,6 +516,7 @@ export default function TeamBalancer() {
                 <HelpCircle className="w-4 h-4" />
                 Help
               </button>
+              <AdminNavButton />
             </div>
           </div>
         </div>
