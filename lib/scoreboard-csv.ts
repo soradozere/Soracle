@@ -157,27 +157,62 @@ export function buildMatchStat(
   }
 }
 
-// Filename starts with YYYY-MM-DD<sep>HH_MM_SS, where <sep> is "_" or " " —
-// convert to an ISO 8601 UTC string.
+// The scoreboard host (German-based) writes filenames in local Berlin time, so
+// the parsed wall-clock is interpreted in this zone (CET/CEST, DST-aware) before
+// converting to a UTC instant for storage.
+const SCOREBOARD_TIMEZONE = "Europe/Berlin"
+
+// Convert a wall-clock time in `timeZone` to the equivalent UTC Date. Uses the
+// standard offset round-trip via Intl, so DST is handled automatically.
+function wallClockToUtc(
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number,
+  timeZone: string,
+): Date {
+  const utcGuess = Date.UTC(year, month - 1, day, hour, minute, second)
+  const dtf = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  })
+  const parts: Record<string, number> = {}
+  for (const p of dtf.formatToParts(new Date(utcGuess))) {
+    if (p.type !== "literal") parts[p.type] = Number(p.value)
+  }
+  // How far the zone is ahead of UTC at this instant (hour can be "24" at midnight).
+  const asZone = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour % 24, parts.minute, parts.second)
+  return new Date(utcGuess - (asZone - utcGuess))
+}
+
+// Filename starts with YYYY-MM-DD<sep>HH_MM_SS, where <sep> is "_" or " ". The time
+// is the host's local Berlin wall clock; returns the equivalent ISO 8601 UTC string.
 export function parseTimestampFromFilename(filename: string): string | null {
   const match = filename.match(/^(\d{4})-(\d{2})-(\d{2})[_ ](\d{2})_(\d{2})_(\d{2})/)
   if (!match) return null
   const [, year, month, day, hour, minute, second] = match.map(Number) as unknown as number[]
-  const ms = Date.UTC(year, month - 1, day, hour, minute, second)
-  if (Number.isNaN(ms)) return null
-  // Guard against rollover (e.g. month 13) that Date.UTC would silently accept.
-  const d = new Date(ms)
+  // Validate the wall-clock components are a real date/time (catches rollover such
+  // as month 13 that Date.UTC would silently accept).
+  const check = new Date(Date.UTC(year, month - 1, day, hour, minute, second))
   if (
-    d.getUTCFullYear() !== year ||
-    d.getUTCMonth() !== month - 1 ||
-    d.getUTCDate() !== day ||
-    d.getUTCHours() !== hour ||
-    d.getUTCMinutes() !== minute ||
-    d.getUTCSeconds() !== second
+    check.getUTCFullYear() !== year ||
+    check.getUTCMonth() !== month - 1 ||
+    check.getUTCDate() !== day ||
+    check.getUTCHours() !== hour ||
+    check.getUTCMinutes() !== minute ||
+    check.getUTCSeconds() !== second
   ) {
     return null
   }
-  return d.toISOString()
+  return wallClockToUtc(year, month, day, hour, minute, second, SCOREBOARD_TIMEZONE).toISOString()
 }
 
 // Turn raw parsed CSV rows (plus the header field list and filename) into a
