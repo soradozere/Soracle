@@ -62,12 +62,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
     }
   }
 
-  // Best team-mate = most wins together; ties broken by most games together.
+  // Best team-mate = highest win-RATE alongside you (not raw volume), min 3 games
+  // together so it's not noise; ties broken by most games together.
+  const MIN_GAMES = 3
   const friend =
     Array.from(together.entries())
-      .map(([name, rec]) => ({ name, ...rec }))
-      .filter((r) => r.games >= 2)
-      .sort((a, b) => (b.wins !== a.wins ? b.wins - a.wins : b.games - a.games))[0] || null
+      .map(([name, rec]) => ({ name, ...rec, rate: rec.wins / rec.games }))
+      .filter((r) => r.games >= MIN_GAMES)
+      .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games))[0] || null
 
   return NextResponse.json({ name: me, month: monthLabel, friend })
 }

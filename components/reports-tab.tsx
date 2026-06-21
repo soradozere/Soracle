@@ -315,8 +315,19 @@ export function ReportsTab() {
     }
   }
 
+  // Rivalry = the most-contested *even* matchup, not just the most-played pair:
+  // among pairs with enough meetings, the head-to-head closest to 50/50 (ties to
+  // the one with more meetings).
+  const RIVALRY_MIN_MEETINGS = 4
+  const rivalryCloseness = (p: { count: number; player1Wins: number }) =>
+    Math.abs(0.5 - p.player1Wins / p.count)
   const topRivalry = Array.from(opponentPairs.values())
-    .sort((a, b) => b.count - a.count)[0] || null
+    .filter((p) => p.count >= RIVALRY_MIN_MEETINGS)
+    .sort((a, b) =>
+      rivalryCloseness(a) !== rivalryCloseness(b)
+        ? rivalryCloseness(a) - rivalryCloseness(b)
+        : b.count - a.count,
+    )[0] || null
 
   // Red vs Blue
   const redWins = matches.filter(m => m.red_score > m.blue_score).length
@@ -672,12 +683,14 @@ export function ReportsTab() {
                   <span className="text-[var(--color-text-dim)]"> - </span>
                   <span className="text-[#ff4757] font-bold">{starPlayer.losses}L</span>
                   <span className="text-[var(--color-text-dim)] ml-3">|</span>
-                  <span className="text-[var(--color-primary)] font-bold ml-3">{starPlayer.avgScore.toFixed(2)} avg</span>
+                  <span className="text-[var(--color-primary)] font-bold ml-3">{starPlayer.avgScore.toFixed(2)} win-value/game</span>
                 </div>
                 <p className="text-xs text-[var(--color-text-dim)] italic">
-                  Awarded to the player with the most impactful wins — upset victories count more than expected ones.
+                  Rewards winning the games you weren&apos;t favoured to win. Each win is worth more when your team was the underdog (lower combined tier) and less when you were favoured — so a single upset beats a string of expected wins. The Star Player has the highest average win-value per game.
                 </p>
-                <p className="text-xs text-[var(--color-text-dim)]/60 mt-1">Based on current player ratings</p>
+                <p className="text-xs text-[var(--color-text-dim)]/60 mt-1">
+                  Min {starPlayerMinMatches} games this month · based on current player tiers
+                </p>
               </div>
             ) : (
               <p className="text-[var(--color-text-dim)] text-sm text-center italic">
@@ -1311,12 +1324,14 @@ export function ReportsTab() {
                   <span className="text-[var(--color-text-dim)]"> - </span>
                   <span className="text-[#ff4757] font-bold">{starPlayer.losses}L</span>
                   <span className="text-[var(--color-text-dim)] ml-3">|</span>
-                  <span className="text-[var(--color-primary)] font-bold ml-3">{starPlayer.avgScore.toFixed(2)} avg</span>
+                  <span className="text-[var(--color-primary)] font-bold ml-3">{starPlayer.avgScore.toFixed(2)} win-value/game</span>
                 </div>
                 <p className="text-xs text-[var(--color-text-dim)] italic">
-                  Awarded to the player with the most impactful wins — upset victories count more than expected ones.
+                  Rewards winning the games you weren&apos;t favoured to win. Each win is worth more when your team was the underdog (lower combined tier) and less when you were favoured — so a single upset beats a string of expected wins. The Star Player has the highest average win-value per game.
                 </p>
-                <p className="text-xs text-[var(--color-text-dim)]/60 mt-1">Based on current player ratings</p>
+                <p className="text-xs text-[var(--color-text-dim)]/60 mt-1">
+                  Min {starPlayerMinMatches} games this month · based on current player tiers
+                </p>
               </div>
             ) : (
               <p className="text-[var(--color-text-dim)] text-sm text-center italic">
