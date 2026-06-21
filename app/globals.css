@@ -120,13 +120,16 @@
 }
 
 @layer base {
+  /* Theme-aware base styles: follow the active theme's CSS variables (set by
+     applyTheme) instead of hardcoded Jedi colors, so every theme — including the
+     light Cloud City theme — gets correct base text / headings / borders. */
   * {
-    border-color: #3d4855;
+    border-color: var(--color-border);
   }
 
   body {
-    background-color: #0b0c10;
-    color: #c5c6c7;
+    background-color: var(--color-background);
+    color: var(--color-text);
     font-family: var(--font-sans);
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -140,8 +143,79 @@
   h4,
   h5,
   h6 {
-    color: #ffffff;
+    color: var(--color-text-bright);
     font-family: var(--font-mono);
+  }
+}
+
+/* Light theme (Cloud City) only: the app is dark-first and hardcodes the Jedi
+   palette in many components. These remap those exact hardcoded hexes to the
+   active theme variables so light mode reads correctly, without touching
+   component files. Substring matchers also catch opacity variants (e.g. /95). */
+@layer utilities {
+  html[data-theme="cloud-city"] [class*="text-[#8892a0]"],
+  html[data-theme="cloud-city"] [class*="text-[#6b7280]"] {
+    color: var(--color-text-dim) !important;
+  }
+  html[data-theme="cloud-city"] [class*="text-[#c5c6c7]"] {
+    color: var(--color-text) !important;
+  }
+  html[data-theme="cloud-city"] [class*="text-[#66fcf1]"] {
+    color: var(--color-primary) !important;
+  }
+  html[data-theme="cloud-city"] [class*="bg-[#0b0c10]"] {
+    background-color: var(--color-background) !important;
+  }
+  html[data-theme="cloud-city"] [class*="bg-[#1f2833]"] {
+    background-color: var(--color-surface) !important;
+  }
+  html[data-theme="cloud-city"] [class*="bg-[#2a3441]"],
+  html[data-theme="cloud-city"] [class*="bg-[#3d4855]"] {
+    background-color: var(--color-surface-elevated) !important;
+  }
+  html[data-theme="cloud-city"] [class*="bg-[#66fcf1]"] {
+    background-color: var(--color-primary) !important;
+  }
+  html[data-theme="cloud-city"] [class*="border-[#3d4855]"] {
+    border-color: var(--color-border) !important;
+  }
+  html[data-theme="cloud-city"] [class*="border-[#66fcf1]"] {
+    border-color: var(--color-primary) !important;
+  }
+
+  /* Semantic Tailwind tokens (bg-surface, text-text, border-border, …) bake the
+     dark Jedi values via @theme inline, so they also need remapping on light.
+     Order matters: broader matchers first, more specific (…-elevated/-dim/-bright)
+     after so they win. !important + the [data-theme] scope keeps it light-only. */
+  html[data-theme="cloud-city"] [class*="bg-background"] {
+    background-color: var(--color-background) !important;
+  }
+  html[data-theme="cloud-city"] [class*="bg-surface"] {
+    background-color: var(--color-surface) !important;
+  }
+  html[data-theme="cloud-city"] [class*="bg-surface-elevated"] {
+    background-color: var(--color-surface-elevated) !important;
+  }
+  html[data-theme="cloud-city"] [class*="bg-primary"]:not([class*=":bg-primary"]) {
+    background-color: var(--color-primary) !important;
+  }
+  html[data-theme="cloud-city"] [class*="text-text"] {
+    color: var(--color-text) !important;
+  }
+  html[data-theme="cloud-city"] [class*="text-text-bright"] {
+    color: var(--color-text-bright) !important;
+  }
+  html[data-theme="cloud-city"] [class*="text-text-dim"] {
+    color: var(--color-text-dim) !important;
+  }
+  html[data-theme="cloud-city"] [class*="text-primary"]:not([class*=":text-primary"]) {
+    color: var(--color-primary) !important;
+  }
+  html[data-theme="cloud-city"] [class*="border-border"] {
+    border-color: var(--color-border) !important;
+  }
+  html[data-theme="cloud-city"] [class*="border-primary"] {
+    border-color: var(--color-primary) !important;
   }
 }
 
