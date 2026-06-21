@@ -1,4 +1,4 @@
-export type ThemeName = "jedi" | "sith" | "bespin" | "yavin" | "nar-shaddaa"
+export type ThemeName = "jedi" | "sith" | "bespin" | "cloud-city" | "yavin" | "nar-shaddaa"
 
 export interface Theme {
   name: ThemeName
@@ -73,10 +73,9 @@ export const themes: Record<ThemeName, Theme> = {
   },
   bespin: {
     name: "bespin",
-    displayName: "Bespin",
-    // Cloud City at sunset: a dark, warm theme (the app is dark-first, so a light
-    // background washed out hardcoded light-on-dark text). Amber-orange identity
-    // kept, now glowing on a deep warm base.
+    displayName: "Bespin Nights",
+    // Cloud City at night: a dark, warm theme with the amber-orange identity
+    // glowing on a deep warm base.
     colors: {
       background: "#15110d",
       surface: "#211a13",
@@ -95,6 +94,32 @@ export const themes: Record<ThemeName, Theme> = {
       text: "#ece1d2",
       textBright: "#fff8ee",
       textDim: "#ad9c87",
+    },
+  },
+  "cloud-city": {
+    name: "cloud-city",
+    displayName: "Cloud City",
+    // The app's light theme: bright, warm Cloud City daylight with burnt-orange
+    // accents. Paired with theme-aware base styles + a scoped override layer in
+    // globals.css so the dark-first hardcoded colors read correctly on light.
+    colors: {
+      background: "#e7ddcc",
+      surface: "#f3ede1",
+      surfaceElevated: "#fbf6ec",
+      border: "#cabda6",
+      borderHover: "#b86b49",
+      primary: "#bf5e2e",
+      primaryDim: "#9f4c22",
+      primaryGlow: "#bf5e2e40",
+      accentRed: "#c0492b",
+      accentBlue: "#3a7ca5",
+      accentGreen: "#5f7d3a",
+      accentYellow: "#b3791a",
+      accentPurple: "#8a5a7a",
+      accentTeal: "#3f8a7d",
+      text: "#2e2a24",
+      textBright: "#15110d",
+      textDim: "#6a6155",
     },
   },
   yavin: {
@@ -147,7 +172,11 @@ export const themes: Record<ThemeName, Theme> = {
 
 export function applyTheme(theme: Theme) {
   const root = document.documentElement
-  
+
+  // Lets globals.css scope light-theme-only fixes for the dark-first hardcoded
+  // colors (e.g. html[data-theme="cloud-city"] …).
+  root.dataset.theme = theme.name
+
   root.style.setProperty("--color-background", theme.colors.background)
   root.style.setProperty("--color-surface", theme.colors.surface)
   root.style.setProperty("--color-surface-elevated", theme.colors.surfaceElevated)
