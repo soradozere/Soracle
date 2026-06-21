@@ -10,8 +10,10 @@ A team balancer for **Jedi Knight II: Jedi Outcast** 6v6 Capture the Flag. Drop 
 - **Competitive mode** — queue 12–18 players and Soracle picks the best 12 to balance, cutting the rest.
 - **Off-role mode** — balance on overall tier only, ignoring role ratings.
 - **Match history & reports** — log results, track player win rates, monthly reports, tier changelogs, and whether higher-confidence balances actually produce closer games.
+- **Discord scoreboard ingestion** — the JK2 Matchmaker bot uploads end-of-match scoreboard CSVs to `/api/bot/scoreboard`; games with 12+ players land in an **"Approval needed"** bin in the Match History tab. Admins review the auto-matched names (clan-tag + alias aware, e.g. `{FoU} Original` → `Original`), fix any, pick Manual/Algorithm, and approve to log the match — which also **learns aliases** so future imports get smarter. An admin **"Log a Match"** button covers scoreboards that never came through Discord.
+- **Match Admin role** — a scoped "captains" role that can approve/log/edit/delete matches and nothing else (no roster, tiers, settings, or admin panel). Backed by the `match_admins` allowlist; match writes run server-side behind an admin-or-match-admin check.
 - **Roster management** — admin tools for players, CSV import, tier snapshots, and active/inactive tracking.
-- **Themes** — Jedi, Sith, Bespin, Yavin, and Nar Shaddaa.
+- **Themes** — Jedi, Sith, Bespin Nights, Cloud City (light), Yavin, and Nar Shaddaa.
 
 ## How balancing works
 
