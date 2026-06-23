@@ -16,6 +16,7 @@ export async function GET(request: Request) {
   const supabase = await createClient()
 
   let match: Record<string, any> | null = null
+  let playerName: string | null = null
 
   if (discordId) {
     // Resolve the player, then find their most recent match on either team.
@@ -30,6 +31,7 @@ export async function GET(request: Request) {
     if (!player) {
       return NextResponse.json({ error: "unlinked" }, { status: 404 })
     }
+    playerName = player.name
 
     const [red, blue] = await Promise.all([
       supabase.from("matches").select(MATCH_SELECT).contains("red_team", [player.name]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
@@ -103,6 +105,7 @@ export async function GET(request: Request) {
     redScore: match.red_score,
     blueScore: match.blue_score,
     winner,
+    playerName,
     stats,
   })
 }
