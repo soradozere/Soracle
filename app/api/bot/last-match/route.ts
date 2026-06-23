@@ -1,27 +1,62 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { requireBotAuth } from "@/lib/bot-api"
+import { fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
 
-// The most recently recorded match on Soracle, with its per-player scoreboard if
-// a stats CSV was logged. Powers the bot's =lg / /lastgame in-depth view.
+const MATCH_SELECT =
+  "id, red_team, blue_team, red_score, blue_score, match_type, created_at, match_played_at"
+
+// The most recently recorded match on Soracle, with its per-player scoreboard if a
+// stats CSV was logged. With ?discordId=, returns that player's last match instead
+// (=lg @player). Powers the bot's =lg / /lastgame in-depth view.
 export async function GET(request: Request) {
   const unauthorized = requireBotAuth(request)
   if (unauthorized) return unauthorized
 
+  const discordId = new URL(request.url).searchParams.get("discordId")
   const supabase = await createClient()
 
-  const { data: match, error } = await supabase
-    .from("matches")
-    .select(
-      "id, red_team, blue_team, red_score, blue_score, match_type, created_at, match_played_at",
-    )
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  if (error) {
-    console.error(error)
-    return NextResponse.json({ error: "Failed to fetch match" }, { status: 500 })
+  let match: Record<string, any> | null = null
+
+  if (discordId) {
+    // Resolve the player, then find their most recent match on either team.
+    let players
+    try {
+      players = await fetchPlayersForBot()
+    } catch (e) {
+      console.error(e)
+      return NextResponse.json({ error: "Failed to fetch players" }, { status: 500 })
+    }
+    const player = players.find((p) => p.discord_ids?.includes(discordId))
+    if (!player) {
+      return NextResponse.json({ error: "unlinked" }, { status: 404 })
+    }
+
+    const [red, blue] = await Promise.all([
+      supabase.from("matches").select(MATCH_SELECT).contains("red_team", [player.name]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("matches").select(MATCH_SELECT).contains("blue_team", [player.name]).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    ])
+    if (red.error || blue.error) {
+      console.error(red.error || blue.error)
+      return NextResponse.json({ error: "Failed to fetch match" }, { status: 500 })
+    }
+    match =
+      [red.data, blue.data]
+        .filter(Boolean)
+        .sort((a, b) => new Date((b as any).created_at).getTime() - new Date((a as any).created_at).getTime())[0] || null
+  } else {
+    const { data, error } = await supabase
+      .from("matches")
+      .select(MATCH_SELECT)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (error) {
+      console.error(error)
+      return NextResponse.json({ error: "Failed to fetch match" }, { status: 500 })
+    }
+    match = data
   }
+
   if (!match) {
     return NextResponse.json({ error: "no_matches" }, { status: 404 })
   }
