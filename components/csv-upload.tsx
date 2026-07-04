@@ -30,9 +30,14 @@ export function CSVUpload({ onUploadComplete }: CSVUploadProps) {
       const result = await uploadCSV(formData)
 
       if (result.success) {
+        const changes =
+          typeof result.tierChanges === "number" && result.tierChanges > 0
+            ? ` · ${result.tierChanges} tier change${result.tierChanges === 1 ? "" : "s"} logged`
+            : ""
         toast({
-          title: "Success",
-          description: `Imported ${result.count} players from CSV`,
+          title: result.warning ? "Imported with a warning" : "Success",
+          description: result.warning ?? `Imported ${result.count} players from CSV${changes}`,
+          variant: result.warning ? "destructive" : undefined,
         })
         onUploadComplete()
       } else {
