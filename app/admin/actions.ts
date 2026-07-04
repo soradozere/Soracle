@@ -132,38 +132,65 @@ export async function uploadCSV(formData: FormData) {
 
     const supabase = await createClient()
 
-    // Snapshot current tiers (by name) BEFORE writing, so we can diff old -> new
-    // and record any rank changes in the Tier Changelog. Deliberately NOT a full
-    // delete + reinsert: players are keyed by name via upsert, so their ids are
-    // preserved and match_stats / tier_changes rows stay linked. Players absent
-    // from the CSV are left untouched.
+    // Snapshot current players (by name) BEFORE writing, so we can (a) diff old ->
+    // new tiers for the changelog and (b) reuse each existing player's real id.
+    // Deliberately NOT a full delete + reinsert: ids are preserved so match_stats /
+    // tier_changes stay linked, and players absent from the CSV are left untouched.
     const { data: existing, error: existingError } = await supabase
       .from("players")
       .select("id, name, tier_value")
     if (existingError) {
       return { success: false, error: existingError.message }
     }
-    const oldTierByName = new Map<string, number>((existing || []).map((p) => [p.name, p.tier_value]))
+    const existingByName = new Map<string, { id: string; tier_value: number }>(
+      (existing || []).map((p) => [p.name, { id: p.id, tier_value: p.tier_value }]),
+    )
 
-    // Upsert on the unique name key, returning ids so we can attribute tier changes.
-    const { data: upserted, error } = await supabase
-      .from("players")
-      .upsert(players, { onConflict: "name" })
-      .select("id, name, tier_value")
+    // Split into updates (name already exists) and inserts (genuinely new). This
+    // matters because of the discord_ids uniqueness trigger: it rejects any row
+    // whose id differs from an existing owner of the same Discord ID. Upserting on
+    // "name" fires the BEFORE INSERT trigger with a fresh random id, which the
+    // trigger reads as a *different* player stealing the ID. By carrying the real
+    // id and conflicting on "id", the trigger correctly sees the row as itself.
+    const toUpdate = []
+    const toInsert = []
+    for (const player of players) {
+      const match = existingByName.get(player.name)
+      if (match) {
+        toUpdate.push({ id: match.id, ...player })
+      } else {
+        toInsert.push(player)
+      }
+    }
 
-    if (error) {
-      return { success: false, error: error.message }
+    if (toUpdate.length > 0) {
+      const { error: updateError } = await supabase
+        .from("players")
+        .upsert(toUpdate, { onConflict: "id" })
+      if (updateError) {
+        return { success: false, error: updateError.message }
+      }
+    }
+
+    if (toInsert.length > 0) {
+      const { error: insertError } = await supabase.from("players").insert(toInsert)
+      if (insertError) {
+        return { success: false, error: insertError.message }
+      }
     }
 
     // Record tier changes for the changelog: only players who already existed and
     // whose tier actually moved. New players don't produce a changelog entry.
-    const tierChangeRows = (upserted || [])
-      .filter((p) => oldTierByName.has(p.name) && oldTierByName.get(p.name) !== p.tier_value)
+    const tierChangeRows = players
+      .filter((p) => {
+        const prev = existingByName.get(p.name)
+        return prev && prev.tier_value !== p.tier_value
+      })
       .map((p) => ({
-        player_id: p.id,
+        player_id: existingByName.get(p.name)!.id,
         player_name: p.name,
-        previous_tier: oldTierByName.get(p.name) as number,
-        new_tier: p.tier_value,
+        previous_tier: existingByName.get(p.name)!.tier_value,
+        new_tier: p.tier_value as number,
       }))
 
     if (tierChangeRows.length > 0) {
