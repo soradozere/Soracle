@@ -1,5 +1,6 @@
 "use server"
 
+import Papa from "papaparse"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
@@ -44,14 +45,21 @@ export async function uploadCSV(formData: FormData) {
 
   try {
     const text = await file.text()
-    const lines = text.split("\n").filter((line) => line.trim())
 
-    if (lines.length < 2) {
+    // Use a real CSV parser: Player/Tooltip are free text and can contain commas,
+    // which spreadsheets export as quoted fields. Naive comma-splitting would
+    // mis-align the row and shift the Discord IDs column onto a tooltip fragment,
+    // causing spurious "Invalid Discord ID" errors. PapaParse handles quoted
+    // fields, embedded commas, and CRLF line endings.
+    const parsed = Papa.parse<Record<string, string>>(text, {
+      header: true,
+      skipEmptyLines: true,
+      transformHeader: (h) => h.trim(),
+    })
+
+    if (!parsed.data || parsed.data.length === 0) {
       return { success: false, error: "CSV file is empty or invalid" }
     }
-
-    // Parse CSV header
-    const header = lines[0].split(",").map((h) => h.trim())
 
     // Map CSV columns to database fields
     const columnMap: Record<string, string> = {
@@ -72,16 +80,12 @@ export async function uploadCSV(formData: FormData) {
 
     // Parse players
     const players = []
-    for (let i = 1; i < lines.length; i++) {
-      const values = lines[i].split(",").map((v) => v.trim())
-      if (values.length < header.length) continue
-
+    for (const row of parsed.data) {
       const player: any = {}
-      for (let j = 0; j < header.length; j++) {
-        const dbField = columnMap[header[j]]
-        if (!dbField) continue
+      for (const [csvCol, dbField] of Object.entries(columnMap)) {
+        if (!(csvCol in row)) continue
 
-        const value = values[j]
+        const value = (row[csvCol] ?? "").trim()
 
         if (dbField === "name" || dbField === "tooltip") {
           player[dbField] = value || null
@@ -126,20 +130,55 @@ export async function uploadCSV(formData: FormData) {
       }
     }
 
-    // Insert into database
     const supabase = await createClient()
 
-    // Clear existing players
-    await supabase.from("players").delete().neq("id", "00000000-0000-0000-0000-000000000000")
+    // Snapshot current tiers (by name) BEFORE writing, so we can diff old -> new
+    // and record any rank changes in the Tier Changelog. Deliberately NOT a full
+    // delete + reinsert: players are keyed by name via upsert, so their ids are
+    // preserved and match_stats / tier_changes rows stay linked. Players absent
+    // from the CSV are left untouched.
+    const { data: existing, error: existingError } = await supabase
+      .from("players")
+      .select("id, name, tier_value")
+    if (existingError) {
+      return { success: false, error: existingError.message }
+    }
+    const oldTierByName = new Map<string, number>((existing || []).map((p) => [p.name, p.tier_value]))
 
-    // Insert new players
-    const { error } = await supabase.from("players").insert(players)
+    // Upsert on the unique name key, returning ids so we can attribute tier changes.
+    const { data: upserted, error } = await supabase
+      .from("players")
+      .upsert(players, { onConflict: "name" })
+      .select("id, name, tier_value")
 
     if (error) {
       return { success: false, error: error.message }
     }
 
-    return { success: true, count: players.length }
+    // Record tier changes for the changelog: only players who already existed and
+    // whose tier actually moved. New players don't produce a changelog entry.
+    const tierChangeRows = (upserted || [])
+      .filter((p) => oldTierByName.has(p.name) && oldTierByName.get(p.name) !== p.tier_value)
+      .map((p) => ({
+        player_id: p.id,
+        player_name: p.name,
+        previous_tier: oldTierByName.get(p.name) as number,
+        new_tier: p.tier_value,
+      }))
+
+    if (tierChangeRows.length > 0) {
+      const { error: changeError } = await supabase.from("tier_changes").insert(tierChangeRows)
+      // A changelog failure shouldn't fail the whole import; surface it as a warning.
+      if (changeError) {
+        return {
+          success: true,
+          count: players.length,
+          warning: `Roster updated, but the tier changelog could not be recorded: ${changeError.message}`,
+        }
+      }
+    }
+
+    return { success: true, count: players.length, tierChanges: tierChangeRows.length }
   } catch (error) {
     return {
       success: false,
