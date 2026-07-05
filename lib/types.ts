@@ -16,6 +16,9 @@ export interface Player {
   last_match_at?: string | null
   manually_inactive?: boolean
   discord_ids?: string[]
+  // Profile presentation (migration 014), admin-editable from the profile page.
+  avatar_url?: string | null
+  spotlight_url?: string | null
 }
 
 export interface BalanceResult {
