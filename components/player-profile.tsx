@@ -5,14 +5,21 @@ import Link from "next/link"
 import {
   loadPlayerProfile,
   playerSlug,
+  spotlightEmbedUrl,
   type PlayerProfileData,
   type ProfileBadge,
   type ProfileMatchEntry,
 } from "@/lib/player-profile"
 import type { Player } from "@/lib/types"
-import { Flame, Swords, Heart, ChevronDown } from "lucide-react"
+import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucide-react"
 import { BADGE_META } from "@/lib/badge-meta"
+import { createClient } from "@/lib/supabase/client"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
+import { Label } from "@/components/ui/label"
 import {
   Bar,
   ComposedChart,
@@ -31,6 +38,16 @@ import {
 interface PlayerProfileProps {
   player: Player
   allPlayers: Player[]
+  // Admins get an inline editor for slogan / avatar / spotlight (RLS enforces
+  // the write; this only decides whether the pencil is shown).
+  isAdmin?: boolean
+}
+
+// Admin-editable presentation fields, held in local state so edits show live.
+interface EditableFields {
+  tooltip: string
+  avatar_url: string
+  spotlight_url: string
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -298,9 +315,177 @@ function ChartTooltipContent({ active, payload, label }: any) {
   )
 }
 
-export function PlayerProfile({ player, allPlayers }: PlayerProfileProps) {
+// The player's chosen highlight clip, rendered as a responsive 16:9 embed.
+// Only shown when a URL is set; a bad/unsupported link falls back to a plain
+// link so nothing silently disappears.
+function Spotlight({ url }: { url: string }) {
+  const embed = spotlightEmbedUrl(url)
+  return (
+    <div>
+      {embed ? (
+        <div className="relative w-full overflow-hidden rounded-lg border border-[#3d4855]" style={{ paddingTop: "56.25%" }}>
+          <iframe
+            src={embed}
+            title="Player spotlight"
+            className="absolute inset-0 h-full w-full"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+            allowFullScreen
+          />
+        </div>
+      ) : (
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-sm text-[#66fcf1] hover:underline break-all"
+        >
+          {url}
+        </a>
+      )}
+    </div>
+  )
+}
+
+// Admin-only editor for slogan / avatar / spotlight. Writes straight to the
+// players table via the browser client — the players update RLS policy is
+// admin-only, so this is safe. Calls onSaved with the new values on success.
+function EditProfileDialog({
+  open,
+  onOpenChange,
+  playerId,
+  playerName,
+  initial,
+  onSaved,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  playerId: string
+  playerName: string
+  initial: EditableFields
+  onSaved: (fields: EditableFields) => void
+}) {
+  const [fields, setFields] = useState<EditableFields>(initial)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  // Re-seed the form whenever it's (re)opened for a player.
+  useEffect(() => {
+    if (open) {
+      setFields(initial)
+      setSaveError(null)
+    }
+  }, [open, initial])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaveError(null)
+    // Empty string → null so cleared fields actually clear in the DB.
+    const payload = {
+      tooltip: fields.tooltip.trim() || null,
+      avatar_url: fields.avatar_url.trim() || null,
+      spotlight_url: fields.spotlight_url.trim() || null,
+    }
+    const supabase = createClient()
+    const { error } = await supabase.from("players").update(payload).eq("id", playerId)
+    setSaving(false)
+    if (error) {
+      setSaveError(error.message)
+      return
+    }
+    onSaved({
+      tooltip: payload.tooltip ?? "",
+      avatar_url: payload.avatar_url ?? "",
+      spotlight_url: payload.spotlight_url ?? "",
+    })
+    onOpenChange(false)
+  }
+
+  const spotlightPreview = spotlightEmbedUrl(fields.spotlight_url)
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-[#0b0c10]/95 backdrop-blur-md border-[#66fcf1]/30 text-[#c5c6c7]">
+        <DialogHeader>
+          <DialogTitle className="text-[#66fcf1] font-mono">Edit profile — {playerName}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-slogan" className="text-xs text-[#8892a0]">
+              Slogan
+            </Label>
+            <Textarea
+              id="edit-slogan"
+              value={fields.tooltip}
+              onChange={(e) => setFields((f) => ({ ...f, tooltip: e.target.value }))}
+              placeholder="Their one-liner (also shown as the Balancer tooltip)"
+              className="bg-[#1f2833] border-[#3d4855]"
+              rows={2}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-avatar" className="text-xs text-[#8892a0]">
+              Avatar image URL
+            </Label>
+            <Input
+              id="edit-avatar"
+              value={fields.avatar_url}
+              onChange={(e) => setFields((f) => ({ ...f, avatar_url: e.target.value }))}
+              placeholder="https://…/image.png"
+              className="bg-[#1f2833] border-[#3d4855]"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="edit-spotlight" className="text-xs text-[#8892a0]">
+              Spotlight clip (Vimeo or YouTube link)
+            </Label>
+            <Input
+              id="edit-spotlight"
+              value={fields.spotlight_url}
+              onChange={(e) => setFields((f) => ({ ...f, spotlight_url: e.target.value }))}
+              placeholder="https://vimeo.com/… or https://youtu.be/…"
+              className="bg-[#1f2833] border-[#3d4855]"
+            />
+            {fields.spotlight_url.trim() && (
+              <p className={`text-xs ${spotlightPreview ? "text-[#27ae60]" : "text-[#f39c12]"}`}>
+                {spotlightPreview ? "✓ Recognised video link" : "⚠ Not a recognised Vimeo/YouTube link — will show as a plain link"}
+              </p>
+            )}
+          </div>
+          {saveError && <p className="text-xs text-[#ff4757]">{saveError}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={saving} className="gap-2">
+            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerProfileProps) {
   const [data, setData] = useState<PlayerProfileData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [editOpen, setEditOpen] = useState(false)
+
+  // Admin-editable fields as live local state, seeded from the player and reset
+  // when navigating to a different player.
+  const [fields, setFields] = useState<EditableFields>({
+    tooltip: player.tooltip ?? "",
+    avatar_url: player.avatar_url ?? "",
+    spotlight_url: player.spotlight_url ?? "",
+  })
+  useEffect(() => {
+    setFields({
+      tooltip: player.tooltip ?? "",
+      avatar_url: player.avatar_url ?? "",
+      spotlight_url: player.spotlight_url ?? "",
+    })
+  }, [player.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     let cancelled = false
@@ -336,16 +521,33 @@ export function PlayerProfile({ player, allPlayers }: PlayerProfileProps) {
       {/* ---- Header: avatar, name, aliases, slogan, tier + roles ---- */}
       <div className="bg-[#1f2833]/40 border border-[#3d4855] rounded-lg backdrop-blur-lg p-5">
         <div className="flex flex-col sm:flex-row gap-5">
-          {/* Placeholder avatar (Discord / in-game model avatars are later phases) */}
+          {/* Custom avatar image if set, else initials (in-game 3D models are a later phase) */}
           <div
-            className="w-24 h-24 shrink-0 rounded-xl border-2 border-[#66fcf1]/40 bg-[#0b0c10] flex items-center justify-center"
+            className="w-24 h-24 shrink-0 rounded-xl border-2 border-[#66fcf1]/40 bg-[#0b0c10] flex items-center justify-center overflow-hidden"
             style={{ boxShadow: "0 0 20px rgba(102,252,241,0.15)" }}
           >
-            <span className="text-4xl font-bold font-mono text-[#66fcf1]">{initials}</span>
+            {fields.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={fields.avatar_url} alt={player.name} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-4xl font-bold font-mono text-[#66fcf1]">{initials}</span>
+            )}
           </div>
 
           <div className="flex-1 min-w-0">
-            <h1 className="text-3xl font-bold text-white">{player.name}</h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-3xl font-bold text-white">{player.name}</h1>
+              {isAdmin && (
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="flex items-center gap-1 text-xs text-[#8892a0] hover:text-[#66fcf1] transition-colors border border-[#3d4855] hover:border-[#66fcf1]/50 rounded px-2 py-1"
+                  title="Edit slogan, avatar and spotlight"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Edit
+                </button>
+              )}
+            </div>
 
             {data && data.aliases.length > 0 && (
               <div className="text-sm text-[#8892a0] mt-1">
@@ -353,8 +555,8 @@ export function PlayerProfile({ player, allPlayers }: PlayerProfileProps) {
               </div>
             )}
 
-            {player.tooltip && (
-              <p className="text-sm italic text-[#66fcf1]/80 mt-2">“{player.tooltip}”</p>
+            {fields.tooltip && (
+              <p className="text-sm italic text-[#66fcf1]/80 mt-2">“{fields.tooltip}”</p>
             )}
 
             <div className="flex items-center gap-2 mt-3">
@@ -522,6 +724,25 @@ export function PlayerProfile({ player, allPlayers }: PlayerProfileProps) {
               )}
             </SectionCard>
 
+          {/* ---- Spotlight (player's chosen highlight clip) ---- */}
+          {fields.spotlight_url ? (
+            <SectionCard title="SPOTLIGHT">
+              <Spotlight url={fields.spotlight_url} />
+            </SectionCard>
+          ) : (
+            isAdmin && (
+              <SectionCard title="SPOTLIGHT">
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="w-full flex items-center justify-center gap-2 py-6 rounded-lg border border-dashed border-[#3d4855] text-sm text-[#8892a0] hover:text-[#66fcf1] hover:border-[#66fcf1]/50 transition-colors"
+                >
+                  <Video className="w-4 h-4" />
+                  Add a spotlight clip (Vimeo or YouTube)
+                </button>
+              </SectionCard>
+            )
+          )}
+
           {/* ---- Performance graph ---- */}
           <SectionCard title="ALL-TIME PERFORMANCE">
             {data.series.length === 0 ? (
@@ -658,6 +879,17 @@ export function PlayerProfile({ player, allPlayers }: PlayerProfileProps) {
             <MatchHistorySection entries={data.matches} playerName={player.name} />
           </SectionCard>
         </>
+      )}
+
+      {isAdmin && (
+        <EditProfileDialog
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          playerId={player.id}
+          playerName={player.name}
+          initial={fields}
+          onSaved={setFields}
+        />
       )}
     </div>
     </TooltipProvider>

@@ -701,6 +701,30 @@ export async function loadBestBadges(players: Player[]): Promise<Record<string, 
   return best
 }
 
+// Turn a pasted Vimeo/YouTube link into an embeddable iframe src, or null if it
+// isn't a recognised video URL (the profile then shows the raw link as a fallback).
+// Handles the common share/watch/short forms of each service.
+export function spotlightEmbedUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  const url = raw.trim()
+  if (!url) return null
+
+  // YouTube: youtu.be/ID, watch?v=ID, /embed/ID, /shorts/ID, /live/ID
+  const yt =
+    url.match(/(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([\w-]{11})/i)
+  if (yt) return `https://www.youtube.com/embed/${yt[1]}`
+
+  // Vimeo: vimeo.com/ID, vimeo.com/ID/HASH (unlisted), player.vimeo.com/video/ID
+  const vimeo = url.match(/vimeo\.com\/(?:video\/)?(\d+)(?:\/([\w-]+))?/i)
+  if (vimeo) {
+    return vimeo[2]
+      ? `https://player.vimeo.com/video/${vimeo[1]}?h=${vimeo[2]}`
+      : `https://player.vimeo.com/video/${vimeo[1]}`
+  }
+
+  return null
+}
+
 // URL slug for a player name: lowercase, spaces → dashes. Resolution compares
 // slugs, so "Dark Jedi" ↔ /player/dark-jedi round-trips.
 export const playerSlug = (name: string) => encodeURIComponent(name.trim().toLowerCase().replace(/\s+/g, "-"))
