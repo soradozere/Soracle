@@ -16,7 +16,9 @@ const ELO_SCALE = 400
 const MARGIN_WEIGHT = 0.6
 
 // Per-player seed from tier (tier 8 → 1800). Unknown tier falls back to mid (5).
-const seedFromTier = (tier: number | null | undefined) => BASE_ELO + (tier ?? 5) * TIER_STEP
+// Exported for the player profile's all-time rating replay (same seed as the
+// leaderboard's all-time view).
+export const seedFromTier = (tier: number | null | undefined) => BASE_ELO + (tier ?? 5) * TIER_STEP
 
 // Fallback for any name that turns up in a match but isn't on the current roster.
 const NEUTRAL_SEED = BASE_ELO + 5 * TIER_STEP
@@ -34,7 +36,8 @@ interface Match {
 }
 
 // Apply one match's ELO update in place. Identical to the leaderboard's applyMatchElo.
-function applyMatchElo(map: Map<string, number>, match: Match) {
+// Exported so the player profile can replay matches without a third copy of the maths.
+export function applyMatchElo(map: Map<string, number>, match: Omit<Match, "id" | "created_at">) {
   const get = (name: string) => {
     if (!map.has(name)) map.set(name, NEUTRAL_SEED)
     return map.get(name)!

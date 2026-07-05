@@ -1,10 +1,17 @@
 "use client"
 
 import type { Player } from "@/lib/types"
-import { Mic, MicOff, Slash, X } from "lucide-react"
+import { Mic, MicOff, Slash, X, UserSearch } from "lucide-react"
 import { useState, memo } from "react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import { playerSlug } from "@/lib/player-profile"
 
 interface PlayerCardProps {
   player: Player
@@ -74,6 +81,8 @@ export const PlayerCard = memo(function PlayerCard({
   }
 
   return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
     <div className="relative" onMouseEnter={() => setShowTooltip(true)} onMouseLeave={() => setShowTooltip(false)}>
       {showTooltip && player.tooltip && !popoverOpen && (
         <div
@@ -276,5 +285,16 @@ export const PlayerCard = memo(function PlayerCard({
         </div>
       </div>
     </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="bg-[#1f2833]/95 backdrop-blur-md border-[#66fcf1]/30 text-[#c5c6c7]">
+        <ContextMenuItem
+          className="gap-2 focus:bg-[#66fcf1]/10 focus:text-[#66fcf1]"
+          onSelect={() => window.open(`/player/${playerSlug(player.name)}`, "_blank")}
+        >
+          <UserSearch className="w-4 h-4" />
+          Show Profile
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 })
