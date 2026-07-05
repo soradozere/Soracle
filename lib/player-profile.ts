@@ -230,18 +230,28 @@ function outcomeFor(name: string, match: ProfileMatch): MatchOutcome {
 // 30% of the month's matches to place on the board.
 const MONTHLY_MIN_FRACTION = 0.3
 
+interface BoardPlace {
+  name: string
+  rank: number
+  wins: number
+  losses: number
+  winPct: number
+}
+
 interface MonthlyHonours {
   key: string
-  champion: { name: string; elo: number } | null
-  top5: { name: string; rank: number; elo: number }[]
+  champion: BoardPlace | null
+  top5: BoardPlace[]
   topCapper: { name: string; captures: number } | null
   topKD: { name: string; kd: number } | null
 }
 
-// For every COMPLETED month, work out who topped the flat-seeded monthly ELO
-// board (champion + top 5), who captured the most flags, and who had the best
-// K/D. The current in-progress month never awards — you can't win a month that
-// isn't over.
+// For every COMPLETED month, work out who topped the public monthly W/L
+// leaderboard (champion + top 5), who captured the most flags, and who had the
+// best K/D. Champion/top-5 deliberately mirror the Reports tab's leaderboard —
+// win rate, then total wins, then games played, 30% qualifier — NOT the
+// ELO/TrueSkill boards, since W/L is the one the community sees. The current
+// in-progress month never awards — you can't win a month that isn't over.
 function computeMonthlyHonours(
   matches: ProfileMatch[],
   stats: StatRow[],
@@ -266,23 +276,38 @@ function computeMonthlyHonours(
 
   const honours: MonthlyHonours[] = []
   for (const [key, monthMatches] of Array.from(matchesByMonth.entries()).sort()) {
-    // --- Champion + top 5: flat-seeded ELO over this month only, matching the
-    // monthly leaderboard (pure this-month form, no tier inheritance).
-    const elo = new Map<string, number>()
-    const games = new Map<string, number>()
+    // --- Champion + top 5: the month's W/L standings, identical maths to the
+    // Reports tab's public leaderboard (draws count as played, not as W or L).
+    const records = new Map<string, { wins: number; losses: number; played: number }>()
     for (const match of monthMatches) {
-      applyMatchElo(elo, match)
-      for (const name of [...match.red_team, ...match.blue_team]) {
-        games.set(name, (games.get(name) ?? 0) + 1)
+      const redWon = match.red_score > match.blue_score
+      const blueWon = match.blue_score > match.red_score
+      for (const [team, won, lost] of [
+        [match.red_team, redWon, blueWon] as const,
+        [match.blue_team, blueWon, redWon] as const,
+      ]) {
+        for (const name of team) {
+          let rec = records.get(name)
+          if (!rec) {
+            rec = { wins: 0, losses: 0, played: 0 }
+            records.set(name, rec)
+          }
+          rec.played++
+          if (won) rec.wins++
+          else if (lost) rec.losses++
+        }
       }
     }
-    // applyMatchElo seeds every unseen name at the neutral mid-tier value, so
-    // starting from an empty map IS the flat-seeded monthly board.
     const minGames = Math.max(1, Math.ceil(monthMatches.length * MONTHLY_MIN_FRACTION))
-    const board = Array.from(elo.entries())
-      .filter(([name]) => (games.get(name) ?? 0) >= minGames)
-      .sort((a, b) => b[1] - a[1])
-      .map(([name, rating], i) => ({ name, rank: i + 1, elo: Math.round(rating) }))
+    const board: BoardPlace[] = Array.from(records.entries())
+      .filter(([, rec]) => rec.played >= minGames)
+      .map(([name, rec]) => ({ name, ...rec, winPct: rec.played > 0 ? (rec.wins / rec.played) * 100 : 0 }))
+      .sort((a, b) => {
+        if (b.winPct !== a.winPct) return b.winPct - a.winPct
+        if (b.wins !== a.wins) return b.wins - a.wins
+        return b.played - a.played
+      })
+      .map((p, i) => ({ name: p.name, rank: i + 1, wins: p.wins, losses: p.losses, winPct: p.winPct }))
 
     // --- Top capper / top K/D from CSV stats (only matches that had a CSV count).
     const caps = new Map<string, number>()
@@ -344,12 +369,13 @@ function badgesFor(name: string, honours: MonthlyHonours[]): ProfileBadge[] {
       .filter((e): e is BadgeEntry => e !== null)
       .reverse()
 
-  const champion = collect((h) => (h.champion?.name === name ? `${h.champion.elo} ELO` : null))
+  const record = (p: BoardPlace) => `${p.wins}W–${p.losses}L (${Math.round(p.winPct)}%)`
+  const champion = collect((h) => (h.champion?.name === name ? record(h.champion) : null))
   // A champion month is not double-counted as a top-5 finish.
   const top5 = collect((h) => {
     if (h.champion?.name === name) return null
     const place = h.top5.find((p) => p.name === name)
-    return place ? `#${place.rank} · ${place.elo} ELO` : null
+    return place ? `#${place.rank} · ${record(place)}` : null
   })
   const capper = collect((h) => (h.topCapper?.name === name ? `${h.topCapper.captures} caps` : null))
   const kd = collect((h) => (h.topKD?.name === name ? `${h.topKD.kd.toFixed(2)} K/D` : null))
