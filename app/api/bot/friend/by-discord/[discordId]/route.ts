@@ -62,14 +62,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
     }
   }
 
-  // Best team-mate = highest win-RATE alongside you (not raw volume), min 3 games
+  // Best team-mates = highest win-RATE alongside you (not raw volume), min 3 games
   // together so it's not noise; ties broken by most games together.
   const MIN_GAMES = 3
-  const friend =
-    Array.from(together.entries())
-      .map(([name, rec]) => ({ name, ...rec, rate: rec.wins / rec.games }))
-      .filter((r) => r.games >= MIN_GAMES)
-      .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games))[0] || null
+  const ranked = Array.from(together.entries())
+    .map(([name, rec]) => ({ name, ...rec, rate: rec.wins / rec.games }))
+    .filter((r) => r.games >= MIN_GAMES)
+    .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games))
 
-  return NextResponse.json({ name: me, month: monthLabel, friend })
+  // Top 3 team-mates. `friend` kept as the single best for backwards compatibility
+  // with bot versions that predate the top-3 rollout.
+  const friends = ranked.slice(0, 3)
+  const friend = friends[0] || null
+
+  return NextResponse.json({ name: me, month: monthLabel, friend, friends })
 }
