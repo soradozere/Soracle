@@ -85,5 +85,8 @@ export function mapDbPlayer(dbPlayer: any): Player {
     last_match_at: dbPlayer.last_match_at ?? null,
     manually_inactive: dbPlayer.manually_inactive ?? false,
     discord_ids: dbPlayer.discord_ids ?? [],
+    // Present only once migration 014 has run; undefined before then.
+    avatar_url: dbPlayer.avatar_url ?? null,
+    spotlight_url: dbPlayer.spotlight_url ?? null,
   }
 }

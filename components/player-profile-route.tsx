@@ -6,6 +6,7 @@ import { PlayerProfile } from "@/components/player-profile"
 import { BackgroundParticles } from "@/components/background-particles"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import { resolvePlayerSlug } from "@/lib/player-profile"
+import { checkIsAdmin } from "@/lib/is-admin"
 import type { Player } from "@/lib/types"
 import { ArrowLeft } from "lucide-react"
 
@@ -17,11 +18,14 @@ import { ArrowLeft } from "lucide-react"
 export function PlayerProfileRoute({ slug }: { slug: string }) {
   const [players, setPlayers] = useState<Player[] | null>(null)
   const [error, setError] = useState(false)
+  const [isAdmin, setIsAdmin] = useState(false)
 
   useEffect(() => {
     fetchPlayersFromDB()
       .then(setPlayers)
       .catch(() => setError(true))
+    // Admins (you) get the inline profile editor; anyone else just views.
+    checkIsAdmin().then(setIsAdmin).catch(() => setIsAdmin(false))
   }, [])
 
   const player = players ? resolvePlayerSlug(slug, players) : null
@@ -52,7 +56,7 @@ export function PlayerProfileRoute({ slug }: { slug: string }) {
             <p className="text-sm text-[#8892a0]">Check the spelling, or head back and right-click a player card.</p>
           </div>
         ) : (
-          <PlayerProfile player={player} allPlayers={players} />
+          <PlayerProfile player={player} allPlayers={players} isAdmin={isAdmin} />
         )}
       </div>
     </div>
