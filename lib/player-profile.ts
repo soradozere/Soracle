@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/client"
 import { applyMatchElo, seedFromTier } from "@/lib/elo"
+import { BADGE_PRIORITY } from "@/lib/badge-meta"
 import type { Player } from "@/lib/types"
 
 // Everything a player profile shows, computed client-side from one pass over
@@ -628,6 +629,50 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
       peakElo: Math.round(peakElo),
     },
   }
+}
+
+/**
+ * Best badge per player for the balancer's Player Cards: one pass over all
+ * matches + stats computes every month's honours, then each player gets their
+ * single most prestigious badge (BADGE_PRIORITY order). Players with no badge
+ * are absent from the map.
+ */
+export async function loadBestBadges(players: Player[]): Promise<Record<string, BadgeId>> {
+  const [matches, stats] = await Promise.all([
+    fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
+    fetchAllRows<StatRow>(
+      "match_stats",
+      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score",
+    ),
+  ])
+
+  const nameById = new Map(players.map((p) => [p.id, p.name]))
+  const playable = matches.filter((m) => m.red_team?.length && m.blue_team?.length)
+  const honours = computeMonthlyHonours(playable, stats, nameById)
+
+  const earned: Record<BadgeId, Set<string>> = {
+    champion: new Set(),
+    top5: new Set(),
+    "top-capper": new Set(),
+    "top-kd": new Set(),
+  }
+  for (const h of honours) {
+    if (h.champion) earned.champion.add(h.champion.name)
+    for (const p of h.top5) earned.top5.add(p.name)
+    if (h.topCapper) earned["top-capper"].add(h.topCapper.name)
+    if (h.topKD) earned["top-kd"].add(h.topKD.name)
+  }
+
+  const best: Record<string, BadgeId> = {}
+  for (const player of players) {
+    for (const id of BADGE_PRIORITY) {
+      if (earned[id].has(player.name)) {
+        best[player.name] = id
+        break
+      }
+    }
+  }
+  return best
 }
 
 // URL slug for a player name: lowercase, spaces → dashes. Resolution compares

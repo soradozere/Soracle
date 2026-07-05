@@ -10,7 +10,8 @@ import {
   type ProfileMatchEntry,
 } from "@/lib/player-profile"
 import type { Player } from "@/lib/types"
-import { Crown, Medal, Flag, Crosshair, Flame, Swords, Heart, ChevronDown } from "lucide-react"
+import { Flame, Swords, Heart, ChevronDown } from "lucide-react"
+import { BADGE_META } from "@/lib/badge-meta"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Bar,
@@ -61,13 +62,6 @@ const TIER_NAMES: Record<number, string> = {
   1: "Youngling",
 }
 
-const BADGE_STYLES: Record<ProfileBadge["id"], { icon: typeof Crown; color: string }> = {
-  champion: { icon: Crown, color: "#f1c40f" },
-  top5: { icon: Medal, color: "#c5c6c7" },
-  "top-capper": { icon: Flag, color: "#62d6e8" },
-  "top-kd": { icon: Crosshair, color: "#ff4757" },
-}
-
 function formatFlagHold(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
   const m = Math.floor(totalSeconds / 60)
@@ -109,7 +103,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 function BadgeChip({ badge }: { badge: ProfileBadge }) {
-  const { icon: Icon, color } = BADGE_STYLES[badge.id]
+  const { icon: Icon, color } = BADGE_META[badge.id]
   return (
     <Tooltip>
       <TooltipTrigger asChild>

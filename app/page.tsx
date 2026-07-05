@@ -16,6 +16,7 @@ import { ReportsTab } from "@/components/reports-tab"
 import { getMonthlyPlayerStats } from "@/app/admin/actions"
 import { balanceTeamsWithOptions, balanceTeamsCompetitive, balanceTeamsByElo } from "@/lib/balance-algorithm"
 import { computeMonthlyEloMap } from "@/lib/elo"
+import { loadBestBadges, type BadgeId } from "@/lib/player-profile"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import { checkIsAdmin } from "@/lib/is-admin"
 import { themes, applyTheme, type ThemeName } from "@/lib/themes"
@@ -44,6 +45,8 @@ export default function TeamBalancer() {
   const [globalOffRole, setGlobalOffRole] = useState(false)
   const [showTutorial, setShowTutorial] = useState(false)
   const [playerStats, setPlayerStats] = useState<Record<string, { wins: number; losses: number; draws: number }>>({})
+  // Best profile badge per player, shown on Player Cards where the mic icon was.
+  const [bestBadges, setBestBadges] = useState<Record<string, BadgeId>>({})
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<"balancer" | "history" | "reports" | "info">("balancer")
   const [isAdmin, setIsAdmin] = useState(false)
@@ -57,6 +60,8 @@ export default function TeamBalancer() {
     fetchPlayersFromDB().then((data) => {
       setPlayers(data)
       setLoading(false)
+      // Non-blocking: cards render immediately, badges pop in when computed.
+      loadBestBadges(data).then(setBestBadges).catch(console.error)
     })
     getMonthlyPlayerStats().then((result) => {
       if (result.success) {
@@ -760,6 +765,7 @@ export default function TeamBalancer() {
                     currentTheme={currentTheme}
                     onDisabledRolesChange={(disabledRoles) => handleDisabledRolesChange(player.name, disabledRoles)}
                     winStats={playerStats[player.name]}
+                    bestBadge={bestBadges[player.name]}
                   />
                 ))}
               </div>
