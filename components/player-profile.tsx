@@ -120,7 +120,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 function BadgeChip({ badge }: { badge: ProfileBadge }) {
-  const { icon: Icon, color } = BADGE_META[badge.id]
+  const { icon: Icon, color, label } = BADGE_META[badge.id]
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -129,7 +129,7 @@ function BadgeChip({ badge }: { badge: ProfileBadge }) {
           style={{ borderColor: `${color}66`, boxShadow: `0 0 10px ${color}22` }}
         >
           <Icon className="w-4 h-4" style={{ color }} />
-          <span className="text-xs font-bold text-[#c5c6c7]">{badge.label}</span>
+          <span className="text-xs font-bold text-[#c5c6c7]">{label}</span>
           {badge.entries.length > 1 && (
             <span className="text-xs font-mono font-bold" style={{ color }}>
               ×{badge.entries.length}
