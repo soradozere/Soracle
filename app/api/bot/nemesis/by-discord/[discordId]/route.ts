@@ -59,14 +59,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
     }
   }
 
-  // Nemesis = highest win-rate AGAINST you (not raw volume), min 3 meetings so
+  // Nemeses = highest win-rate AGAINST you (not raw volume), min 3 meetings so
   // it's not noise; ties broken by who you've faced more.
   const MIN_MEETINGS = 3
-  const nemesis =
-    Array.from(h2h.entries())
-      .map(([name, rec]) => ({ name, ...rec, rate: rec.theirWins / rec.meetings }))
-      .filter((r) => r.meetings >= MIN_MEETINGS)
-      .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.meetings - a.meetings))[0] || null
+  const ranked = Array.from(h2h.entries())
+    .map(([name, rec]) => ({ name, ...rec, rate: rec.theirWins / rec.meetings }))
+    .filter((r) => r.meetings >= MIN_MEETINGS)
+    .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.meetings - a.meetings))
 
-  return NextResponse.json({ name: me, month: monthLabel, nemesis })
+  // Top 3 nemeses. `nemesis` kept as the single worst for backwards compatibility
+  // with bot versions that predate the top-3 rollout.
+  const nemeses = ranked.slice(0, 3)
+  const nemesis = nemeses[0] || null
+
+  return NextResponse.json({ name: me, month: monthLabel, nemesis, nemeses })
 }

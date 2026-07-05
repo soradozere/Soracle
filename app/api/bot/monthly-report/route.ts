@@ -111,6 +111,41 @@ export async function GET(request: Request) {
     .sort((a, b) => (closeness(a) !== closeness(b) ? closeness(a) - closeness(b) : b.count - a.count))
     .slice(0, 5)
 
+  // --- Duos: the month's best-winning team-mate pairs ("power couples") ---
+  const duoPairs = new Map<string, { player1: string; player2: string; games: number; wins: number }>()
+  for (const match of matches) {
+    const redWon = match.red_score > match.blue_score
+    const blueWon = match.blue_score > match.red_score
+    for (const [team, won] of [
+      [match.red_team, redWon] as const,
+      [match.blue_team, blueWon] as const,
+    ]) {
+      const roster = team || []
+      for (let i = 0; i < roster.length; i++) {
+        for (let j = i + 1; j < roster.length; j++) {
+          const [player1, player2] = [roster[i], roster[j]].sort()
+          const key = `${player1} & ${player2}`
+          let duo = duoPairs.get(key)
+          if (!duo) {
+            duo = { player1, player2, games: 0, wins: 0 }
+            duoPairs.set(key, duo)
+          }
+          duo.games++
+          if (won) duo.wins++
+        }
+      }
+    }
+  }
+
+  // Best duo = highest win-RATE together (not raw volume), min 4 games as a pair
+  // to match the rivalry floor; ties broken by more games played together.
+  const DUO_MIN_GAMES = 4
+  const duos = Array.from(duoPairs.values())
+    .map((d) => ({ ...d, rate: d.wins / d.games }))
+    .filter((d) => d.games >= DUO_MIN_GAMES)
+    .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games))
+    .slice(0, 5)
+
   // --- Longest win streaks of the month (chronological) ---
   const sortedMatches = [...matches].sort(
     (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
@@ -160,6 +195,7 @@ export async function GET(request: Request) {
         }
       : null,
     rivalries,
+    duos,
     streaks,
     redBlue: { redWins, blueWins, draws, total: totalMatches },
   })
