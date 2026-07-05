@@ -247,10 +247,12 @@ function HistoryRow({ entry, playerName }: { entry: ProfileMatchEntry; playerNam
   )
 }
 
+// Short initial view keeps the profile page compact; Show More digs in faster.
+const HISTORY_INITIAL = 5
 const HISTORY_PAGE_SIZE = 10
 
 function MatchHistorySection({ entries, playerName }: { entries: ProfileMatchEntry[]; playerName: string }) {
-  const [visible, setVisible] = useState(HISTORY_PAGE_SIZE)
+  const [visible, setVisible] = useState(HISTORY_INITIAL)
 
   if (entries.length === 0) {
     return <p className="text-sm text-[#8892a0]">No matches recorded yet.</p>
