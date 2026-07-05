@@ -409,7 +409,7 @@ export function MatchHistoryTab() {
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {match.red_team.map((player, index) => (
-                      <span key={player} className="text-xs text-[var(--color-text)] bg-[var(--color-surface)] px-2 py-0.5 rounded flex items-center gap-1">
+                      <span key={`${player}-${index}`} className="text-xs text-[var(--color-text)] bg-[var(--color-surface)] px-2 py-0.5 rounded flex items-center gap-1">
                         {player}
                         {match.red_tiers?.[index] != null && (
                           <span className="text-[10px] font-bold text-[var(--color-primary)] bg-[var(--color-primary)]/20 px-1 rounded">
@@ -431,7 +431,7 @@ export function MatchHistoryTab() {
                   </div>
                   <div className="flex flex-wrap gap-1">
                     {match.blue_team.map((player, index) => (
-                      <span key={player} className="text-xs text-[var(--color-text)] bg-[var(--color-surface)] px-2 py-0.5 rounded flex items-center gap-1">
+                      <span key={`${player}-${index}`} className="text-xs text-[var(--color-text)] bg-[var(--color-surface)] px-2 py-0.5 rounded flex items-center gap-1">
                         {player}
                         {match.blue_tiers?.[index] != null && (
                           <span className="text-[10px] font-bold text-[var(--color-primary)] bg-[var(--color-primary)]/20 px-1 rounded">
