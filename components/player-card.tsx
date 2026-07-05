@@ -1,10 +1,18 @@
 "use client"
 
 import type { Player } from "@/lib/types"
-import { Mic, MicOff, Slash, X } from "lucide-react"
+import { Slash, X, UserSearch } from "lucide-react"
 import { useState, memo } from "react"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Switch } from "@/components/ui/switch"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
+import { playerSlug, type BadgeId } from "@/lib/player-profile"
+import { BADGE_META } from "@/lib/badge-meta"
 
 interface PlayerCardProps {
   player: Player
@@ -15,6 +23,9 @@ interface PlayerCardProps {
   currentTheme?: string
   onDisabledRolesChange?: (disabledRoles: string[]) => void
   winStats?: { wins: number; losses: number; draws: number }
+  // The player's most prestigious profile badge, shown where the mic icon
+  // used to live. Absent = no badge earned yet, nothing rendered.
+  bestBadge?: BadgeId
 }
 
 const ROLE_COLORS = {
@@ -42,6 +53,7 @@ export const PlayerCard = memo(function PlayerCard({
   currentTheme = "jedi",
   onDisabledRolesChange,
   winStats,
+  bestBadge,
 }: PlayerCardProps) {
   const [showTooltip, setShowTooltip] = useState(false)
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -74,6 +86,8 @@ export const PlayerCard = memo(function PlayerCard({
   }
 
   return (
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
     <div className="relative" onMouseEnter={() => setShowTooltip(true)} onMouseLeave={() => setShowTooltip(false)}>
       {showTooltip && player.tooltip && !popoverOpen && (
         <div
@@ -230,9 +244,14 @@ export const PlayerCard = memo(function PlayerCard({
               )}
             </div>
           </div>
-          <div className="ml-2 flex flex-col items-end gap-1">
-            {player.mic ? <Mic className="w-4 h-4 text-[#27ae60]" /> : <MicOff className="w-4 h-4 text-[#8892a0]" />}
-          </div>
+          {bestBadge && (() => {
+            const { icon: BadgeIcon, color, label } = BADGE_META[bestBadge]
+            return (
+              <div className="ml-2 flex flex-col items-end gap-1" title={label}>
+                <BadgeIcon className="w-4 h-4" style={{ color }} />
+              </div>
+            )
+          })()}
         </div>
 
         <div className="space-y-2">
@@ -276,5 +295,16 @@ export const PlayerCard = memo(function PlayerCard({
         </div>
       </div>
     </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent className="bg-[#1f2833]/95 backdrop-blur-md border-[#66fcf1]/30 text-[#c5c6c7]">
+        <ContextMenuItem
+          className="gap-2 focus:bg-[#66fcf1]/10 focus:text-[#66fcf1]"
+          onSelect={() => window.open(`/player/${playerSlug(player.name)}`, "_blank")}
+        >
+          <UserSearch className="w-4 h-4" />
+          Show Profile
+        </ContextMenuItem>
+      </ContextMenuContent>
+    </ContextMenu>
   )
 })
