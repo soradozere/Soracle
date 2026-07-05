@@ -701,9 +701,9 @@ export async function loadBestBadges(players: Player[]): Promise<Record<string, 
   return best
 }
 
-// Turn a pasted Vimeo/YouTube link into an embeddable iframe src, or null if it
-// isn't a recognised video URL (the profile then shows the raw link as a fallback).
-// Handles the common share/watch/short forms of each service.
+// Turn a pasted Vimeo/YouTube/Streamable link into an embeddable iframe src, or
+// null if it isn't a recognised video URL (the profile then shows the raw link
+// as a fallback). Handles the common share/watch/short forms of each service.
 export function spotlightEmbedUrl(raw: string | null | undefined): string | null {
   if (!raw) return null
   const url = raw.trim()
@@ -721,6 +721,10 @@ export function spotlightEmbedUrl(raw: string | null | undefined): string | null
       ? `https://player.vimeo.com/video/${vimeo[1]}?h=${vimeo[2]}`
       : `https://player.vimeo.com/video/${vimeo[1]}`
   }
+
+  // Streamable: streamable.com/CODE (share) or streamable.com/e/CODE (embed)
+  const streamable = url.match(/streamable\.com\/(?:e\/)?([a-z0-9]+)/i)
+  if (streamable) return `https://streamable.com/e/${streamable[1]}`
 
   return null
 }

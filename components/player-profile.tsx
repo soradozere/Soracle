@@ -436,18 +436,18 @@ function EditProfileDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="edit-spotlight" className="text-xs text-[#8892a0]">
-              Spotlight clip (Vimeo or YouTube link)
+              Spotlight clip (Vimeo, YouTube or Streamable link)
             </Label>
             <Input
               id="edit-spotlight"
               value={fields.spotlight_url}
               onChange={(e) => setFields((f) => ({ ...f, spotlight_url: e.target.value }))}
-              placeholder="https://vimeo.com/… or https://youtu.be/…"
+              placeholder="https://vimeo.com/… , https://youtu.be/… or https://streamable.com/…"
               className="bg-[#1f2833] border-[#3d4855]"
             />
             {fields.spotlight_url.trim() && (
               <p className={`text-xs ${spotlightPreview ? "text-[#27ae60]" : "text-[#f39c12]"}`}>
-                {spotlightPreview ? "✓ Recognised video link" : "⚠ Not a recognised Vimeo/YouTube link — will show as a plain link"}
+                {spotlightPreview ? "✓ Recognised video link" : "⚠ Not a recognised Vimeo/YouTube/Streamable link — will show as a plain link"}
               </p>
             )}
           </div>
@@ -737,7 +737,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
                   className="w-full flex items-center justify-center gap-2 py-6 rounded-lg border border-dashed border-[#3d4855] text-sm text-[#8892a0] hover:text-[#66fcf1] hover:border-[#66fcf1]/50 transition-colors"
                 >
                   <Video className="w-4 h-4" />
-                  Add a spotlight clip (Vimeo or YouTube)
+                  Add a spotlight clip (Vimeo, YouTube or Streamable)
                 </button>
               </SectionCard>
             )
