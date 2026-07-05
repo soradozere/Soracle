@@ -2,8 +2,15 @@
 
 import type { Player } from "@/lib/types"
 import { isPlayerInactive } from "@/lib/fetch-players-db"
-import { Mic, ChevronDown } from "lucide-react"
+import { playerSlug } from "@/lib/player-profile"
+import { Mic, ChevronDown, UserSearch } from "lucide-react"
 import { useMemo, useState } from "react"
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu"
 
 interface TierListViewProps {
   players: Player[]
@@ -101,8 +108,9 @@ export function TierListView({
     const isSelected = selectionIndex !== -1
 
     return (
+      <ContextMenu key={player.name}>
+        <ContextMenuTrigger asChild>
       <div
-        key={player.name}
         onClick={() => onTogglePlayer(player.name)}
         className="backdrop-blur-md border rounded-lg p-3 transition-all cursor-pointer hover:scale-105"
         style={{
@@ -192,6 +200,17 @@ export function TierListView({
           ))}
         </div>
       </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent className="bg-[#1f2833]/95 backdrop-blur-md border-[#66fcf1]/30 text-[#c5c6c7]">
+          <ContextMenuItem
+            className="gap-2 focus:bg-[#66fcf1]/10 focus:text-[#66fcf1]"
+            onSelect={() => window.open(`/player/${playerSlug(player.name)}`, "_blank")}
+          >
+            <UserSearch className="w-4 h-4" />
+            Show Profile
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </ContextMenu>
     )
   }
 
