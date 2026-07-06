@@ -714,12 +714,12 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
 }
 
 /**
- * Best badge per player for the balancer's Player Cards: one pass over all
- * matches + stats computes every month's honours, then each player gets their
- * single most prestigious badge (BADGE_PRIORITY order). Players with no badge
- * are absent from the map.
+ * Every badge each player has earned, for the balancer's Player Cards: one pass
+ * over all matches + stats computes every month's honours, then each player gets
+ * their badges in BADGE_PRIORITY order (most prestigious first). Players with no
+ * badge are absent from the map.
  */
-export async function loadBestBadges(players: Player[]): Promise<Record<string, BadgeId>> {
+export async function loadPlayerBadges(players: Player[]): Promise<Record<string, BadgeId[]>> {
   const [matches, stats] = await Promise.all([
     fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
     fetchAllRows<StatRow>(
@@ -748,16 +748,12 @@ export async function loadBestBadges(players: Player[]): Promise<Record<string, 
     if (h.topKD) earned["top-kd"].add(h.topKD.name)
   }
 
-  const best: Record<string, BadgeId> = {}
+  const byPlayer: Record<string, BadgeId[]> = {}
   for (const player of players) {
-    for (const id of BADGE_PRIORITY) {
-      if (earned[id].has(player.name)) {
-        best[player.name] = id
-        break
-      }
-    }
+    const badges = BADGE_PRIORITY.filter((id) => earned[id].has(player.name))
+    if (badges.length) byPlayer[player.name] = badges
   }
-  return best
+  return byPlayer
 }
 
 // Turn a pasted Vimeo/YouTube/Streamable link into an embeddable iframe src, or
