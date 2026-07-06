@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/context-menu"
 import { playerSlug, type BadgeId } from "@/lib/player-profile"
 import { BADGE_META } from "@/lib/badge-meta"
+import { BadgeIcon } from "@/components/badge-icon"
 
 interface PlayerCardProps {
   player: Player
@@ -23,9 +24,9 @@ interface PlayerCardProps {
   currentTheme?: string
   onDisabledRolesChange?: (disabledRoles: string[]) => void
   winStats?: { wins: number; losses: number; draws: number }
-  // The player's most prestigious profile badge, shown where the mic icon
-  // used to live. Absent = no badge earned yet, nothing rendered.
-  bestBadge?: BadgeId
+  // The player's profile badges (priority order, best first), shown where the
+  // mic icon used to live. Absent/empty = no badge earned yet, nothing rendered.
+  badges?: BadgeId[]
 }
 
 const ROLE_COLORS = {
@@ -53,7 +54,7 @@ export const PlayerCard = memo(function PlayerCard({
   currentTheme = "jedi",
   onDisabledRolesChange,
   winStats,
-  bestBadge,
+  badges,
 }: PlayerCardProps) {
   const [showTooltip, setShowTooltip] = useState(false)
   const [popoverOpen, setPopoverOpen] = useState(false)
@@ -229,7 +230,7 @@ export const PlayerCard = memo(function PlayerCard({
 
         <div className="flex items-start justify-between mb-3">
           <div className="flex-1">
-            <h3 className="text-white font-bold text-lg mb-2 truncate">{player.name}</h3>
+            <h3 className="text-white font-extrabold text-lg mb-2 truncate" style={{ fontFamily: "var(--font-orbitron)" }}>{player.name}</h3>
             <div className="flex flex-wrap gap-2 items-center">
               <span
                 className="inline-block px-2 py-1 text-xs font-bold rounded opacity-60"
@@ -244,14 +245,13 @@ export const PlayerCard = memo(function PlayerCard({
               )}
             </div>
           </div>
-          {bestBadge && (() => {
-            const { icon: BadgeIcon, color, label } = BADGE_META[bestBadge]
-            return (
-              <div className="ml-2 flex flex-col items-end gap-1" title={label}>
-                <BadgeIcon className="w-4 h-4" style={{ color }} />
-              </div>
-            )
-          })()}
+          {badges && badges.length > 0 && (
+            <div className="ml-2 flex flex-wrap items-center justify-end gap-1.5 max-w-[7rem]">
+              {badges.map((id) => (
+                <BadgeIcon key={id} id={id} className="w-6 h-6" title={BADGE_META[id].label} />
+              ))}
+            </div>
+          )}
         </div>
 
         <div className="space-y-2">

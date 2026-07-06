@@ -653,19 +653,19 @@ export function ReportsTab() {
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
               <div className="text-[var(--color-text-dim)] text-xs uppercase mb-1">Total Matches</div>
-              <div className="text-2xl font-bold text-[var(--color-primary)]">{totalMatches}</div>
+              <div className="text-2xl font-bold font-mono text-[var(--color-primary)]">{totalMatches}</div>
             </div>
             <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
               <div className="text-[var(--color-text-dim)] text-xs uppercase mb-1">Avg Score Margin</div>
-              <div className="text-2xl font-bold text-[var(--color-text)]">{avgMargin.toFixed(1)}</div>
+              <div className="text-2xl font-bold font-mono text-[var(--color-text)]">{avgMargin.toFixed(1)}</div>
             </div>
             <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
               <div className="text-[var(--color-text-dim)] text-xs uppercase mb-1">Tight games (7-6)</div>
-              <div className="text-2xl font-bold text-[#f39c12]">{nailBiters.length}</div>
+              <div className="text-2xl font-bold font-mono text-[#f39c12]">{nailBiters.length}</div>
             </div>
             <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
               <div className="text-[var(--color-text-dim)] text-xs uppercase mb-1">Blowouts (&gt; 4)</div>
-              <div className="text-2xl font-bold text-[var(--color-text)]">{blowoutCount}</div>
+              <div className="text-2xl font-bold font-mono text-[var(--color-text)]">{blowoutCount}</div>
             </div>
           </div>
 
@@ -677,7 +677,7 @@ export function ReportsTab() {
             </h3>
             {starPlayer ? (
               <div className="text-center">
-                <div className="text-3xl font-bold text-[#ffd700] mb-2">{starPlayer.name}</div>
+                <div className="text-3xl font-bold font-mono text-[#ffd700] mb-2">{starPlayer.name}</div>
                 <div className="text-lg mb-3">
                   <span className="text-[#27ae60] font-bold">{starPlayer.wins}W</span>
                   <span className="text-[var(--color-text-dim)]"> - </span>
@@ -763,7 +763,7 @@ export function ReportsTab() {
               </h3>
               {avgLobbyStrength !== null ? (
                 <div className="text-center">
-                  <div className="text-3xl font-bold mb-2 text-[var(--color-primary)]">
+                  <div className="text-3xl font-bold font-mono mb-2 text-[var(--color-primary)]">
                     {avgLobbyStrength.toFixed(1)}
                   </div>
                   <div className="text-xs text-[var(--color-text-dim)]">
@@ -826,8 +826,8 @@ export function ReportsTab() {
               </h3>
               {topFlagHold ? (
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{topFlagHold.name}</div>
-                  <div className="text-2xl font-bold text-[#f39c12] mb-2">
+                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{topFlagHold.name}</div>
+                  <div className="text-2xl font-bold font-mono text-[#f39c12] mb-2">
                     {formatFlagHold(topFlagHold.flagHoldMs)}
                   </div>
                   <div className="text-xs text-[var(--color-text-dim)] italic">
@@ -852,8 +852,8 @@ export function ReportsTab() {
               </h3>
               {topDbsKills ? (
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{topDbsKills.name}</div>
-                  <div className="text-2xl font-bold text-[#ff4757] mb-2">
+                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{topDbsKills.name}</div>
+                  <div className="text-2xl font-bold font-mono text-[#ff4757] mb-2">
                     {topDbsKills.dbsKills} DBS kills
                   </div>
                   <div className="text-xs text-[var(--color-text-dim)] italic">
@@ -881,8 +881,8 @@ export function ReportsTab() {
               </h3>
               {mostCapsPerRun ? (
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{mostCapsPerRun.name}</div>
-                  <div className="text-2xl font-bold text-[#f39c12] mb-1">
+                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{mostCapsPerRun.name}</div>
+                  <div className="text-2xl font-bold font-mono text-[#f39c12] mb-1">
                     1 cap / {mostCapsPerRun.minutesPerCap.toFixed(1)} min
                   </div>
                   <div className="text-xs text-[var(--color-text-dim)] mb-2">
@@ -910,8 +910,8 @@ export function ReportsTab() {
               </h3>
               {topRetsPerMin ? (
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{topRetsPerMin.name}</div>
-                  <div className="text-2xl font-bold text-[#00d4ff] mb-1">
+                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{topRetsPerMin.name}</div>
+                  <div className="text-2xl font-bold font-mono text-[#00d4ff] mb-1">
                     {topRetsPerMin.retsPerMin.toFixed(2)} rets/min
                   </div>
                   <div className="text-xs text-[var(--color-text-dim)] mb-2">
@@ -942,8 +942,8 @@ export function ReportsTab() {
               </h3>
               {highestKd ? (
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{highestKd.name}</div>
-                  <div className="text-2xl font-bold text-[#ff4757] mb-1">
+                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{highestKd.name}</div>
+                  <div className="text-2xl font-bold font-mono text-[#ff4757] mb-1">
                     {highestKd.kd.toFixed(2)} K/D
                   </div>
                   <div className="text-xs text-[var(--color-text-dim)] mb-2">
@@ -971,8 +971,8 @@ export function ReportsTab() {
               </h3>
               {highestScore ? (
                 <div className="text-center">
-                  <div className="text-3xl font-bold text-[var(--color-text)] mb-1">{highestScore.name}</div>
-                  <div className="text-2xl font-bold text-[#f39c12] mb-2">
+                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{highestScore.name}</div>
+                  <div className="text-2xl font-bold font-mono text-[#f39c12] mb-2">
                     {highestScore.score} pts
                   </div>
                   {highestScore.match && (
@@ -1318,7 +1318,7 @@ export function ReportsTab() {
             </h3>
             {starPlayer ? (
               <div className="text-center">
-                <div className="text-3xl font-bold text-[#ffd700] mb-2">{starPlayer.name}</div>
+                <div className="text-3xl font-bold font-mono text-[#ffd700] mb-2">{starPlayer.name}</div>
                 <div className="text-lg mb-3">
                   <span className="text-[#27ae60] font-bold">{starPlayer.wins}W</span>
                   <span className="text-[var(--color-text-dim)]"> - </span>
