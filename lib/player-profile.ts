@@ -174,6 +174,34 @@ async function fetchAllRows<T>(table: string, columns: string): Promise<T[]> {
   return rows
 }
 
+// The full matches + match_stats tables, fetched once and shared. Both
+// loadPlayerBadges (every balancer visit) and loadPlayerProfile (every profile
+// view, including profile→profile hops) need the complete history, and before
+// this cache each of them re-pulled both tables from Supabase. Short TTL keeps
+// game-night flows fresh (log match → check stats) while de-duping the
+// navigation-heavy paths; a hard reload always refetches.
+const MATCH_DATA_TTL_MS = 60_000
+let matchDataCache: { at: number; promise: Promise<{ matches: ProfileMatch[]; stats: StatRow[] }> } | null = null
+
+function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[] }> {
+  if (matchDataCache && Date.now() - matchDataCache.at < MATCH_DATA_TTL_MS) {
+    return matchDataCache.promise
+  }
+  const promise = Promise.all([
+    fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
+    fetchAllRows<StatRow>(
+      "match_stats",
+      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns",
+    ),
+  ]).then(([matches, stats]) => ({ matches, stats }))
+  matchDataCache = { at: Date.now(), promise }
+  // A failed fetch shouldn't poison the cache for the whole TTL.
+  promise.catch(() => {
+    if (matchDataCache?.promise === promise) matchDataCache = null
+  })
+  return promise
+}
+
 async function fetchAliases(playerId: string): Promise<string[]> {
   const supabase = createClient()
   const { data, error } = await supabase
@@ -557,14 +585,7 @@ function recordHolders(
 }
 
 export async function loadPlayerProfile(player: Player, allPlayers: Player[]): Promise<PlayerProfileData> {
-  const [matches, stats, aliases] = await Promise.all([
-    fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
-    fetchAllRows<StatRow>(
-      "match_stats",
-      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns",
-    ),
-    fetchAliases(player.id),
-  ])
+  const [{ matches, stats }, aliases] = await Promise.all([fetchMatchData(), fetchAliases(player.id)])
 
   const name = player.name
   const nameById = new Map(allPlayers.map((p) => [p.id, p.name]))
@@ -778,13 +799,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
  * badge are absent from the map.
  */
 export async function loadPlayerBadges(players: Player[]): Promise<Record<string, BadgeId[]>> {
-  const [matches, stats] = await Promise.all([
-    fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
-    fetchAllRows<StatRow>(
-      "match_stats",
-      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns",
-    ),
-  ])
+  const { matches, stats } = await fetchMatchData()
 
   const nameById = new Map(players.map((p) => [p.id, p.name]))
   const tierByName = new Map(players.map((p) => [p.name, p.tierValue]))
