@@ -12,12 +12,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
   if (!player) {
     return {
-      title: "Player not found — Soracle",
+      title: "Player not found — JK2 Capture the Flag",
       description: "This player profile could not be found.",
     }
   }
 
-  const title = `${player.name} — Soracle`
+  const title = `${player.name} — JK2 Capture the Flag`
   const label = tierLabel(player.tier)
   const description = player.slogan ? `“${player.slogan}” · ${label}` : `${label} · JK2 CTF player profile`
 

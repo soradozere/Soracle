@@ -6,7 +6,7 @@ import { join } from "node:path"
 // as a branded card in Discord etc. Mirrors the app masthead: glowing JK2 logo,
 // the Orbitron title, and the tagline. Per-player links use the card generated
 // by app/player/[slug]/opengraph-image.tsx instead.
-export const alt = "JK2 Capture the Flag — 6v6 CTF for Jedi Knight 2, also known as Soracle"
+export const alt = "JK2 Capture the Flag — 6v6 CTF for Jedi Knight 2: Jedi Outcast"
 export const size = { width: 1200, height: 630 }
 export const contentType = "image/png"
 
@@ -81,22 +81,6 @@ export default async function Image() {
           <div style={{ display: "flex", fontSize: 30, color: DIM, marginTop: 28 }}>
             Jedi Knight 2: Jedi Outcast • 6v6 Competitive
           </div>
-        </div>
-
-        {/* Brand wordmark — matches the profile share cards */}
-        <div
-          style={{
-            display: "flex",
-            position: "absolute",
-            bottom: 56,
-            right: 72,
-            fontSize: 30,
-            fontWeight: 700,
-            letterSpacing: 6,
-            color: DIM,
-          }}
-        >
-          SORACLE
         </div>
       </div>
     ),

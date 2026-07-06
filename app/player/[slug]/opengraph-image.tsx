@@ -4,14 +4,13 @@ import { findPlayerForMeta, tierLabel, initialsOf } from "@/lib/profile-meta"
 // Social-share thumbnail for /player/<name>, generated per player so a link
 // dropped in Discord unfurls as a branded card: avatar (or initials monogram),
 // name, slogan and tier. Mirrors the profile header's look.
-export const alt = "Soracle player profile"
+export const alt = "JK2 Capture the Flag player profile"
 export const size = { width: 1200, height: 630 }
 export const contentType = "image/png"
 
 const BG = "#0b0c10"
 const CYAN = "#66fcf1"
 const TEXT = "#c5c6c7"
-const DIM = "#8892a0"
 
 export default async function Image({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params
@@ -84,24 +83,8 @@ export default async function Image({ params }: { params: Promise<{ slug: string
             </div>
           </div>
         ) : (
-          <div style={{ display: "flex", fontSize: 72, fontWeight: 800, color: TEXT }}>Soracle player profile</div>
+          <div style={{ display: "flex", fontSize: 72, fontWeight: 800, color: TEXT }}>JK2 Capture the Flag</div>
         )}
-
-        {/* Brand wordmark */}
-        <div
-          style={{
-            display: "flex",
-            position: "absolute",
-            bottom: 56,
-            right: 72,
-            fontSize: 30,
-            fontWeight: 700,
-            letterSpacing: 6,
-            color: DIM,
-          }}
-        >
-          SORACLE
-        </div>
       </div>
     ),
     size,

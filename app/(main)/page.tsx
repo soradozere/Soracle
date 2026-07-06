@@ -4,27 +4,19 @@ import { useState, useEffect, useMemo, useRef, useCallback } from "react"
 import { PlayerCard } from "@/components/player-card"
 import { TeamDisplay } from "@/components/team-display"
 import { FilterPanel } from "@/components/filter-panel"
-import { BackgroundParticles, type BackgroundParticlesRef } from "@/components/background-particles"
 import { BalanceOptions } from "@/components/balance-options"
 import { BalanceHistory } from "@/components/balance-history"
-import { ThemeSelector } from "@/components/theme-selector"
-import { AdminNavButton } from "@/components/admin-nav-button"
 import { TierListView } from "@/components/tier-list-view"
-import { TutorialDialog } from "@/components/tutorial-dialog"
-import { MatchHistoryTab } from "@/components/match-history-tab"
-import { ReportsTab } from "@/components/reports-tab"
 import { getMonthlyPlayerStats } from "@/app/admin/actions"
 import { balanceTeamsWithOptions, balanceTeamsCompetitive, balanceTeamsByElo } from "@/lib/balance-algorithm"
 import { computeMonthlyEloMap } from "@/lib/elo"
 import { loadPlayerBadges, type BadgeId } from "@/lib/player-profile"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import { checkIsAdmin } from "@/lib/is-admin"
-import { themes, applyTheme, type ThemeName } from "@/lib/themes"
 import type { Player, BalanceOption, BalanceHistoryEntry } from "@/lib/types"
-import { Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, HelpCircle, History, BarChart3, TrendingUp } from "lucide-react"
-import Image from "next/image"
-import { useToast } from "@/hooks/use-toast"
+import { Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, TrendingUp } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { useCurrentTheme } from "@/hooks/use-current-theme"
 
 export default function TeamBalancer() {
   const [players, setPlayers] = useState<Player[]>([])
@@ -39,23 +31,21 @@ export default function TeamBalancer() {
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
   const [competitiveMode, setCompetitiveMode] = useState(false)
   const [cutPlayers, setCutPlayers] = useState<string[]>([])
-  const [currentTheme, setCurrentTheme] = useState<ThemeName>("jedi")
   const [playerView, setPlayerView] = useState<"select" | "tierList">("select")
   const [playerDisabledRoles, setPlayerDisabledRoles] = useState<Map<string, string[]>>(new Map())
   const [globalOffRole, setGlobalOffRole] = useState(false)
-  const [showTutorial, setShowTutorial] = useState(false)
   const [playerStats, setPlayerStats] = useState<Record<string, { wins: number; losses: number; draws: number }>>({})
   // Profile badges per player (priority order), shown on Player Cards where the
   // mic icon was.
   const [playerBadges, setPlayerBadges] = useState<Record<string, BadgeId[]>>({})
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<"balancer" | "history" | "reports" | "info">("balancer")
   const [isAdmin, setIsAdmin] = useState(false)
   const [eloBalancing, setEloBalancing] = useState(false)
 
-  const particlesRef = useRef<BackgroundParticlesRef>(null)
   const balanceOptionsRef = useRef<HTMLDivElement>(null)
-  const { toast } = useToast()
+  // Theme is owned by the SiteHeader; the balancer only reads it (Bespin tweaks
+  // + PlayerCard/TierList props).
+  const currentTheme = useCurrentTheme()
 
   useEffect(() => {
     fetchPlayersFromDB().then((data) => {
@@ -76,36 +66,6 @@ export default function TeamBalancer() {
   useEffect(() => {
     checkIsAdmin().then(setIsAdmin)
   }, [])
-
-  useEffect(() => {
-    const savedTheme = localStorage.getItem("jk2-theme") as ThemeName
-    if (savedTheme && themes[savedTheme]) {
-      setCurrentTheme(savedTheme)
-      applyTheme(themes[savedTheme])
-    } else {
-      applyTheme(themes.jedi)
-    }
-  }, [])
-
-  useEffect(() => {
-    const hasSeenTutorial = localStorage.getItem("hasSeenTutorial")
-    if (!hasSeenTutorial) {
-      setShowTutorial(true)
-      localStorage.setItem("hasSeenTutorial", "true")
-    }
-  }, [])
-
-  const handleThemeChange = (theme: ThemeName) => {
-    setCurrentTheme(theme)
-    applyTheme(themes[theme])
-    localStorage.setItem("jk2-theme", theme)
-
-    toast({
-      title: `${themes[theme].displayName} Theme Activated`,
-      description: "The Force is strong with this one.",
-      duration: 3000,
-    })
-  }
 
   const filteredPlayers = useMemo(() => {
     return players
@@ -388,9 +348,8 @@ export default function TeamBalancer() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <BackgroundParticles ref={particlesRef} />
-        <div className="text-center relative z-10">
+      <div className="container mx-auto px-4 py-32 relative z-10">
+        <div className="text-center">
           <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
           <p className="text-text-dim">Loading player data...</p>
         </div>
@@ -399,139 +358,7 @@ export default function TeamBalancer() {
   }
 
   return (
-    <div className="min-h-screen pb-20 relative">
-      <BackgroundParticles ref={particlesRef} />
-
-      <header
-        className="border-b backdrop-blur-xl sticky top-0 z-50"
-        style={{
-          borderColor: "var(--color-border)",
-          backgroundColor: "var(--color-surface)",
-        }}
-      >
-        <div className="container mx-auto px-4 py-4 md:py-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-3 md:gap-4">
-              <Image
-                src="/logo.png"
-                alt="JK2 Logo"
-                width={50}
-                height={50}
-                className="drop-shadow-[0_0_10px_rgba(102,252,241,0.5)] md:w-[60px] md:h-[60px]"
-              />
-              <div>
-                <h1 className="text-xl md:text-2xl lg:text-3xl font-bold glow-text mb-1" style={{ fontFamily: "var(--font-orbitron)" }}>JK2 CAPTURE THE FLAG</h1>
-                <p className="text-xs md:text-sm" style={{ color: "var(--color-text-dim)" }}>
-                  Jedi Knight 2: Jedi Outcast • 6v6 Competitive • Also known as Soracle
-                </p>
-              </div>
-            </div>
-            <div className="flex gap-2">
-              <ThemeSelector currentTheme={currentTheme} onThemeChange={handleThemeChange} />
-              <button
-                onClick={() => setActiveTab("balancer")}
-                className={`flex-1 md:flex-none px-3 md:px-4 py-2 rounded-md transition-all font-medium text-sm ${
-                  activeTab === "balancer" ? "font-bold" : "hover:bg-[#3d4855] border"
-                }`}
-                style={
-                  activeTab === "balancer"
-                    ? {
-                        backgroundColor: "var(--color-primary)",
-                        color: "var(--color-background)",
-                        boxShadow: "0 0 15px var(--color-primary-glow)",
-                      }
-                    : {
-                        backgroundColor: "var(--color-surface-elevated)",
-                        color: "var(--color-text)",
-                        borderColor: "var(--color-border)",
-                      }
-                }
-              >
-                Team Balancer
-              </button>
-              <button
-                onClick={() => setActiveTab("history")}
-                className={`flex-1 md:flex-none px-3 md:px-4 py-2 rounded-md transition-all font-medium text-sm flex items-center gap-1.5 ${
-                  activeTab === "history" ? "font-bold" : "hover:bg-[#3d4855] border"
-                }`}
-                style={
-                  activeTab === "history"
-                    ? {
-                        backgroundColor: "var(--color-primary)",
-                        color: "var(--color-background)",
-                        boxShadow: "0 0 15px var(--color-primary-glow)",
-                      }
-                    : {
-                        backgroundColor: "var(--color-surface-elevated)",
-                        color: "var(--color-text)",
-                        borderColor: "var(--color-border)",
-                      }
-                }
-              >
-                <History className="w-4 h-4" />
-                Match History
-              </button>
-              <button
-                onClick={() => setActiveTab("reports")}
-                className={`flex-1 md:flex-none px-3 md:px-4 py-2 rounded-md transition-all font-medium text-sm flex items-center gap-1.5 ${
-                  activeTab === "reports" ? "font-bold" : "hover:bg-[#3d4855] border"
-                }`}
-                style={
-                  activeTab === "reports"
-                    ? {
-                        backgroundColor: "var(--color-primary)",
-                        color: "var(--color-background)",
-                        boxShadow: "0 0 15px var(--color-primary-glow)",
-                      }
-                    : {
-                        backgroundColor: "var(--color-surface-elevated)",
-                        color: "var(--color-text)",
-                        borderColor: "var(--color-border)",
-                      }
-                }
-              >
-                <BarChart3 className="w-4 h-4" />
-                Stats
-              </button>
-              <button
-                onClick={() => setActiveTab("info")}
-                className={`flex-1 md:flex-none px-3 md:px-4 py-2 rounded-md transition-all font-medium text-sm ${
-                  activeTab === "info" ? "font-bold" : "hover:bg-[#3d4855] border"
-                }`}
-                style={
-                  activeTab === "info"
-                    ? {
-                        backgroundColor: "var(--color-primary)",
-                        color: "var(--color-background)",
-                        boxShadow: "0 0 15px var(--color-primary-glow)",
-                      }
-                    : {
-                        backgroundColor: "var(--color-surface-elevated)",
-                        color: "var(--color-text)",
-                        borderColor: "var(--color-border)",
-                      }
-                }
-              >
-                How It Works
-              </button>
-              <button
-                onClick={() => setShowTutorial(!showTutorial)}
-                className="px-3 py-1.5 rounded-md text-sm transition-all font-medium flex items-center gap-1.5 bg-[#2a3441]/60 backdrop-blur-sm text-[#c5c6c7] hover:bg-[#3d4855] border border-[#3d4855]"
-                title="Show Tutorial"
-              >
-                <HelpCircle className="w-4 h-4" />
-                Help
-              </button>
-              <AdminNavButton />
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {showTutorial && <TutorialDialog onClose={() => setShowTutorial(false)} />}
-
-      {activeTab === "balancer" ? (
-        <div className="container mx-auto px-4 py-8 relative z-10">
+    <div className="container mx-auto px-4 py-8 relative z-10">
           <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4 mb-6 sticky top-[100px] md:top-[120px] z-40">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
               <div className="flex items-center gap-2 flex-1 min-w-[200px]">
@@ -811,212 +638,6 @@ export default function TeamBalancer() {
             onRestore={handleRestoreFromHistory}
             onClear={handleClearHistory}
           />
-        </div>
-      ) : activeTab === "history" ? (
-        <div className="container mx-auto px-4 py-8 relative z-10">
-          <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-6">
-            <MatchHistoryTab />
-          </div>
-        </div>
-      ) : activeTab === "reports" ? (
-        <div className="container mx-auto px-4 py-8 relative z-10">
-          <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-6">
-            <ReportsTab />
-          </div>
-        </div>
-      ) : (
-        <div className="container mx-auto px-4 py-8 max-w-4xl relative z-10">
-          <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-8">
-            <h2 className="text-2xl font-bold text-[#66fcf1] mb-6">How The Balancer Works</h2>
-
-            <div className="space-y-6 text-[#c5c6c7]">
-              <section>
-                <h3 className="text-xl font-bold text-text-bright mb-3">The Challenge</h3>
-                <p className="leading-relaxed">
-                  JK2 CTF requires both balanced overall skill AND proper role coverage. You can&apos;t just average player ratings — that ignores whether teams can actually cap, chase, or defend effectively. It also matters how skill is distributed — two evenly-totalled teams can still produce a blowout if one side has all the top players.
-                </p>
-              </section>
-
-              <section>
-                <h3 className="text-xl font-bold text-text-bright mb-3">How It Works</h3>
-                <p className="leading-relaxed mb-4">
-                  The balancer evaluates every one of the 924 ways to split 12 players into two teams of six. Each split earns a penalty score for how unbalanced it is — lower is better — and the lowest-scoring split wins.
-                </p>
-                <p className="leading-relaxed mb-4">
-                  Here&apos;s what each split is graded on:
-                </p>
-                <ul className="space-y-3">
-                  <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">•</span>
-                    <div>
-                      <strong className="text-text-bright">Tier balance</strong>
-                      <p className="text-sm text-text-dim mt-1">
-                        Both teams should add up to roughly the same total tier rank. This is the heaviest-weighted check.
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">•</span>
-                    <div>
-                      <strong className="text-text-bright">Role coverage</strong>
-                      <p className="text-sm text-text-dim mt-1">
-                        Every team needs at least one viable Capper and one viable Chaser. Missing either makes the match unplayable.
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">•</span>
-                    <div>
-                      <strong className="text-text-bright">Cappers split fairly</strong>
-                      <p className="text-sm text-text-dim mt-1">
-                        Capper is the most crucial and scarcest role, so the balancer spreads the best cappers across both teams rather than just matching capper totals. The two elite cappers won&apos;t end up on the same side.
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">•</span>
-                    <div>
-                      <strong className="text-text-bright">Even role spread</strong>
-                      <p className="text-sm text-text-dim mt-1">
-                        Beyond capping, each team should have similar total ratings in every other role (Chase, Camp, Cleaner, Support) — not just a matching overall score.
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">•</span>
-                    <div>
-                      <strong className="text-text-bright">Top-3 vs Top-3</strong>
-                      <p className="text-sm text-text-dim mt-1">
-                        The three strongest players on each team should be close in combined strength.
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">•</span>
-                    <div>
-                      <strong className="text-text-bright">Bottom-3 vs Bottom-3</strong>
-                      <p className="text-sm text-text-dim mt-1">
-                        Same idea for the three weakest, so one team doesn&apos;t get a much lower floor.
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">•</span>
-                    <div>
-                      <strong className="text-text-bright">No stacked elites</strong>
-                      <p className="text-sm text-text-dim mt-1">
-                        One team shouldn&apos;t hoard the tier 8+ players while the other goes without.
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">•</span>
-                    <div>
-                      <strong className="text-text-bright">Don&apos;t stack the #1</strong>
-                      <p className="text-sm text-text-dim mt-1">
-                        The single best player shouldn&apos;t be surrounded by too many other top-tier teammates.
-                      </p>
-                    </div>
-                  </li>
-                  <li className="flex items-start gap-3">
-                    <span className="text-primary font-mono font-bold">•</span>
-                    <div>
-                      <strong className="text-text-bright">Mic balance</strong>
-                      <p className="text-sm text-text-dim mt-1">
-                        A light tiebreaker that spreads mic users evenly.
-                      </p>
-                    </div>
-                  </li>
-                </ul>
-                <p className="leading-relaxed mt-4">
-                  The balancer combines all of these into one score and returns the split with the lowest total penalty — plus a couple of close alternatives in case the top pick doesn&apos;t feel right.
-                </p>
-              </section>
-
-              <section>
-                <h3 className="text-xl font-bold text-text-bright mb-3">Understanding the Two Rating Systems</h3>
-                <p className="leading-relaxed">
-                  Tier values balance overall strength. Role ratings ensure team composition works. A tier 8 Capper and a tier 8 Chaser have similar competitive impact (same tier), but fill completely different needs on a team (different role profiles). The balancer uses tier as the primary balance metric and roles as the composition metric.
-                </p>
-              </section>
-
-              <section>
-                <h3 className="text-xl font-bold text-text-bright mb-3">Balance Confidence</h3>
-                <p className="leading-relaxed">
-                  Each balance option shows a confidence percentage based on the penalty score — lower penalty translates to higher confidence. You&apos;ll also see this on logged matches in the Match History tab, so you can track whether higher-confidence balances actually produce closer games.
-                </p>
-              </section>
-
-              <section>
-                <h3 className="text-xl font-bold text-text-bright mb-3">Role System</h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div className="bg-background p-3 rounded-md border border-border">
-                    <span className="inline-block px-2 py-1 bg-[#62d6e8] text-background text-xs font-bold rounded mb-2">
-                      CAP
-                    </span>
-                    <p className="text-sm">Capper - Flag carrier, evasion and speed specialist</p>
-                  </div>
-                  <div className="bg-background p-3 rounded-md border border-border">
-                    <span className="inline-block px-2 py-1 bg-[#27ae60] text-background text-xs font-bold rounded mb-2">
-                      CHA
-                    </span>
-                    <p className="text-sm">Chase returner - Pursues enemy flag carrier</p>
-                  </div>
-                  <div className="bg-background p-3 rounded-md border border-border">
-                    <span className="inline-block px-2 py-1 bg-[#45a29e] text-background text-xs font-bold rounded mb-2">
-                      CAM
-                    </span>
-                    <p className="text-sm">Camp returner - blocks off enemy capper and protects base hallways</p>
-                  </div>
-                  <div className="bg-background p-3 rounded-md border border-border">
-                    <span className="inline-block px-2 py-1 bg-[#9b59b6] text-background text-xs font-bold rounded mb-2">
-                      BC
-                    </span>
-                    <p className="text-sm">Base Cleaner - Base control specialist</p>
-                  </div>
-                  <div className="bg-background p-3 rounded-md border border-border col-span-full">
-                    <span className="inline-block px-2 py-1 bg-[#f39c12] text-background text-xs font-bold rounded mb-2">
-                      SUP
-                    </span>
-                    <p className="text-sm">Support - Flexible utility player</p>
-                  </div>
-                </div>
-              </section>
-
-              <section>
-                <h3 className="text-xl font-bold text-text-bright mb-3">Pro Tips</h3>
-                <ul className="space-y-2 text-sm">
-                  <li className="flex items-start gap-2">
-                    <span className="text-primary">•</span>
-                    <span>Hit &quot;Copy Teams&quot; to paste the lineup to Discord</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-primary">•</span>
-                    <span>
-                      Check alternative balance options if the first balance doesn&apos;t feel right, or if you want to
-                      rematch with different lineups
-                    </span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-primary">•</span>
-                    <span>Sides are randomized—use Swap Sides to change up team colours</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-primary">•</span>
-                    <span>No coverage on a specific role? Time to improvise and try out new positions!</span>
-                  </li>
-                  <li className="flex items-start gap-2">
-                    <span className="text-primary">•</span>
-                    <span>Check the Match History tab to see past results and player win rates</span>
-                  </li>
-                </ul>
-              </section>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <TutorialDialog open={showTutorial} onOpenChange={setShowTutorial} />
     </div>
   )
 }
