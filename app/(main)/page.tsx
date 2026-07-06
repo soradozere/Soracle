@@ -17,23 +17,40 @@ import type { Player, BalanceOption, BalanceHistoryEntry } from "@/lib/types"
 import { Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, TrendingUp } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useCurrentTheme } from "@/hooks/use-current-theme"
+import { useSessionState } from "@/hooks/use-session-state"
 
 export default function TeamBalancer() {
   const [players, setPlayers] = useState<Player[]>([])
-  const [selectedPlayers, setSelectedPlayers] = useState<string[]>([])
-  const [balanceOptions, setBalanceOptions] = useState<BalanceOption[]>([])
-  const [selectedOptionIndex, setSelectedOptionIndex] = useState(0)
-  const [balanceHistory, setBalanceHistory] = useState<BalanceHistoryEntry[]>([])
+  // Picks-in-progress and balance results survive navigating to /stats etc.
+  // (sessionStorage-backed), matching the old keep-it-in-memory tab behaviour.
+  const [selectedPlayers, setSelectedPlayers] = useSessionState<string[]>("balancer.selected", [])
+  const [balanceOptions, setBalanceOptions] = useSessionState<BalanceOption[]>("balancer.options", [])
+  const [selectedOptionIndex, setSelectedOptionIndex] = useSessionState<number>("balancer.optionIndex", 0)
+  const [balanceHistory, setBalanceHistory] = useSessionState<BalanceHistoryEntry[]>("balancer.history", [], {
+    // timestamp is a Date; JSON turns it into a string, so revive it.
+    revive: (raw) =>
+      (raw as (Omit<BalanceHistoryEntry, "timestamp"> & { timestamp: string })[]).map((e) => ({
+        ...e,
+        timestamp: new Date(e.timestamp),
+      })),
+  })
   const [searchQuery, setSearchQuery] = useState("")
   const [roleFilter, setRoleFilter] = useState<string | null>(null)
   const [micFilter, setMicFilter] = useState(false)
   const [eliteFilter, setEliteFilter] = useState(false)
   const [showSearchDropdown, setShowSearchDropdown] = useState(false)
-  const [competitiveMode, setCompetitiveMode] = useState(false)
-  const [cutPlayers, setCutPlayers] = useState<string[]>([])
+  const [competitiveMode, setCompetitiveMode] = useSessionState<boolean>("balancer.competitive", false)
+  const [cutPlayers, setCutPlayers] = useSessionState<string[]>("balancer.cut", [])
   const [playerView, setPlayerView] = useState<"select" | "tierList">("select")
-  const [playerDisabledRoles, setPlayerDisabledRoles] = useState<Map<string, string[]>>(new Map())
-  const [globalOffRole, setGlobalOffRole] = useState(false)
+  const [playerDisabledRoles, setPlayerDisabledRoles] = useSessionState<Map<string, string[]>>(
+    "balancer.disabledRoles",
+    new Map(),
+    {
+      prepare: (map) => Array.from(map.entries()),
+      revive: (raw) => new Map(raw as [string, string[]][]),
+    },
+  )
+  const [globalOffRole, setGlobalOffRole] = useSessionState<boolean>("balancer.offRole", false)
   const [playerStats, setPlayerStats] = useState<Record<string, { wins: number; losses: number; draws: number }>>({})
   // Profile badges per player (priority order), shown on Player Cards where the
   // mic icon was.
