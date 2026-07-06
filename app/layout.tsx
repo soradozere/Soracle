@@ -22,21 +22,21 @@ const oxanium = Oxanium({
 // classic square look preserved on those pages only (rest of the app is Oxanium).
 const orbitron = Orbitron({
   subsets: ["latin"],
-  weight: ["700", "800", "900"],
+  weight: ["700", "800"],
   variable: "--font-orbitron",
 })
 
 const SITE_DESCRIPTION = "6v6 Capture the Flag team balancer for Star Wars Jedi Knight 2: Jedi Outcast"
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://soracle.vercel.app"),
+  metadataBase: new URL("https://jk2ctf.vercel.app"),
   title: "JK2 Capture the Flag",
   description: SITE_DESCRIPTION,
   // og:image / twitter:image are wired automatically from app/opengraph-image.tsx.
   openGraph: {
     title: "JK2 Capture the Flag",
     description: SITE_DESCRIPTION,
-    siteName: "Soracle",
+    siteName: "JK2 Capture the Flag",
     type: "website",
   },
   twitter: {
