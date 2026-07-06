@@ -76,7 +76,7 @@
 
 @theme inline {
   --font-sans: "Inter", system-ui, sans-serif;
-  --font-mono: "Orbitron", monospace;
+  --font-mono: var(--font-oxanium), sans-serif;
 
   /* Core cyberpunk colors - dark theme only */
   --color-background: #0b0c10;

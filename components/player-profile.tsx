@@ -13,6 +13,7 @@ import {
 import type { Player } from "@/lib/types"
 import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucide-react"
 import { BADGE_META } from "@/lib/badge-meta"
+import { BadgeIcon } from "@/components/badge-icon"
 import { createClient } from "@/lib/supabase/client"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -120,7 +121,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
 }
 
 function BadgeChip({ badge }: { badge: ProfileBadge }) {
-  const { icon: Icon, color, label } = BADGE_META[badge.id]
+  const { color, label } = BADGE_META[badge.id]
   return (
     <Tooltip>
       <TooltipTrigger asChild>
@@ -128,7 +129,7 @@ function BadgeChip({ badge }: { badge: ProfileBadge }) {
           className="flex items-center gap-2 px-3 py-2 rounded-lg border bg-[#0b0c10]/60 cursor-default"
           style={{ borderColor: `${color}66`, boxShadow: `0 0 10px ${color}22` }}
         >
-          <Icon className="w-4 h-4" style={{ color }} />
+          <BadgeIcon id={badge.id} className="w-6 h-6" />
           <span className="text-xs font-bold text-[#c5c6c7]">{label}</span>
           {badge.entries.length > 1 && (
             <span className="text-xs font-mono font-bold" style={{ color }}>
@@ -536,7 +537,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
-              <h1 className="text-3xl font-bold text-white">{player.name}</h1>
+              <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-orbitron)" }}>{player.name}</h1>
               {isAdmin && (
                 <button
                   onClick={() => setEditOpen(true)}
