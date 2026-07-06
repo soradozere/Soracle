@@ -54,6 +54,7 @@ interface StatRow {
   kills: number
   deaths: number
   score: number
+  dbs_returns: number
 }
 
 export interface MonthStatTotals {
@@ -111,7 +112,7 @@ export interface OppRecord {
   rate: number
 }
 
-export type BadgeId = "champion" | "star" | "top5" | "top-capper" | "top-kd"
+export type BadgeId = "champion" | "star" | "highscore" | "dbs-god" | "top5" | "top-capper" | "top-kd"
 
 // One earned month of a badge, with the stat that earned it ("2.31 K/D",
 // "34 caps", "#3 · 12W–4L") for the badge tooltip.
@@ -243,7 +244,6 @@ interface MonthlyHonours {
   key: string
   champion: BoardPlace | null
   top5: BoardPlace[]
-  starPlayer: { name: string; wins: number; losses: number; avgScore: number } | null
   topCapper: { name: string; captures: number } | null
   topKD: { name: string; kd: number } | null
 }
@@ -251,6 +251,52 @@ interface MonthlyHonours {
 // For every COMPLETED month, work out who topped the public monthly W/L
 // leaderboard (champion + top 5), who was Star Player of the Month, who captured
 // the most flags, and who had the best K/D. Champion/top-5 deliberately mirror
+// Star Player for a set of matches (one month's worth): upset-weighted average
+// win value, mirroring the Reports "Star Player of the Month". A win counts for
+// more when your team was the underdog (lower combined current-tier) and less
+// when favoured; draws are skipped. Qualifier is 35% of the matches. Used for
+// both the monthly honours and the live current-month badge.
+function computeStarPlayer(
+  monthMatches: ProfileMatch[],
+  tierByName: Map<string, number>,
+): { name: string; wins: number; losses: number; avgScore: number } | null {
+  const starStats = new Map<string, { wins: number; losses: number; score: number; matches: number }>()
+  for (const match of monthMatches) {
+    const redWon = match.red_score > match.blue_score
+    const blueWon = match.blue_score > match.red_score
+    if (!redWon && !blueWon) continue
+    const redTier = match.red_team.reduce((s, n) => s + (tierByName.get(n) ?? 5), 0)
+    const blueTier = match.blue_team.reduce((s, n) => s + (tierByName.get(n) ?? 5), 0)
+    for (const [team, won, tierAdvantage] of [
+      [match.red_team, redWon, blueTier - redTier] as const,
+      [match.blue_team, blueWon, redTier - blueTier] as const,
+    ]) {
+      for (const name of team) {
+        let s = starStats.get(name)
+        if (!s) {
+          s = { wins: 0, losses: 0, score: 0, matches: 0 }
+          starStats.set(name, s)
+        }
+        s.matches++
+        if (won) {
+          s.wins++
+          s.score += tierAdvantage > 0 ? 1.0 + tierAdvantage * 0.1 : Math.max(0.3, 1.0 + tierAdvantage * 0.05)
+        } else {
+          s.losses++
+        }
+      }
+    }
+  }
+  const starMinMatches = Math.ceil(monthMatches.length * 0.35)
+  const bestStar = Array.from(starStats.entries())
+    .filter(([, s]) => s.matches >= starMinMatches)
+    .map(([name, s]) => ({ name, wins: s.wins, losses: s.losses, matches: s.matches, avgScore: s.score / s.matches }))
+    .sort((a, b) => (b.avgScore !== a.avgScore ? b.avgScore - a.avgScore : b.matches - a.matches))[0]
+  return bestStar
+    ? { name: bestStar.name, wins: bestStar.wins, losses: bestStar.losses, avgScore: bestStar.avgScore }
+    : null
+}
+
 // the Reports tab's leaderboard — win rate, then total wins, then games played,
 // 30% qualifier — NOT the ELO/TrueSkill boards, since W/L is the one the
 // community sees. Star Player mirrors the Reports "Star Player of the Month"
@@ -314,45 +360,6 @@ function computeMonthlyHonours(
       })
       .map((p, i) => ({ name: p.name, rank: i + 1, wins: p.wins, losses: p.losses, winPct: p.winPct }))
 
-    // --- Star Player of the Month: upset-weighted average win value, mirroring
-    // the Reports tab exactly. A win counts for more when your team was the
-    // underdog (lower combined current-tier) and less when favoured; draws are
-    // skipped. Qualifier is 35% of the month's matches.
-    const starStats = new Map<string, { wins: number; losses: number; score: number; matches: number }>()
-    for (const match of monthMatches) {
-      const redWon = match.red_score > match.blue_score
-      const blueWon = match.blue_score > match.red_score
-      if (!redWon && !blueWon) continue
-      const redTier = match.red_team.reduce((s, n) => s + (tierByName.get(n) ?? 5), 0)
-      const blueTier = match.blue_team.reduce((s, n) => s + (tierByName.get(n) ?? 5), 0)
-      for (const [team, won, tierAdvantage] of [
-        [match.red_team, redWon, blueTier - redTier] as const,
-        [match.blue_team, blueWon, redTier - blueTier] as const,
-      ]) {
-        for (const name of team) {
-          let s = starStats.get(name)
-          if (!s) {
-            s = { wins: 0, losses: 0, score: 0, matches: 0 }
-            starStats.set(name, s)
-          }
-          s.matches++
-          if (won) {
-            s.wins++
-            s.score += tierAdvantage > 0 ? 1.0 + tierAdvantage * 0.1 : Math.max(0.3, 1.0 + tierAdvantage * 0.05)
-          } else {
-            s.losses++
-          }
-        }
-      }
-    }
-    const starMinMatches = Math.ceil(monthMatches.length * 0.35)
-    const bestStar = Array.from(starStats.entries())
-      .filter(([, s]) => s.matches >= starMinMatches)
-      .map(([name, s]) => ({ name, wins: s.wins, losses: s.losses, matches: s.matches, avgScore: s.score / s.matches }))
-      .sort((a, b) => (b.avgScore !== a.avgScore ? b.avgScore - a.avgScore : b.matches - a.matches))[0]
-    const starPlayer = bestStar
-      ? { name: bestStar.name, wins: bestStar.wins, losses: bestStar.losses, avgScore: bestStar.avgScore }
-      : null
 
     // --- Top capper / top K/D from CSV stats (only matches that had a CSV count).
     const caps = new Map<string, number>()
@@ -394,7 +401,6 @@ function computeMonthlyHonours(
       key,
       champion: board[0] ?? null,
       top5: board.slice(0, 5),
-      starPlayer,
       topCapper,
       topKD,
     })
@@ -424,11 +430,8 @@ function badgesFor(name: string, honours: MonthlyHonours[]): ProfileBadge[] {
     const place = h.top5.find((p) => p.name === name)
     return place ? `#${place.rank} · ${record(place)}` : null
   })
-  const star = collect((h) =>
-    h.starPlayer?.name === name
-      ? `${h.starPlayer.wins}W–${h.starPlayer.losses}L · ${h.starPlayer.avgScore.toFixed(2)} win-value`
-      : null,
-  )
+  // Star Player is deliberately NOT collected here: it's a single "current star
+  // player" title, awarded live in loadPlayerProfile, not one badge per month.
   const capper = collect((h) => (h.topCapper?.name === name ? `${h.topCapper.captures} caps` : null))
   const kd = collect((h) => (h.topKD?.name === name ? `${h.topKD.kd.toFixed(2)} K/D` : null))
 
@@ -436,7 +439,6 @@ function badgesFor(name: string, honours: MonthlyHonours[]): ProfileBadge[] {
   // the single "best badge" on Player Cards lives in BADGE_PRIORITY.
   const badges: ProfileBadge[] = []
   if (champion.length) badges.push({ id: "champion", entries: champion })
-  if (star.length) badges.push({ id: "star", entries: star })
   if (top5.length) badges.push({ id: "top5", entries: top5 })
   if (capper.length) badges.push({ id: "top-capper", entries: capper })
   if (kd.length) badges.push({ id: "top-kd", entries: kd })
@@ -519,12 +521,47 @@ function topNemeses(name: string, matches: ProfileMatch[]): OppRecord[] {
 // Main entry
 // ---------------------------------------------------------------------------
 
+// All-time, single-holder record badges computed from the full match_stats set:
+// High Score = the highest single-match score on record; DBS God = the most
+// cumulative DBS returns on record. Each returns the current holder's name +
+// tooltip detail, or null if there's no data yet.
+function recordHolders(
+  stats: StatRow[],
+  nameById: Map<string, string>,
+): {
+  highscore: { name: string; detail: string } | null
+  dbsGod: { name: string; detail: string } | null
+} {
+  let topScore: StatRow | null = null
+  const dbsByPlayer = new Map<string, number>()
+  for (const r of stats) {
+    if (!topScore || r.score > topScore.score) topScore = r
+    if (r.dbs_returns) dbsByPlayer.set(r.player_id, (dbsByPlayer.get(r.player_id) ?? 0) + r.dbs_returns)
+  }
+
+  let dbsTop: { id: string; total: number } | null = null
+  for (const [id, total] of dbsByPlayer) {
+    if (!dbsTop || total > dbsTop.total) dbsTop = { id, total }
+  }
+
+  return {
+    highscore:
+      topScore && topScore.score > 0
+        ? { name: nameById.get(topScore.player_id) ?? "Unknown player", detail: `${topScore.score} pts` }
+        : null,
+    dbsGod:
+      dbsTop && dbsTop.total > 0
+        ? { name: nameById.get(dbsTop.id) ?? "Unknown player", detail: `${dbsTop.total} DBS returns` }
+        : null,
+  }
+}
+
 export async function loadPlayerProfile(player: Player, allPlayers: Player[]): Promise<PlayerProfileData> {
   const [matches, stats, aliases] = await Promise.all([
     fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
     fetchAllRows<StatRow>(
       "match_stats",
-      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score",
+      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns",
     ),
     fetchAliases(player.id),
   ])
@@ -695,6 +732,27 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
 
   const honours = computeMonthlyHonours(playable, stats, nameById, tierByName)
 
+  // Monthly badges + any all-time record this player currently holds, ordered by
+  // prestige (BADGE_PRIORITY) so the chip row matches the Player Cards.
+  const records = recordHolders(stats, nameById)
+  const currentStar = computeStarPlayer(monthMatches, tierByName)
+  const badges = badgesFor(name, honours)
+  if (currentStar?.name === name)
+    badges.push({
+      id: "star",
+      entries: [
+        {
+          month: monthLabelLong(nowKey),
+          detail: `${currentStar.wins}W–${currentStar.losses}L · ${currentStar.avgScore.toFixed(2)} win-value`,
+        },
+      ],
+    })
+  if (records.highscore?.name === name)
+    badges.push({ id: "highscore", entries: [{ month: "On record", detail: records.highscore.detail }] })
+  if (records.dbsGod?.name === name)
+    badges.push({ id: "dbs-god", entries: [{ month: "On record", detail: records.dbsGod.detail }] })
+  badges.sort((a, b) => BADGE_PRIORITY.indexOf(a.id) - BADGE_PRIORITY.indexOf(b.id))
+
   return {
     aliases,
     currentMonth: current,
@@ -702,7 +760,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
     series,
     friends: topFriends(name, playable),
     nemeses: topNemeses(name, playable),
-    badges: badgesFor(name, honours),
+    badges,
     matches: matchHistory,
     totals: {
       ...totals,
@@ -724,7 +782,7 @@ export async function loadPlayerBadges(players: Player[]): Promise<Record<string
     fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
     fetchAllRows<StatRow>(
       "match_stats",
-      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score",
+      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns",
     ),
   ])
 
@@ -736,17 +794,31 @@ export async function loadPlayerBadges(players: Player[]): Promise<Record<string
   const earned: Record<BadgeId, Set<string>> = {
     champion: new Set(),
     star: new Set(),
+    highscore: new Set(),
+    "dbs-god": new Set(),
     top5: new Set(),
     "top-capper": new Set(),
     "top-kd": new Set(),
   }
   for (const h of honours) {
     if (h.champion) earned.champion.add(h.champion.name)
-    if (h.starPlayer) earned.star.add(h.starPlayer.name)
     for (const p of h.top5) earned.top5.add(p.name)
     if (h.topCapper) earned["top-capper"].add(h.topCapper.name)
     if (h.topKD) earned["top-kd"].add(h.topKD.name)
   }
+
+  // Star Player is the single CURRENT-month title (not one badge per past month).
+  const nowKey = monthKey(new Date().toISOString())
+  const currentStar = computeStarPlayer(
+    playable.filter((m) => monthKey(m.created_at) === nowKey),
+    tierByName,
+  )
+  if (currentStar) earned.star.add(currentStar.name)
+
+  // All-time record holders (single player each).
+  const records = recordHolders(stats, nameById)
+  if (records.highscore) earned.highscore.add(records.highscore.name)
+  if (records.dbsGod) earned["dbs-god"].add(records.dbsGod.name)
 
   const byPlayer: Record<string, BadgeId[]> = {}
   for (const player of players) {
