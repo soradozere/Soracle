@@ -257,6 +257,10 @@ export function MatchHistoryTab() {
         </div>
       </div>
 
+      <p className="-mt-4 mb-4 text-xs text-[var(--color-text-dim)]">
+        Thanks to Tom for his scoreboard bots, which track stats and matches.
+      </p>
+
       <div className="space-y-3">
         {matches.map((match) => {
           const redWon = match.red_score > match.blue_score
