@@ -161,10 +161,8 @@ export function buildMatchStat(
     mine_grabs_red: toInt(row["MINEGRABS-REDBASE"]),
     mine_grabs_blue: toInt(row["MINEGRABS-BLUEBASE"]),
 
-    // Achievement columns (migration 015, live — see OPTIONAL_COLUMNS).
-    // DFA-ATTEMPTS is a confirmed header; BLOCKS-ENEMY is a best guess (toInt
-    // yields 0 for an absent header, so blocks_enemy stays 0 until a real
-    // block-bearing CSV confirms the spelling — harmless, the column defaults 0).
+    // Achievement columns (migration 015, live — see OPTIONAL_COLUMNS). Both
+    // DFA-ATTEMPTS and BLOCKS-ENEMY are confirmed scoreboard headers.
     dfa_attempts: toInt(row["DFA-ATTEMPTS"]),
     blocks_enemy: toInt(row["BLOCKS-ENEMY"]),
 
