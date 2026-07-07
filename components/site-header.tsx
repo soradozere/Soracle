@@ -84,7 +84,7 @@ export function SiteHeader() {
                   JK2 CAPTURE THE FLAG
                 </h1>
                 <p className="text-xs md:text-sm" style={{ color: "var(--color-text-dim)" }}>
-                  Jedi Knight 2: Jedi Outcast • 6v6 Competitive • Also known as Soracle
+                  Jedi Knight 2: Jedi Outcast • 6v6 Competitive • Also known as Soracle • With thanks to TomArrow
                 </p>
               </div>
             </div>
