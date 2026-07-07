@@ -33,8 +33,9 @@ export function TierChangelog({ year, month, isAdmin = false }: TierChangelogPro
   async function fetchChanges() {
     setIsLoading(true)
 
-    const monthStart = new Date(year, month - 1, 1)
-    const monthEnd = new Date(year, month, 0, 23, 59, 59)
+    // UTC month window, matching the site-wide UTC month bucketing.
+    const monthStart = new Date(Date.UTC(year, month - 1, 1))
+    const monthEnd = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
 
     let query = supabase
       .from("tier_changes")
