@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { normalizeName } from "@/lib/name-match"
+import { notifyAchievementUnlocks } from "@/lib/achievement-notify"
 
 const PENDING_BUCKET = "pending-scoreboards"
 
@@ -380,6 +381,9 @@ async function persistMatchWithStats(
       `Match ${matchId} saved, but CSV move failed (left at ${pendingPath}): ${moveError.message}`,
     )
   }
+
+  // Best-effort achievement-unlock ping (never throws; no-op without a webhook).
+  await notifyAchievementUnlocks(matchId)
 
   return { success: true, matchId }
 }
