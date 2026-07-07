@@ -67,12 +67,9 @@ interface StatRow {
   mine_grabs_red: number
   mine_grabs_blue: number
   dfa_kills: number
+  dfa_attempts: number
+  blocks_enemy: number
   time_played: number | null
-  // dfa_attempts + blocks_enemy (migration 015) are NOT selected until the
-  // columns exist on the live table — selecting a missing column errors the
-  // whole fetch. They read 0 until then (forward-only anyway). To enable: add
-  // both to the select below + here, map the real values in loadPlayerProfile,
-  // and uncomment the writes in lib/scoreboard-csv.ts.
 }
 
 export interface MonthStatTotals {
@@ -210,7 +207,7 @@ function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[] }
     fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
     fetchAllRows<StatRow>(
       "match_stats",
-      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, turret_kills, mine_returns, blue_returns, upcut_kills, bs_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, time_played",
+      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, turret_kills, mine_returns, blue_returns, upcut_kills, bs_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played",
     ),
   ]).then(([matches, stats]) => ({ matches, stats }))
   matchDataCache = { at: Date.now(), promise }
@@ -804,9 +801,8 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
             mine_grabs_red: row.mine_grabs_red,
             mine_grabs_blue: row.mine_grabs_blue,
             dfa_kills: row.dfa_kills,
-            // Forward-only, not yet selected (see StatRow note) — 0 until 015 is live.
-            dfa_attempts: 0,
-            blocks_enemy: 0,
+            dfa_attempts: row.dfa_attempts,
+            blocks_enemy: row.blocks_enemy,
             time_played: row.time_played,
           }
         : null,
