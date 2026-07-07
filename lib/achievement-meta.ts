@@ -216,10 +216,13 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     title: "Demoman",
     category: "match",
     icon: "confederancy-of-independent-system",
-    condition: "5+ mine returns in a single match",
+    condition: "Mine returns in a single match",
     metric: { type: "matchMax", get: (s) => s.mine_returns },
-    threshold: 5,
-    rarity: "rare",
+    ranks: [
+      { threshold: 5, rarity: "rare" },
+      { threshold: 8, rarity: "epic" },
+      { threshold: 10, rarity: "legendary" },
+    ],
   },
   {
     id: "eiffel-65",
