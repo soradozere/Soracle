@@ -86,8 +86,10 @@ export async function computeMonthlyEloMap(year: number, month: number): Promise
 
   for (const match of (matches || []) as Match[]) {
     if (!match.red_team?.length || !match.blue_team?.length) continue
+    // UTC month bucketing — must match monthKey in player-profile.ts, or two
+    // viewers in different timezones see different monthly boards.
     const d = new Date(match.created_at)
-    if (d.getFullYear() !== year || d.getMonth() !== month - 1) continue
+    if (d.getUTCFullYear() !== year || d.getUTCMonth() !== month - 1) continue
     applyMatchElo(elo, match)
   }
 

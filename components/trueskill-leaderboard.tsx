@@ -178,8 +178,9 @@ export function TrueSkillLeaderboard({ year, month }: TrueSkillLeaderboardProps)
       }
 
       const isInSelectedMonth = (iso: string) => {
+        // UTC bucketing so every viewer sees the same monthly board.
         const d = new Date(iso)
-        return d.getFullYear() === year && d.getMonth() === month - 1
+        return d.getUTCFullYear() === year && d.getUTCMonth() === month - 1
       }
 
       const monthMatchIds = new Set<string>()
