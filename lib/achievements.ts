@@ -170,8 +170,10 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
       progressPct = clampPct(value / next.threshold)
       progressLabel = label(next.threshold, romanFor(unlocked + 1))
     } else {
+      // Top rank reached — no "next", so surface the achieved threshold instead
+      // of a bare "MAXED" (which would hide the number the other states show).
       progressPct = 1
-      progressLabel = "MAXED"
+      progressLabel = `MAXED · ${fmtVal(cur.threshold, def)}+`
     }
     return {
       id: def.id,
