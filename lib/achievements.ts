@@ -25,6 +25,7 @@ export interface AchievementView {
   totalRanks: number
   earned: boolean
   earnedDate: string | null
+  earnedMatchId: string | null // the match that crossed the current rank (for unlock pings)
   progressPct: number | null // toward the next (earned) / first (locked) threshold
   progressLabel: string | null
   value: number // raw current metric value
@@ -37,8 +38,8 @@ const romanFor = (rank: number) => ROMAN[rank - 1] ?? String(rank)
 // value of this family's metric. Because every metric here is effectively
 // monotonic in its own progression, `value` = the max seen and the earliest
 // crossing of a threshold T = the first entry whose value ≥ T.
-function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date: string }[] {
-  const out: { v: number; date: string }[] = []
+function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date: string; matchId: string }[] {
+  const out: { v: number; date: string; matchId: string }[] = []
   const m = def.metric
   switch (m.type) {
     case "careerSum": {
@@ -48,7 +49,7 @@ function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date
         const c = m.get(mt.stat)
         if (c) {
           total += c
-          out.push({ v: total, date: mt.date })
+          out.push({ v: total, date: mt.date, matchId: mt.matchId })
         }
       }
       break
@@ -60,7 +61,7 @@ function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date
         const val = m.get(mt.stat)
         if (val > best) {
           best = val
-          out.push({ v: best, date: mt.date })
+          out.push({ v: best, date: mt.date, matchId: mt.matchId })
         }
       }
       break
@@ -70,7 +71,7 @@ function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date
       for (const mt of seq) {
         if (!mt.played) continue
         n++
-        out.push({ v: n, date: mt.date })
+        out.push({ v: n, date: mt.date, matchId: mt.matchId })
       }
       break
     }
@@ -80,7 +81,7 @@ function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date
         if (!mt.played) continue
         if (mt.won) {
           n++
-          out.push({ v: n, date: mt.date })
+          out.push({ v: n, date: mt.date, matchId: mt.matchId })
         }
       }
       break
@@ -91,7 +92,7 @@ function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date
         if (!mt.played) continue
         if (mt.won) {
           s++
-          out.push({ v: s, date: mt.date })
+          out.push({ v: s, date: mt.date, matchId: mt.matchId })
         } else {
           s = 0
         }
@@ -104,7 +105,7 @@ function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date
         if (!mt.played) continue
         if (mt.won && mt.oppScore === 0) {
           n++
-          out.push({ v: n, date: mt.date })
+          out.push({ v: n, date: mt.date, matchId: mt.matchId })
         }
       }
       break
@@ -115,7 +116,7 @@ function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date
         if (!mt.played) continue
         if (mt.won && mt.myScore - mt.oppScore === 1) {
           n++
-          out.push({ v: n, date: mt.date })
+          out.push({ v: n, date: mt.date, matchId: mt.matchId })
         }
       }
       break
@@ -126,7 +127,7 @@ function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date
         if (!mt.played || !mt.stat) continue
         if (m.test(mt.stat, mt)) {
           n++
-          out.push({ v: n, date: mt.date })
+          out.push({ v: n, date: mt.date, matchId: mt.matchId })
         }
       }
       break
@@ -142,6 +143,7 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
   const prog = progressionFor(def, seq)
   const value = prog.reduce((mx, e) => Math.max(mx, e.v), 0)
   const crossingDate = (t: number) => prog.find((e) => e.v >= t)?.date ?? null
+  const crossingMatchId = (t: number) => prog.find((e) => e.v >= t)?.matchId ?? null
   const best = def.metric.type === "matchMax" || def.metric.type === "matchPredicate"
 
   // Progress label toward `t`; `next` = the roman numeral being worked toward.
@@ -184,6 +186,7 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
       totalRanks: ranks.length,
       earned,
       earnedDate: earned ? crossingDate(cur.threshold) : null,
+      earnedMatchId: earned ? crossingMatchId(cur.threshold) : null,
       progressPct,
       progressLabel,
       value,
@@ -208,6 +211,7 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
     totalRanks: 1,
     earned,
     earnedDate: earned ? crossingDate(threshold) : null,
+    earnedMatchId: earned ? crossingMatchId(threshold) : null,
     // Boolean feats have no meaningful partial progress; scalar ones do.
     progressPct: earned ? 1 : predicate ? null : clampPct(value / threshold),
     progressLabel: earned || predicate ? null : label(threshold, null),
