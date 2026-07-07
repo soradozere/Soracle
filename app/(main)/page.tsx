@@ -262,7 +262,7 @@ export default function TeamBalancer() {
       }))
 
       const now = new Date()
-      const eloMap = await computeMonthlyEloMap(now.getFullYear(), now.getMonth() + 1)
+      const eloMap = await computeMonthlyEloMap(now.getUTCFullYear(), now.getUTCMonth() + 1)
       const options = balanceTeamsByElo(selectedPlayers, playersWithDisabledRoles, eloMap)
       setBalanceOptions(options)
       setSelectedOptionIndex(0)

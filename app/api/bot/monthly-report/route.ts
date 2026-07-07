@@ -24,8 +24,8 @@ export async function GET(request: Request) {
   const yearParam = url.searchParams.get("year")
   const monthParam = url.searchParams.get("month")
   const target = yearParam && monthParam ? new Date(Number(yearParam), Number(monthParam) - 1, 1) : new Date()
-  const monthStart = new Date(target.getFullYear(), target.getMonth(), 1)
-  const monthEnd = new Date(target.getFullYear(), target.getMonth() + 1, 1)
+  const monthStart = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), 1))
+  const monthEnd = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 1))
   const monthLabel = target.toLocaleString("en-GB", { month: "long", year: "numeric" })
 
   const { data: matchesRaw, error } = await supabase
