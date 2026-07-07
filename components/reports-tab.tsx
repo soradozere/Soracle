@@ -72,9 +72,12 @@ function formatFlagHold(ms: number): string {
 }
 
 export function ReportsTab() {
+  // "Current month" in UTC, matching the UTC month bucketing used everywhere
+  // (badges, boards, server actions) — viewer-local months made viewers in
+  // different timezones see different boards.
   const now = new Date()
-  const [selectedYear, setSelectedYear] = useState(now.getFullYear())
-  const [selectedMonth, setSelectedMonth] = useState(now.getMonth() + 1)
+  const [selectedYear, setSelectedYear] = useState(now.getUTCFullYear())
+  const [selectedMonth, setSelectedMonth] = useState(now.getUTCMonth() + 1)
   const [matches, setMatches] = useState<Match[]>([])
   const [matchStats, setMatchStats] = useState<MatchStatRow[]>([])
   const [players, setPlayers] = useState<Player[]>([])
@@ -104,7 +107,7 @@ export function ReportsTab() {
   }, [selectedYear, selectedMonth])
 
   // Visibility logic for leaderboard
-  const isCurrentMonth = selectedYear === now.getFullYear() && selectedMonth === now.getMonth() + 1
+  const isCurrentMonth = selectedYear === now.getUTCFullYear() && selectedMonth === now.getUTCMonth() + 1
   const showLeaderboard = !isCurrentMonth || isAdmin
 
   // Force view back to stats if the selected view becomes unavailable to this user.
@@ -117,7 +120,7 @@ export function ReportsTab() {
     }
   }, [showLeaderboard, isAdmin, currentView])
 
-  const canGoNext = !(selectedYear === now.getFullYear() && selectedMonth === now.getMonth() + 1)
+  const canGoNext = !(selectedYear === now.getUTCFullYear() && selectedMonth === now.getUTCMonth() + 1)
 
   const goToPrevMonth = () => {
     if (selectedMonth === 1) {

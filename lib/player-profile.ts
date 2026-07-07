@@ -216,9 +216,14 @@ async function fetchAliases(playerId: string): Promise<string[]> {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
+// Months are bucketed in UTC everywhere, deliberately: this runs in the
+// viewer's browser, and local-time bucketing made boundary matches (NA-East
+// evenings = early-morning UTC) land in different months per viewer — two
+// people could see different monthly champions. UTC matches the server-side
+// bot endpoints and the production Stats tab.
 const monthKey = (iso: string) => {
   const d = new Date(iso)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`
 }
 
 const monthLabelLong = (key: string) => {
@@ -642,7 +647,8 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
   const series: SeriesPoint[] = []
   if (firstMatch) {
     const start = new Date(firstMatch)
-    const cursor = new Date(start.getFullYear(), start.getMonth(), 1)
+    // Walk months in UTC so cursor keys line up with monthKey's UTC buckets.
+    const cursor = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1))
     const now = new Date()
     let lastElo = seedFromTier(player.tierValue)
     while (cursor <= now) {
@@ -661,14 +667,14 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
         winRate: games > 0 ? Math.round((wins / games) * 100) : null,
         elo: Math.round(lastElo),
       })
-      cursor.setMonth(cursor.getMonth() + 1)
+      cursor.setUTCMonth(cursor.getUTCMonth() + 1)
     }
   }
 
   // --- Current month record + streak + CSV stat totals.
   const monthMatches = playable.filter((m) => monthKey(m.created_at) === nowKey)
   const current: MonthRecord = {
-    label: new Date().toLocaleString("en-GB", { month: "long", year: "numeric" }),
+    label: monthLabelLong(nowKey),
     games: 0,
     wins: 0,
     losses: 0,

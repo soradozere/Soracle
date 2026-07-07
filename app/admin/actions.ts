@@ -702,9 +702,10 @@ export async function getMatchesByMonth(year: number, month: number) {
   try {
     const supabase = await createClient()
 
-    // Create date range for the month
-    const startDate = new Date(year, month - 1, 1)
-    const endDate = new Date(year, month, 0, 23, 59, 59, 999)
+    // Create date range for the month (UTC — matches the site-wide UTC month
+    // bucketing; server-local windows differed between dev and Vercel).
+    const startDate = new Date(Date.UTC(year, month - 1, 1))
+    const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
 
     const { data, error } = await supabase
       .from("matches")
@@ -734,8 +735,8 @@ export async function getMatchStatsByMonth(year: number, month: number) {
   try {
     const supabase = await createClient()
 
-    const startDate = new Date(year, month - 1, 1)
-    const endDate = new Date(year, month, 0, 23, 59, 59, 999)
+    const startDate = new Date(Date.UTC(year, month - 1, 1))
+    const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
 
     // Which matches fall in this month.
     const { data: monthMatches, error: matchError } = await supabase
@@ -804,8 +805,8 @@ export async function getMonthlyPlayerStats() {
     const supabase = await createClient()
 
     const now = new Date()
-    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
-    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999)
+    const startOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
+    const endOfMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0, 23, 59, 59, 999))
 
     const { data: matches, error } = await supabase
       .from("matches")
