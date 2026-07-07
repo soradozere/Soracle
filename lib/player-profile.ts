@@ -1,6 +1,8 @@
 import { createClient } from "@/lib/supabase/client"
 import { applyMatchElo, seedFromTier } from "@/lib/elo"
 import { BADGE_PRIORITY } from "@/lib/badge-meta"
+import { computeAchievements, type AchievementView } from "@/lib/achievements"
+import type { AchMatch } from "@/lib/achievement-meta"
 import type { Player } from "@/lib/types"
 
 // Everything a player profile shows, computed client-side from one pass over
@@ -55,6 +57,19 @@ interface StatRow {
   deaths: number
   score: number
   dbs_returns: number
+  // Extra counters the achievements layer reads (lib/achievements.ts).
+  turret_kills: number
+  mine_returns: number
+  blue_returns: number
+  upcut_kills: number
+  bs_kills: number
+  doom_kills: number
+  mine_grabs_red: number
+  mine_grabs_blue: number
+  dfa_kills: number
+  dfa_attempts: number
+  blocks_enemy: number
+  time_played: number | null
 }
 
 export interface MonthStatTotals {
@@ -146,6 +161,7 @@ export interface PlayerProfileData {
   friends: PairRecord[]
   nemeses: OppRecord[]
   badges: ProfileBadge[]
+  achievements: AchievementView[]
   totals: ProfileTotals
   matches: ProfileMatchEntry[]
 }
@@ -191,7 +207,7 @@ function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[] }
     fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
     fetchAllRows<StatRow>(
       "match_stats",
-      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns",
+      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, turret_kills, mine_returns, blue_returns, upcut_kills, bs_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played",
     ),
   ]).then(([matches, stats]) => ({ matches, stats }))
   matchDataCache = { at: Date.now(), promise }
@@ -757,6 +773,49 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
   }
   matchHistory.reverse() // playable is chronological ascending
 
+  // --- Achievements: one chronological pass over the player's own matches +
+  // scoreboard lines (playable is ascending, so streaks/totals accrue in order).
+  const achSeq: AchMatch[] = []
+  for (const match of playable) {
+    const o = outcomeFor(name, match)
+    if (!o.played) continue
+    const onRed = (match.red_team || []).includes(name)
+    const row = myStatByMatch.get(match.id)
+    achSeq.push({
+      date: match.created_at,
+      played: true,
+      won: o.won,
+      lost: o.lost,
+      myScore: onRed ? match.red_score : match.blue_score,
+      oppScore: onRed ? match.blue_score : match.red_score,
+      stat: row
+        ? {
+            score: row.score,
+            captures: row.captures,
+            returns: row.returns,
+            base_cleaner: row.base_cleaner,
+            kills: row.kills,
+            deaths: row.deaths,
+            flag_hold_ms: row.flag_hold_ms,
+            dbs_returns: row.dbs_returns,
+            turret_kills: row.turret_kills,
+            mine_returns: row.mine_returns,
+            blue_returns: row.blue_returns,
+            upcut_kills: row.upcut_kills,
+            bs_kills: row.bs_kills,
+            doom_kills: row.doom_kills,
+            mine_grabs_red: row.mine_grabs_red,
+            mine_grabs_blue: row.mine_grabs_blue,
+            dfa_kills: row.dfa_kills,
+            dfa_attempts: row.dfa_attempts,
+            blocks_enemy: row.blocks_enemy,
+            time_played: row.time_played,
+          }
+        : null,
+    })
+  }
+  const achievements = computeAchievements(achSeq)
+
   const honours = computeMonthlyHonours(playable, stats, nameById, tierByName)
 
   // Monthly badges + any all-time record this player currently holds, ordered by
@@ -788,6 +847,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
     friends: topFriends(name, playable),
     nemeses: topNemeses(name, playable),
     badges,
+    achievements,
     matches: matchHistory,
     totals: {
       ...totals,
