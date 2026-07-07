@@ -14,6 +14,7 @@ import type { Player } from "@/lib/types"
 import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucide-react"
 import { BADGE_META } from "@/lib/badge-meta"
 import { BadgeIcon } from "@/components/badge-icon"
+import { AchievementsStrip } from "@/components/achievements-strip"
 import { createClient } from "@/lib/supabase/client"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -683,6 +684,8 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
                   hint="Highest ELO rating ever reached (tier-seeded, replayed over every match)"
                 />
               </div>
+              <AchievementsStrip achievements={data.achievements} />
+              <div className="mt-4">
               <Tooltip>
                 <TooltipTrigger asChild>
               <div className="bg-[#0b0c10]/60 border border-[#f1c40f]/40 rounded-lg p-4 flex items-center justify-between cursor-default">
@@ -723,6 +726,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
                   })}
                 </p>
               )}
+              </div>
             </SectionCard>
 
           {/* ---- Spotlight (player's chosen highlight clip) ---- */}

@@ -49,11 +49,19 @@ export const REQUIRED_COLUMNS = [
   "TIME-SUM",
 ] as const
 
+// Optional counters that back achievements but aren't printed by every
+// scoreboard build. Deliberately kept OUT of REQUIRED_COLUMNS so a CSV that
+// lacks them still parses (toInt yields 0 for an absent header). The exact
+// header spellings are best-effort and must be confirmed against a real
+// scoreboard that carries these columns — until then they simply accrue 0.
+export const OPTIONAL_COLUMNS = ["DFA-ATTEMPTS", "BLOCKS-ENEMY"] as const
+
 // Numeric counter columns summed when merging reconnect rows — every required
-// column except the two identity columns (team + name).
-export const SUMMABLE_COLUMNS = REQUIRED_COLUMNS.filter(
-  (col) => col !== "LAST-NONSPEC-TEAM" && col !== "NAME-CLEAN",
-)
+// column except the two identity columns (team + name), plus the optional ones.
+export const SUMMABLE_COLUMNS = [
+  ...REQUIRED_COLUMNS.filter((col) => col !== "LAST-NONSPEC-TEAM" && col !== "NAME-CLEAN"),
+  ...OPTIONAL_COLUMNS,
+]
 
 export type CsvRow = Record<string, string>
 export type TeamClass = "Red" | "Blue" | "Other"
@@ -152,6 +160,14 @@ export function buildMatchStat(
 
     mine_grabs_red: toInt(row["MINEGRABS-REDBASE"]),
     mine_grabs_blue: toInt(row["MINEGRABS-BLUEBASE"]),
+
+    // Achievement columns (migration 015, see OPTIONAL_COLUMNS). Left unemitted
+    // until 015 is confirmed live on the DB — writing to columns that don't yet
+    // exist fails the whole insert. DFA-ATTEMPTS is a confirmed header;
+    // BLOCKS-ENEMY is still a guess. To turn on: verify the columns exist, then
+    // uncomment (and re-enable the matching select in lib/player-profile.ts).
+    // dfa_attempts: toInt(row["DFA-ATTEMPTS"]),
+    // blocks_enemy: toInt(row["BLOCKS-ENEMY"]),
 
     time_played: toInt(row["TIME-SUM"]),
   }
