@@ -108,6 +108,12 @@ export interface MatchStats {
   mine_grabs_red: number
   mine_grabs_blue: number
 
+  // Achievements-only counters (migration 015, live). dfa_attempts ingests from
+  // the confirmed DFA-ATTEMPTS header; blocks_enemy's header is still a guess so
+  // it reads 0 until a real block-bearing CSV confirms the spelling.
+  dfa_attempts: number
+  blocks_enemy: number
+
   // Network
   time_played: number | null
 
