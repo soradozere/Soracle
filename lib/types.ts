@@ -108,6 +108,13 @@ export interface MatchStats {
   mine_grabs_red: number
   mine_grabs_blue: number
 
+  // Achievements-only counters (migration 015). Optional + not written by
+  // buildMatchStat until the columns actually exist on the live table — writing
+  // them to a table that lacks them fails every insert. Header for dfa_attempts
+  // is confirmed (DFA-ATTEMPTS); blocks_enemy's header is still a guess.
+  dfa_attempts?: number
+  blocks_enemy?: number
+
   // Network
   time_played: number | null
 
