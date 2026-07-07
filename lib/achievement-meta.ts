@@ -50,6 +50,7 @@ export interface AchStat {
 // One match from the player's perspective, chronological. `stat` is their
 // scoreboard line when the match has a CSV, else null.
 export interface AchMatch {
+  matchId: string
   date: string
   played: boolean
   won: boolean
