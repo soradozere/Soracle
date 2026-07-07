@@ -782,6 +782,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
     const onRed = (match.red_team || []).includes(name)
     const row = myStatByMatch.get(match.id)
     achSeq.push({
+      matchId: match.id,
       date: match.created_at,
       played: true,
       won: o.won,
