@@ -658,7 +658,15 @@ export function PlayerManagementTable() {
                         placeholder="Comma-separated IDs"
                       />
                     ) : (player.discord_ids || []).length > 0 ? (
-                      <span className="break-all text-sm">{player.discord_ids.join(", ")}</span>
+                      // TableCell is whitespace-nowrap, so a bare `break-all` span can't
+                      // wrap — multiple ids then spill across the neighbouring columns.
+                      // Same block + max-width + whitespace-normal shape as the tooltip cell.
+                      <div
+                        className="max-w-[180px] whitespace-normal break-all text-sm"
+                        title={player.discord_ids.join(", ")}
+                      >
+                        {player.discord_ids.join(", ")}
+                      </div>
                     ) : (
                       "-"
                     )}
