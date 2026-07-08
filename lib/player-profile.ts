@@ -63,6 +63,7 @@ interface StatRow {
   mine_returns: number
   mine_kills: number
   blue_returns: number
+  blubs_returns: number
   upcut_kills: number
   bs_kills: number
   dbs_kills: number
@@ -213,7 +214,7 @@ function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[] }
     fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
     fetchAllRows<StatRow>(
       "match_stats",
-      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played",
+      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, blubs_returns, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played",
     ),
   ]).then(([matches, stats]) => ({ matches, stats }))
   matchDataCache = { at: Date.now(), promise }
@@ -276,7 +277,15 @@ function outcomeFor(name: string, match: ProfileMatch): MatchOutcome {
   const lost = onRed ? match.blue_score > match.red_score : match.red_score > match.blue_score
   const mine = onRed ? match.red_team || [] : match.blue_team || []
   const theirs = onRed ? match.blue_team || [] : match.red_team || []
-  return { played: true, won, lost, teammates: mine.filter((n) => n !== name), opponents: theirs }
+  // De-duplicate: a mid-match reconnect can list the same player twice on one team,
+  // which would otherwise count as two games played alongside (or against) them.
+  return {
+    played: true,
+    won,
+    lost,
+    teammates: [...new Set(mine)].filter((n) => n !== name),
+    opponents: [...new Set(theirs)].filter((n) => n !== name),
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -795,6 +804,8 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
       lost: o.lost,
       myScore: onRed ? match.red_score : match.blue_score,
       oppScore: onRed ? match.blue_score : match.red_score,
+      teammates: o.teammates,
+      opponents: o.opponents,
       stat: row
         ? {
             score: row.score,
@@ -811,6 +822,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
             mine_returns: row.mine_returns,
             mine_kills: row.mine_kills,
             blue_returns: row.blue_returns,
+            blubs_returns: row.blubs_returns,
             upcut_kills: row.upcut_kills,
             bs_kills: row.bs_kills,
             dbs_kills: row.dbs_kills,

@@ -133,6 +133,10 @@ function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date
       }
       break
     }
+    // Teammate/opponent-grouped metrics supply their own walk; the contract on the
+    // returned entries is identical, so crossing detection below is unchanged.
+    case "seqDerived":
+      return m.compute(seq)
   }
   return out
 }
@@ -145,7 +149,10 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
   const value = prog.reduce((mx, e) => Math.max(mx, e.v), 0)
   const crossingDate = (t: number) => prog.find((e) => e.v >= t)?.date ?? null
   const crossingMatchId = (t: number) => prog.find((e) => e.v >= t)?.matchId ?? null
-  const best = def.metric.type === "matchMax" || def.metric.type === "matchPredicate"
+  const best =
+    def.metric.type === "matchMax" ||
+    def.metric.type === "matchPredicate" ||
+    (def.metric.type === "seqDerived" && !!def.metric.best)
 
   // Progress label toward `t`; `next` = the roman numeral being worked toward.
   const label = (t: number, next: string | null) => {
