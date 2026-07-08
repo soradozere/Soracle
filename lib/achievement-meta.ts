@@ -43,6 +43,7 @@ export interface AchStat {
   mine_returns: number
   mine_kills: number
   blue_returns: number
+  blubs_returns: number
   upcut_kills: number
   bs_kills: number
   dbs_kills: number
@@ -68,6 +69,11 @@ export interface AchMatch {
   lost: boolean
   myScore: number
   oppScore: number
+  // The other players in this match, from this player's perspective. Both are
+  // de-duplicated and exclude the player themselves — a reconnect can list a name
+  // twice on one team, which would otherwise double-count games together.
+  teammates: string[]
+  opponents: string[]
   stat: AchStat | null
 }
 
@@ -82,6 +88,17 @@ export type Metric =
   | { type: "winStreak" } // longest consecutive-win run
   | { type: "shutoutWins" } // wins where the enemy scored 0
   | { type: "oneCapWins" } // wins by a single capture
+  // Escape hatch for metrics the linear passes above can't express — anything that
+  // groups by teammate/opponent rather than accumulating over the sequence.
+  // `compute` walks the player's chronological matches and returns one entry each
+  // time the tracked value improves (same contract as the built-in passes: the
+  // earliest crossing of a threshold T is the first entry with v >= T).
+  // `best` marks the value as a personal best ("best 9 / 12") rather than a total.
+  | {
+      type: "seqDerived"
+      best?: boolean
+      compute: (seq: AchMatch[]) => { v: number; date: string; matchId: string }[]
+    }
 
 export interface Rank {
   threshold: number
@@ -103,6 +120,16 @@ export interface AchievementDef {
   pending?: boolean // forward-only: needs a column populated only by new uploads
   unit?: "hours" // display hint for value/threshold formatting
 }
+
+// Team-mate / opponent achievements are FORWARD-ONLY. The match history is full
+// of long-standing streaks (bizzle had beaten arhont 15 times running), so
+// counting it would hand out ranks — including a Mythic — the moment they ship.
+// Everyone starts from zero here instead, and the crests read "tracking from now"
+// until earned. Matches are compared on parsed timestamps because created_at
+// spellings vary (+00:00 vs Z), which a string compare would get wrong.
+export const PAIR_ACHIEVEMENTS_FROM = "2026-07-08T00:00:00.000Z"
+const PAIR_FROM_MS = Date.parse(PAIR_ACHIEVEMENTS_FROM)
+const countsForPair = (m: AchMatch) => m.played && Date.parse(m.date) >= PAIR_FROM_MS
 
 // avg flag-hold per capture, ms → the 2:00 gate for Pro Rusher.
 const TWO_MINUTES_MS = 120_000
@@ -317,6 +344,33 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     rarity: "epic",
   },
   {
+    // The scoreboard has no DOOM-RETURNS column, only DOOM-KILLS — so this counts
+    // doom kills. Nobody has ever managed two in one match (33 doom kills exist in
+    // the whole database), which is what makes it Mythic.
+    // Icon deliberately reused (shares DOOM's crest, no spare SVGs).
+    id: "bonebreaker",
+    title: "Bonebreaker",
+    category: "match",
+    icon: "sith-era",
+    condition: "3+ doom kills in a single match",
+    metric: { type: "matchMax", get: (s) => s.doom_kills },
+    threshold: 3,
+    rarity: "mythic",
+  },
+  {
+    // blubs_returns = returns landed with a blue-stance backstab. Non-zero in only
+    // 3 of 811 scoreboard rows, and never above 1 — three in one match is a feat.
+    // Icon deliberately reused (shares BSer's crest, no spare SVGs).
+    id: "zorro",
+    title: "Zorro",
+    category: "match",
+    icon: "dark-lord-of-the-sith",
+    condition: "3+ blue-backstab returns in a single match",
+    metric: { type: "matchMax", get: (s) => s.blubs_returns },
+    threshold: 3,
+    rarity: "legendary",
+  },
+  {
     id: "cheeses-dream",
     title: "Cheese's Dream",
     category: "match",
@@ -396,6 +450,85 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       { threshold: 500, rarity: "epic" },
       { threshold: 1000, rarity: "legendary" },
       { threshold: 2500, rarity: "mythic" },
+    ],
+  },
+  {
+    // Most matches played alongside any one team-mate (draws included — it counts
+    // games together, not results). Deliberately has no Mythic: a career counter
+    // that only ever grows makes a top rank a waiting game rather than a feat.
+    // Icon deliberately reused (no spare crest SVGs).
+    id: "inseparable",
+    title: "Inseparable",
+    category: "career",
+    icon: "old-galactic-republic",
+    condition: "Career matches played alongside one team-mate",
+    pending: true, // forward-only, see PAIR_ACHIEVEMENTS_FROM
+    metric: {
+      type: "seqDerived",
+      best: true,
+      compute: (seq) => {
+        const out: { v: number; date: string; matchId: string }[] = []
+        const games = new Map<string, number>()
+        let best = 0
+        for (const m of seq) {
+          if (!countsForPair(m)) continue
+          for (const mate of m.teammates) {
+            const g = (games.get(mate) ?? 0) + 1
+            games.set(mate, g)
+            if (g > best) {
+              best = g
+              out.push({ v: best, date: m.date, matchId: m.matchId })
+            }
+          }
+        }
+        return out
+      },
+    },
+    ranks: [
+      { threshold: 25, rarity: "common" },
+      { threshold: 40, rarity: "rare" },
+      { threshold: 60, rarity: "epic" },
+      { threshold: 100, rarity: "legendary" },
+    ],
+  },
+  {
+    // Counted per opponent, not per match: if a whole enemy six has a 3+ run over
+    // you and you finally beat them, that ends several streaks at once. A running
+    // tally, so it's "best 4 / 6" style progress rather than a personal best.
+    // Icon deliberately reused (no spare crest SVGs).
+    id: "revenge",
+    title: "Revenge",
+    category: "streak",
+    icon: "raziel-clan",
+    condition: "End an opponent's 3+ win streak over you",
+    pending: true, // forward-only, see PAIR_ACHIEVEMENTS_FROM
+    metric: {
+      type: "seqDerived",
+      compute: (seq) => {
+        const out: { v: number; date: string; matchId: string }[] = []
+        const losingTo = new Map<string, number>()
+        let n = 0
+        for (const m of seq) {
+          if (!countsForPair(m)) continue
+          if (m.won) {
+            for (const opp of m.opponents) {
+              if ((losingTo.get(opp) ?? 0) >= 3) {
+                n++
+                out.push({ v: n, date: m.date, matchId: m.matchId })
+              }
+              losingTo.set(opp, 0)
+            }
+          } else if (m.lost) {
+            for (const opp of m.opponents) losingTo.set(opp, (losingTo.get(opp) ?? 0) + 1)
+          }
+        }
+        return out
+      },
+    },
+    ranks: [
+      { threshold: 3, rarity: "common" },
+      { threshold: 6, rarity: "rare" },
+      { threshold: 10, rarity: "epic" },
     ],
   },
   {
@@ -517,6 +650,91 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ],
   },
   // -------------------------------------------------------------------- Streaks
+  {
+    // Team outcomes, not duels: a "win with" is a match your side won while they
+    // were on it. Streaks only advance on matches you actually shared, and only
+    // reset when you lose one together (a draw leaves them untouched).
+    // Icon deliberately reused (no spare crest SVGs).
+    id: "ride-or-die",
+    title: "Ride or Die",
+    category: "streak",
+    icon: "rebel-alliance",
+    condition: "Consecutive wins alongside the same team-mate",
+    pending: true, // forward-only, see PAIR_ACHIEVEMENTS_FROM
+    metric: {
+      type: "seqDerived",
+      best: true,
+      compute: (seq) => {
+        const out: { v: number; date: string; matchId: string }[] = []
+        const streak = new Map<string, number>()
+        let best = 0
+        for (const m of seq) {
+          if (!countsForPair(m)) continue
+          if (m.won) {
+            for (const mate of m.teammates) {
+              const s = (streak.get(mate) ?? 0) + 1
+              streak.set(mate, s)
+              if (s > best) {
+                best = s
+                out.push({ v: best, date: m.date, matchId: m.matchId })
+              }
+            }
+          } else if (m.lost) {
+            for (const mate of m.teammates) streak.set(mate, 0)
+          }
+        }
+        return out
+      },
+    },
+    ranks: [
+      { threshold: 5, rarity: "rare" },
+      { threshold: 8, rarity: "epic" },
+      { threshold: 12, rarity: "legendary" },
+      { threshold: 15, rarity: "mythic" },
+    ],
+  },
+  {
+    // Same shape, mirrored onto the other side of the server: consecutive matches
+    // in which your team beat a team containing this player.
+    // Icon deliberately reused (no spare crest SVGs).
+    id: "owends",
+    title: "Owends",
+    category: "streak",
+    icon: "general-grevious",
+    condition: "Consecutive wins against the same opponent",
+    pending: true, // forward-only, see PAIR_ACHIEVEMENTS_FROM
+    metric: {
+      type: "seqDerived",
+      best: true,
+      compute: (seq) => {
+        const out: { v: number; date: string; matchId: string }[] = []
+        const streak = new Map<string, number>()
+        let best = 0
+        for (const m of seq) {
+          if (!countsForPair(m)) continue
+          if (m.won) {
+            for (const opp of m.opponents) {
+              const s = (streak.get(opp) ?? 0) + 1
+              streak.set(opp, s)
+              if (s > best) {
+                best = s
+                out.push({ v: best, date: m.date, matchId: m.matchId })
+              }
+            }
+          } else if (m.lost) {
+            for (const opp of m.opponents) streak.set(opp, 0)
+          }
+        }
+        return out
+      },
+    },
+    ranks: [
+      { threshold: 5, rarity: "rare" },
+      { threshold: 8, rarity: "epic" },
+      { threshold: 12, rarity: "legendary" },
+      { threshold: 15, rarity: "mythic" },
+    ],
+  },
   {
     id: "on-fire",
     title: "On Fire",
