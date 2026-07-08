@@ -48,6 +48,10 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
       tiered: v.tiered,
       rank: v.rank,
       condition: v.condition,
+      // The current rank's threshold ("100+") for tiered crests — the number the
+      // condition text alone doesn't carry. Null for untiered, whose condition
+      // already spells it out ("Score 1500+ in a single match").
+      requirement: v.earnedRequirement,
       earnedDate: v.earnedDate,
       image: imageUrl(v),
     })),
