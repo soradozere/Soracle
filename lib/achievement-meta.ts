@@ -12,14 +12,18 @@
 // mask-tinted to the rarity colour (same technique as badges). The mapping is
 // thematic/decorative — the crests are emblems, not literal action icons.
 
-export type Rarity = "common" | "rare" | "epic" | "legendary"
+export type Rarity = "common" | "rare" | "epic" | "legendary" | "mythic"
 export type AchievementCategory = "match" | "career" | "streak"
 
+// Mythic sits above legendary — the very rarest feats. Its crest is a wispy,
+// near-white iridescent (styled in components/achievements-strip.tsx), so the
+// colour here is a pale silver-white the tint/glow/tag all derive from.
 export const RARITY_META: Record<Rarity, { label: string; color: string; order: number }> = {
   common: { label: "Common", color: "#3ddc84", order: 1 },
   rare: { label: "Rare", color: "#2f81f7", order: 2 },
   epic: { label: "Epic", color: "#a855f7", order: 3 },
   legendary: { label: "Legendary", color: "#f5c542", order: 4 },
+  mythic: { label: "Mythic", color: "#eaeeff", order: 5 },
 }
 
 // The per-match scoreboard fields achievements read. A subset of match_stats,
@@ -33,6 +37,7 @@ export interface AchStat {
   deaths: number
   flag_hold_ms: number
   dbs_returns: number
+  yellow_kills: number
   turret_kills: number
   mine_returns: number
   blue_returns: number
@@ -106,7 +111,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Score 2000+ in a single match",
     metric: { type: "matchMax", get: (s) => s.score },
     threshold: 2000,
-    rarity: "legendary",
+    rarity: "mythic",
   },
   {
     id: "1500-club",
@@ -185,7 +190,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       test: (s) => s.kills >= 30 && s.kills >= 5 * s.deaths,
     },
     threshold: 1,
-    rarity: "legendary",
+    rarity: "mythic",
   },
   {
     id: "suvix-special",
@@ -302,12 +307,25 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     title: "BSer",
     category: "career",
     icon: "dark-lord-of-the-sith",
-    condition: "Career backstab kills",
+    condition: "Career backslash kills",
     metric: { type: "careerSum", get: (s) => s.bs_kills },
     ranks: [
       { threshold: 100, rarity: "common" },
       { threshold: 250, rarity: "rare" },
       { threshold: 500, rarity: "epic" },
+    ],
+  },
+  {
+    id: "yellow-spammer",
+    title: "Yellow Spammer",
+    category: "career",
+    icon: "black-sun",
+    condition: "Career yellow-stance kills",
+    metric: { type: "careerSum", get: (s) => s.yellow_kills },
+    ranks: [
+      { threshold: 1000, rarity: "rare" },
+      { threshold: 2500, rarity: "epic" },
+      { threshold: 5000, rarity: "legendary" },
     ],
   },
   {
@@ -433,10 +451,12 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     title: "Shutout Specialist",
     category: "streak",
     icon: "mandalorian-clan",
-    condition: "Win 10 matches to nil",
+    condition: "Win matches to nil",
     metric: { type: "shutoutWins" },
-    threshold: 10,
-    rarity: "rare",
+    ranks: [
+      { threshold: 10, rarity: "epic" },
+      { threshold: 20, rarity: "legendary" },
+    ],
   },
   {
     id: "heartbreaker",
