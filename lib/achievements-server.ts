@@ -25,7 +25,7 @@ interface ServerStat extends AchStat {
 }
 
 const STAT_COLUMNS =
-  "match_id, player_id, score, captures, returns, base_cleaner, kills, deaths, flag_hold_ms, dbs_returns, yellow_kills, turret_kills, mine_returns, blue_returns, upcut_kills, bs_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played"
+  "match_id, player_id, score, captures, returns, base_cleaner, assists, kills, deaths, flag_hold_ms, dbs_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played"
 
 const PAGE_SIZE = 1000
 
@@ -78,6 +78,7 @@ export async function computeAllPlayerAchievements(): Promise<Map<string, Player
           captures: s.captures,
           returns: s.returns,
           base_cleaner: s.base_cleaner,
+          assists: s.assists,
           kills: s.kills,
           deaths: s.deaths,
           flag_hold_ms: s.flag_hold_ms,
@@ -85,9 +86,14 @@ export async function computeAllPlayerAchievements(): Promise<Map<string, Player
           yellow_kills: s.yellow_kills,
           turret_kills: s.turret_kills,
           mine_returns: s.mine_returns,
+          mine_kills: s.mine_kills,
           blue_returns: s.blue_returns,
           upcut_kills: s.upcut_kills,
           bs_kills: s.bs_kills,
+          dbs_kills: s.dbs_kills,
+          red_kills: s.red_kills,
+          blue_kills: s.blue_kills,
+          ydfa_kills: s.ydfa_kills,
           doom_kills: s.doom_kills,
           mine_grabs_red: s.mine_grabs_red,
           mine_grabs_blue: s.mine_grabs_blue,
