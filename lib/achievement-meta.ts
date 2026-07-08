@@ -33,6 +33,7 @@ export interface AchStat {
   captures: number
   returns: number
   base_cleaner: number
+  assists: number
   kills: number
   deaths: number
   flag_hold_ms: number
@@ -40,9 +41,14 @@ export interface AchStat {
   yellow_kills: number
   turret_kills: number
   mine_returns: number
+  mine_kills: number
   blue_returns: number
   upcut_kills: number
   bs_kills: number
+  dbs_kills: number
+  red_kills: number
+  blue_kills: number
+  ydfa_kills: number
   doom_kills: number
   mine_grabs_red: number
   mine_grabs_blue: number
@@ -100,6 +106,8 @@ export interface AchievementDef {
 
 // avg flag-hold per capture, ms → the 2:00 gate for Pro Rusher.
 const TWO_MINUTES_MS = 120_000
+// total flag-hold in one match, ms → the 40:00 gate for Marathon Runner.
+const FORTY_MINUTES_MS = 2_400_000
 
 export const ACHIEVEMENTS: AchievementDef[] = [
   // ---------------------------------------------------------------- Match feats
@@ -147,24 +155,71 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     rarity: "epic",
   },
   {
-    id: "the-wall",
-    title: "The Wall",
+    // Replaces the old untiered "The Wall" (25) + "40 Bomb" (40) pair: one crest
+    // that levels up, with the rank's title carrying the number.
+    id: "bomb",
+    title: "30 Bomb",
     category: "match",
     icon: "mandalorian-guard",
-    condition: "25+ returns in a single match",
+    condition: "Returns in a single match",
     metric: { type: "matchMax", get: (s) => s.returns },
-    threshold: 25,
+    ranks: [
+      { threshold: 30, rarity: "epic" },
+      { threshold: 40, rarity: "legendary", title: "40 Bomb" },
+      { threshold: 50, rarity: "mythic", title: "50 Bomb" },
+    ],
+  },
+  {
+    id: "rambo",
+    title: "Rambo",
+    category: "match",
+    icon: "sith-eternal",
+    condition: "Kills in a single match",
+    metric: { type: "matchMax", get: (s) => s.kills },
+    ranks: [
+      { threshold: 100, rarity: "rare" },
+      { threshold: 150, rarity: "epic" },
+      { threshold: 200, rarity: "legendary" },
+      { threshold: 250, rarity: "mythic" },
+    ],
+  },
+  {
+    id: "marathon-runner",
+    title: "Marathon Runner",
+    category: "match",
+    icon: "new-jedi-order",
+    condition: "40+ minutes of flag hold in a match with 3+ caps",
+    metric: {
+      type: "matchPredicate",
+      test: (s) => s.flag_hold_ms >= FORTY_MINUTES_MS && s.captures >= 3,
+    },
+    threshold: 1,
     rarity: "epic",
   },
   {
-    id: "40-bomb",
-    title: "40 Bomb",
+    // A deliberate challenge run: land a kill with every saber/weapon style in one
+    // match. YDFA and blue-stance kills are the rare ones — you have to go for it.
+    id: "nah-youre-hacking",
+    title: "Nah, You're Hacking",
     category: "match",
-    icon: "sith-eternal",
-    condition: "40+ returns in a single match",
-    metric: { type: "matchMax", get: (s) => s.returns },
-    threshold: 40,
-    rarity: "legendary",
+    icon: "lord-revan",
+    condition: "One match, a kill with all 10 styles",
+    metric: {
+      type: "matchPredicate",
+      test: (s) =>
+        s.dfa_kills > 0 &&
+        s.ydfa_kills > 0 &&
+        s.dbs_kills > 0 &&
+        s.bs_kills > 0 &&
+        s.red_kills > 0 &&
+        s.yellow_kills > 0 &&
+        s.blue_kills > 0 &&
+        s.mine_kills > 0 &&
+        s.turret_kills > 0 &&
+        s.upcut_kills > 0,
+    },
+    threshold: 1,
+    rarity: "mythic",
   },
   {
     id: "batcher",
@@ -177,6 +232,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       { threshold: 50, rarity: "epic" },
       { threshold: 80, rarity: "epic" },
       { threshold: 100, rarity: "legendary" },
+      { threshold: 140, rarity: "mythic" },
     ],
   },
   {
@@ -326,6 +382,34 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       { threshold: 1000, rarity: "rare" },
       { threshold: 2500, rarity: "epic" },
       { threshold: 5000, rarity: "legendary" },
+    ],
+  },
+  {
+    // Mine KILLS — the offensive counterpart to Demoman, which counts mine returns.
+    id: "sapper",
+    title: "Sapper",
+    category: "career",
+    icon: "separatists",
+    condition: "Career mine kills",
+    metric: { type: "careerSum", get: (s) => s.mine_kills },
+    ranks: [
+      { threshold: 500, rarity: "epic" },
+      { threshold: 1000, rarity: "legendary" },
+      { threshold: 2500, rarity: "mythic" },
+    ],
+  },
+  {
+    id: "giga-teammate",
+    title: "Giga Teammate",
+    category: "career",
+    icon: "rebel-alliance-jedi-order",
+    condition: "Career assists",
+    metric: { type: "careerSum", get: (s) => s.assists },
+    ranks: [
+      { threshold: 100, rarity: "common" },
+      { threshold: 250, rarity: "rare" },
+      { threshold: 500, rarity: "epic" },
+      { threshold: 1000, rarity: "legendary" },
     ],
   },
   {
