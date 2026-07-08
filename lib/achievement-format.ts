@@ -1,4 +1,4 @@
-import { ACHIEVEMENTS, RARITY_META } from "@/lib/achievement-meta"
+import { findAchievementDef, RARITY_META } from "@/lib/achievement-meta"
 import type { AchievementView } from "@/lib/achievements"
 
 // Presentation helpers shared by the Discord flows (unlock ping + =achievements):
@@ -21,7 +21,7 @@ export function ordinal(n: number): string {
 // Families with a per-rank title override use that title alone (Unstoppable, Cap
 // Legend, MF DOOM); otherwise append the roman numeral for tiered ranks above I.
 export function displayName(v: AchievementView): string {
-  const base = ACHIEVEMENTS.find((d) => d.id === v.id)?.title
+  const base = findAchievementDef(v.id)?.title
   if (v.tiered && v.rank > 1 && v.title === base) return `${v.title} ${roman(v.rank)}`
   return v.title
 }
