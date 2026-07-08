@@ -1,9 +1,13 @@
 import {
   ACHIEVEMENTS,
   RARITY_META,
+  SECRET_ACHIEVEMENTS,
+  SECRET_RARITY,
   type AchievementCategory,
   type AchievementDef,
   type AchMatch,
+  type AchStat,
+  type ClaimContext,
   type Rarity,
 } from "@/lib/achievement-meta"
 
@@ -248,6 +252,91 @@ function compareViews(a: AchievementView, b: AchievementView): number {
   return (b.progressPct ?? -1) - (a.progressPct ?? -1)
 }
 
-export function computeAchievements(seq: AchMatch[]): AchievementView[] {
-  return ACHIEVEMENTS.map((def) => viewFor(def, seq)).sort(compareViews)
+// ---------------------------------------------------------------------------
+// Secret one-of-one achievements
+// ---------------------------------------------------------------------------
+
+// One player's scoreboard line in one match — the only thing a `claim` can read.
+// Both callers already hold every match and every stat row, so building these
+// costs no extra queries: lib/player-profile.ts for the browser,
+// lib/achievements-server.ts for the Discord bot.
+export interface SecretCandidate {
+  playerId: string
+  matchId: string
+  date: string
+  ctx: ClaimContext
+  stat: AchStat
+}
+
+export interface SecretHolder {
+  playerId: string
+  matchId: string
+  date: string
+}
+
+// Earliest claim wins. Two team-mates CAN both finish a won match on zero kills,
+// so "earliest" alone is ambiguous — matchId then playerId break the tie. The rule
+// only has to be total and stable: the browser and the bot each resolve this
+// independently, and they must never name different holders for the same crest.
+function claimedFirst(a: SecretCandidate, b: SecretHolder): boolean {
+  const at = Date.parse(a.date)
+  const bt = Date.parse(b.date)
+  if (at !== bt) return at < bt
+  if (a.matchId !== b.matchId) return a.matchId < b.matchId
+  return a.playerId < b.playerId
+}
+
+// Who holds each secret crest. Absent from the map = nobody has claimed it yet,
+// and it stays invisible to everyone.
+export function resolveSecretHolders(candidates: SecretCandidate[]): Map<string, SecretHolder> {
+  const holders = new Map<string, SecretHolder>()
+  for (const def of SECRET_ACHIEVEMENTS) {
+    // Forward-only crests ignore the back catalogue entirely (see SecretDef.from).
+    // Parsed timestamps, not string compare — created_at spelling varies (+00:00 vs Z).
+    const fromMs = def.from ? Date.parse(def.from) : null
+    let best: SecretHolder | null = null
+    for (const c of candidates) {
+      if (fromMs !== null && Date.parse(c.date) < fromMs) continue
+      if (!def.claim(c.stat, c.ctx)) continue
+      if (!best || claimedFirst(c, best)) best = { playerId: c.playerId, matchId: c.matchId, date: c.date }
+    }
+    if (best) holders.set(def.id, best)
+  }
+  return holders
+}
+
+// The secret crests THIS player holds, as views. Everyone else gets an empty array,
+// which is what keeps a secret secret — there is no locked state to leak.
+export function secretViewsFor(playerId: string, holders: Map<string, SecretHolder>): AchievementView[] {
+  const views: AchievementView[] = []
+  for (const def of SECRET_ACHIEVEMENTS) {
+    const holder = holders.get(def.id)
+    if (holder?.playerId !== playerId) continue
+    views.push({
+      id: def.id,
+      title: def.title,
+      category: def.category,
+      rarity: SECRET_RARITY,
+      icon: def.icon,
+      condition: def.condition,
+      pending: false,
+      tiered: false,
+      rank: 1,
+      totalRanks: 1,
+      earned: true,
+      earnedDate: holder.date,
+      earnedMatchId: holder.matchId,
+      earnedRequirement: null,
+      progressPct: 1,
+      progressLabel: null,
+      value: 1,
+    })
+  }
+  return views
+}
+
+// `secrets` comes from secretViewsFor — empty for all but the single holder. They
+// sort to the front for free: RARITY_META.oneofone has the highest order.
+export function computeAchievements(seq: AchMatch[], secrets: AchievementView[] = []): AchievementView[] {
+  return [...ACHIEVEMENTS.map((def) => viewFor(def, seq)), ...secrets].sort(compareViews)
 }

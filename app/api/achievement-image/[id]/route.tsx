@@ -1,5 +1,5 @@
 import { ImageResponse } from "next/og"
-import { ACHIEVEMENTS, RARITY_META, type Rarity } from "@/lib/achievement-meta"
+import { findAchievementDef, RARITY_META, type Rarity } from "@/lib/achievement-meta"
 
 export const runtime = "nodejs"
 
@@ -13,7 +13,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const { id } = await params
   const rank = Math.max(1, parseInt(new URL(request.url).searchParams.get("rank") ?? "1", 10))
 
-  const def = ACHIEVEMENTS.find((d) => d.id === id)
+  // Secret one-of-one crests live outside ACHIEVEMENTS, so this has to look in both
+  // lists — otherwise Pacifist's Discord thumbnail is a grey card reading "Achievement".
+  const def = findAchievementDef(id)
   let rarity: Rarity = "common"
   let title = def?.title ?? "Achievement"
   if (def?.ranks?.length) {

@@ -6,6 +6,15 @@ import { colorInt, displayName, imageUrl, ordinal, profileUrl } from "@/lib/achi
 // down, compute error) is swallowed so it can never break match approval. The
 // webhook is bound to a single channel, so pings only ever land there.
 
+const isOneOfOne = (u: Unlock) => u.view.rarity === "oneofone"
+
+// Tiered conditions are generic ("Base cleans in a single match") — the number that
+// defines the rank lives in earnedRequirement ("80+"). Lead with it so the ping says
+// what was actually done. Untiered conditions already spell out their own number
+// ("Score 2000+ in a single match") and have no earnedRequirement.
+const conditionWithNumber = (u: Unlock) =>
+  u.view.earnedRequirement ? `**${u.view.earnedRequirement}** · ${u.view.condition}` : u.view.condition
+
 function embedFor(u: Unlock) {
   return {
     author: { name: u.playerName },
@@ -16,7 +25,11 @@ function embedFor(u: Unlock) {
     // III in the same game showed only 1500 Club. The query param keeps every link
     // pointing at the profile while making each embed's url distinct.
     url: `${profileUrl(u.playerName)}?ach=${u.view.id}`,
-    description: `${u.view.condition}\n**${ordinal(u.n)}** player to unlock this`,
+    // "1st player to unlock this" is true of a one-of-one and completely misses the
+    // point — there will never be a second.
+    description: isOneOfOne(u)
+      ? `${u.view.condition}\n**The only player who will ever hold this**`
+      : `${conditionWithNumber(u)}\n**${ordinal(u.n)}** player to unlock this`,
     color: colorInt(u.view),
     thumbnail: { url: imageUrl(u.view) },
   }
@@ -37,9 +50,18 @@ export async function notifyAchievementUnlocks(matchId: string): Promise<void> {
   }
   if (!unlocks.length) return
 
+  // A one-of-one outranks everything, and computeMatchUnlocks sorts rarest first, so
+  // if one was claimed it leads the message even when other crests unlocked alongside.
+  const headline = unlocks[0]
+
   // One unlock → the personal copy; several → one combined message, an embed each.
   let content: string
-  if (unlocks.length === 1) {
+  if (isOneOfOne(headline)) {
+    content =
+      `Stop everything. **${headline.playerName}** just claimed **${displayName(headline.view)}** ` +
+      `— a one-of-one. Nobody else will ever hold it.\n\n` +
+      `See it at ${profileUrl(headline.playerName)}`
+  } else if (unlocks.length === 1) {
     const u = unlocks[0]
     content =
       `Good shit, **${u.playerName}**. You just unlocked **${displayName(u.view)}**, ` +
