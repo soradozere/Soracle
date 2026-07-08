@@ -267,6 +267,13 @@ export async function logMatch(data: {
       return { success: false, error: error.message }
     }
 
+    // Keep players.last_match_at current (see touchLastMatchAt).
+    await touchLastMatchAt(
+      supabase,
+      [...data.red_team, ...data.blue_team],
+      data.played_at ?? new Date().toISOString(),
+    )
+
     return { success: true }
   } catch (error) {
     return {
@@ -293,6 +300,42 @@ type MatchWithStatsPayload = {
 // DB stays consistent on any failure: upload CSV → insert match → insert stats →
 // move CSV. Returns the new match id. Used by both the manual log flow and the
 // pending-match approval flow, so the two paths can never drift apart.
+/**
+ * Stamp players.last_match_at when a match is logged. Nothing else writes this
+ * column, and lib/fetch-players-db.ts derives "inactive" from it (27 days), so
+ * without this every active player eventually shows as Inactive on the Tier List.
+ * Only moves the value forward — back-dated matches never rewind a newer date.
+ * Best-effort: a failure here must not fail an otherwise-good match.
+ */
+async function touchLastMatchAt(supabase: SupabaseClient, names: string[], playedAtIso: string) {
+  const unique = [...new Set(names)]
+  if (unique.length === 0) return
+
+  // Read-then-write rather than a PostgREST `.or(last_match_at.lt.<iso>)` filter:
+  // the stored value and playedAtIso can use different ISO spellings (+00:00 vs Z),
+  // so the comparison is done on parsed timestamps, not strings.
+  const { data, error: readError } = await supabase
+    .from("players")
+    .select("id, last_match_at")
+    .in("name", unique)
+  if (readError) {
+    console.warn(`Failed to read last_match_at: ${readError.message}`)
+    return
+  }
+
+  const playedAt = new Date(playedAtIso).getTime()
+  const stale = (data ?? [])
+    .filter((p) => !p.last_match_at || new Date(p.last_match_at).getTime() < playedAt)
+    .map((p) => p.id)
+  if (stale.length === 0) return
+
+  const { error } = await supabase
+    .from("players")
+    .update({ last_match_at: playedAtIso })
+    .in("id", stale)
+  if (error) console.warn(`Failed to update last_match_at: ${error.message}`)
+}
+
 async function persistMatchWithStats(
   supabase: SupabaseClient,
   payload: MatchWithStatsPayload,
@@ -381,6 +424,9 @@ async function persistMatchWithStats(
       `Match ${matchId} saved, but CSV move failed (left at ${pendingPath}): ${moveError.message}`,
     )
   }
+
+  // 5. Keep players.last_match_at current so the Tier List's activity check works.
+  await touchLastMatchAt(supabase, allPlayers, payload.played_at ?? new Date().toISOString())
 
   // Best-effort achievement-unlock ping (never throws; no-op without a webhook).
   await notifyAchievementUnlocks(matchId)

@@ -61,9 +61,14 @@ interface StatRow {
   yellow_kills: number
   turret_kills: number
   mine_returns: number
+  mine_kills: number
   blue_returns: number
   upcut_kills: number
   bs_kills: number
+  dbs_kills: number
+  red_kills: number
+  blue_kills: number
+  ydfa_kills: number
   doom_kills: number
   mine_grabs_red: number
   mine_grabs_blue: number
@@ -208,7 +213,7 @@ function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[] }
     fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
     fetchAllRows<StatRow>(
       "match_stats",
-      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, yellow_kills, turret_kills, mine_returns, blue_returns, upcut_kills, bs_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played",
+      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played",
     ),
   ]).then(([matches, stats]) => ({ matches, stats }))
   matchDataCache = { at: Date.now(), promise }
@@ -796,6 +801,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
             captures: row.captures,
             returns: row.returns,
             base_cleaner: row.base_cleaner,
+            assists: row.assists,
             kills: row.kills,
             deaths: row.deaths,
             flag_hold_ms: row.flag_hold_ms,
@@ -803,9 +809,14 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
             yellow_kills: row.yellow_kills,
             turret_kills: row.turret_kills,
             mine_returns: row.mine_returns,
+            mine_kills: row.mine_kills,
             blue_returns: row.blue_returns,
             upcut_kills: row.upcut_kills,
             bs_kills: row.bs_kills,
+            dbs_kills: row.dbs_kills,
+            red_kills: row.red_kills,
+            blue_kills: row.blue_kills,
+            ydfa_kills: row.ydfa_kills,
             doom_kills: row.doom_kills,
             mine_grabs_red: row.mine_grabs_red,
             mine_grabs_blue: row.mine_grabs_blue,
