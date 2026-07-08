@@ -33,7 +33,7 @@ import {
 } from "recharts"
 
 // The player profile body, rendered by the /player/[slug] page (right-click →
-// Show Profile opens it in a new tab). Design is deliberately freeform for now —
+// Show Profile navigates to it in the same tab). Design is deliberately freeform for now —
 // Sam wants to nail visuals later with custom images, so badges etc. are simple
 // styled chips.
 
