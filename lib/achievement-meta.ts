@@ -697,8 +697,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     // Same shape, mirrored onto the other side of the server: consecutive matches
     // in which your team beat a team containing this player.
     // Icon deliberately reused (no spare crest SVGs).
-    id: "owends",
-    title: "Owends",
+    id: "owneds",
+    title: "Owneds",
     category: "streak",
     icon: "general-grevious",
     condition: "Consecutive wins against the same opponent",
