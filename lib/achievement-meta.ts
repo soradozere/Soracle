@@ -12,18 +12,24 @@
 // mask-tinted to the rarity colour (same technique as badges). The mapping is
 // thematic/decorative — the crests are emblems, not literal action icons.
 
-export type Rarity = "common" | "rare" | "epic" | "legendary" | "mythic"
+export type Rarity = "common" | "rare" | "epic" | "legendary" | "mythic" | "oneofone"
 export type AchievementCategory = "match" | "career" | "streak"
 
-// Mythic sits above legendary — the very rarest feats. Its crest is a wispy,
+// Mythic sits above legendary — the very rarest feats. Its crest is a fire-lit
 // near-white iridescent (styled in components/achievements-strip.tsx), so the
 // colour here is a pale silver-white the tint/glow/tag all derive from.
+//
+// "One of One" sits above everything and is not a tier you climb: exactly one
+// player holds each, forever. Fuchsia because no other tier is anywhere near it
+// on the wheel, and its crest is an octagon rather than a hexagon — a crest that
+// nobody else can ever earn should not be the same shape as the ones they can.
 export const RARITY_META: Record<Rarity, { label: string; color: string; order: number }> = {
   common: { label: "Common", color: "#3ddc84", order: 1 },
   rare: { label: "Rare", color: "#2f81f7", order: 2 },
   epic: { label: "Epic", color: "#a855f7", order: 3 },
   legendary: { label: "Legendary", color: "#f5c542", order: 4 },
   mythic: { label: "Mythic", color: "#eaeeff", order: 5 },
+  oneofone: { label: "One of One", color: "#ff2fb9", order: 6 },
 }
 
 // The per-match scoreboard fields achievements read. A subset of match_stats,
@@ -774,3 +780,137 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ],
   },
 ]
+
+// ---------------------------------------------------------------------------
+// Secret one-of-one achievements
+// ---------------------------------------------------------------------------
+
+// These are NOT in ACHIEVEMENTS, and deliberately so: every entry above answers
+// "did THIS player do X?" from that player's own history. A one-of-one asks a
+// global question — "was anyone earlier?" — which no per-player metric can see.
+// The first player in the whole match history to satisfy `claim` holds the crest
+// forever; nobody else can ever earn it. lib/achievements.ts resolves the holder
+// (resolveSecretHolders) and only the holder is ever handed a view, so for every
+// other player these do not exist: not on the profile, not in the bot's
+// =achievements, not in any earned/total count.
+//
+// No forward-only cutoff (cf. PAIR_ACHIEVEMENTS_FROM): the whole history is fair
+// game, because nobody has claimed one yet. See PACIFIST_MIN_MINUTES for why.
+
+// A claim only needs the scoreboard line plus the match result, so this is a much
+// narrower context than AchMatch — no team rosters, no streak history.
+export interface ClaimContext {
+  won: boolean
+  lost: boolean
+  myScore: number
+  oppScore: number
+}
+
+export interface SecretDef {
+  id: string
+  title: string
+  category: AchievementCategory
+  icon: string // /achievements/<icon>.svg
+  condition: string
+  claim: (s: AchStat, m: ClaimContext) => boolean
+  // Forward-only cutoff: matches before this ISO timestamp can never claim the
+  // crest. Used when the back catalogue already contains a qualifying match that
+  // should NOT silently take it on deploy (see agent-zero).
+  from?: string
+}
+
+// Every secret crest is this rarity. There is no ladder to climb.
+export const SECRET_RARITY: Rarity = "oneofone"
+
+// Pacifist needs a participation floor. There is exactly one zero-kill line in the
+// 811 scoreboard rows on record — three minutes played, zero score, one death — so
+// without this a player who connects, does nothing and happens to be on the winning
+// team would permanently claim the rarest crest in the game. No player with ten
+// minutes on the clock has ever finished a match below two kills, so 20 minutes
+// gates out the AFKs without putting a real pacifist run out of reach.
+// time_played is stored in MINUTES (scoreboard TIME-SUM) and is nullable.
+const PACIFIST_MIN_MINUTES = 20
+
+// Thresholds below were calibrated against all 811 scoreboard rows on record
+// (July 2026): each sits just past the all-time best, so every crest is
+// unclaimed but not absurd. For reference — dbs_kills record 14, dfa_kills
+// record 81, best flag hold under 30 deaths 36:00, doom_kills record 1 (yes,
+// one: Mayhem 4 is meant to be the white whale), and 3+ caps with 20+ returns
+// has never once co-occurred, never mind with 100 kills on top.
+//
+// Icons are all reused from ACHIEVEMENTS (no spare crest SVGs), picked for
+// theme: the octagon chassis + fuchsia keeps them visually distinct anyway.
+export const SECRET_ACHIEVEMENTS: SecretDef[] = [
+  {
+    id: "pacifist",
+    title: "Pacifist",
+    category: "match",
+    icon: "new-jedi-order", // the Jedi crest — peace
+    condition: "Win a match without a single kill",
+    claim: (s, m) => m.won && s.kills === 0 && (s.time_played ?? 0) >= PACIFIST_MIN_MINUTES,
+  },
+  {
+    // shax already did this on 27 Jun 2026 (25 flag grabs, zero conversions of any
+    // kind, 45 minutes) — forward-only so it has to be re-earned live rather than
+    // handed out silently on deploy.
+    id: "agent-zero",
+    title: "Agent Zero",
+    category: "match",
+    icon: "black-sun", // the crime-syndicate crest — the invisible man
+    condition: "Finish a 25+ min match with 0 caps, 0 returns, 0 base cleans",
+    from: "2026-07-09T00:00:00.000Z",
+    claim: (s) => s.captures === 0 && s.returns === 0 && s.base_cleaner === 0 && (s.time_played ?? 0) >= 25,
+  },
+  {
+    id: "prime-vo",
+    title: "Prime [ v O ]",
+    category: "match",
+    icon: "sith-order", // shares DBS Enjoyer's crest — it's a DBS feat
+    condition: "20+ DBS kills in a single match",
+    claim: (s) => s.dbs_kills >= 20,
+  },
+  {
+    id: "wesleys-prodigy",
+    title: "Wesley's Prodigy",
+    category: "match",
+    icon: "rogue-one", // shares Pro Rusher's crest — the runner's crest
+    condition: "Hold the flag 45+ minutes with under 30 deaths",
+    claim: (s) => s.flag_hold_ms >= 2_700_000 && s.deaths < 30,
+  },
+  {
+    id: "cheese-is-hacking",
+    title: "Cheese is Hacking",
+    category: "match",
+    icon: "mandalorian-mysteries", // shares Cheese's Dream's crest, naturally
+    condition: "100+ DFA kills in a single match",
+    claim: (s) => s.dfa_kills >= 100,
+  },
+  {
+    id: "protector-of-yavin",
+    title: "Protector of Yavin",
+    category: "match",
+    icon: "rebel-alliance", // Yavin IV — the Rebel base
+    condition: "3+ caps, 20+ returns and 100+ kills in one match",
+    claim: (s) => s.captures >= 3 && s.returns >= 20 && s.kills >= 100,
+  },
+  {
+    id: "mayhem-4",
+    title: "Mayhem 4 Incoming",
+    category: "match",
+    icon: "sith-era", // shares DOOM's crest — it's a doom feat
+    condition: "5+ dooms, 20+ DBS kills and a cap in one match",
+    claim: (s) => s.doom_kills >= 5 && s.dbs_kills >= 20 && s.captures >= 1,
+  },
+]
+
+// Both ACHIEVEMENTS and SECRET_ACHIEVEMENTS, by id. Anything that renders a crest
+// from an id alone — the Discord embed thumbnail, the unlock ping's display name —
+// must go through this, or a secret crest falls back to a grey "Achievement" card.
+export function findAchievementDef(
+  id: string,
+): { id: string; title: string; ranks?: Rank[]; rarity?: Rarity } | undefined {
+  const def = ACHIEVEMENTS.find((d) => d.id === id)
+  if (def) return def
+  const secret = SECRET_ACHIEVEMENTS.find((d) => d.id === id)
+  return secret && { id: secret.id, title: secret.title, rarity: SECRET_RARITY }
+}

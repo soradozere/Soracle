@@ -1,8 +1,14 @@
 import { createClient } from "@/lib/supabase/client"
 import { applyMatchElo, seedFromTier } from "@/lib/elo"
 import { BADGE_PRIORITY } from "@/lib/badge-meta"
-import { computeAchievements, type AchievementView } from "@/lib/achievements"
-import type { AchMatch } from "@/lib/achievement-meta"
+import {
+  computeAchievements,
+  resolveSecretHolders,
+  secretViewsFor,
+  type AchievementView,
+  type SecretCandidate,
+} from "@/lib/achievements"
+import type { AchMatch, AchStat } from "@/lib/achievement-meta"
 import type { Player } from "@/lib/types"
 
 // Everything a player profile shows, computed client-side from one pass over
@@ -286,6 +292,44 @@ function outcomeFor(name: string, match: ProfileMatch): MatchOutcome {
     teammates: [...new Set(mine)].filter((n) => n !== name),
     opponents: [...new Set(theirs)].filter((n) => n !== name),
   }
+}
+
+// StatRow is a superset of AchStat (it also carries match_id / player_id / flag_grabs),
+// so the achievements layer can read a row directly.
+const toAchStat = (row: StatRow): AchStat => row
+
+// ---------------------------------------------------------------------------
+// Secret one-of-one achievements
+// ---------------------------------------------------------------------------
+
+// A one-of-one asks "was anyone earlier?", so it has to see EVERY player's rows, not
+// just this profile's. fetchMatchData already pulls both tables in full (recordHolders
+// needs them too), so this is a pass over data we're holding anyway — no extra queries.
+function secretCandidates(
+  matches: ProfileMatch[],
+  stats: StatRow[],
+  nameById: Map<string, string>,
+): SecretCandidate[] {
+  const matchById = new Map(matches.map((m) => [m.id, m]))
+  const candidates: SecretCandidate[] = []
+  for (const row of stats) {
+    const match = matchById.get(row.match_id)
+    const name = nameById.get(row.player_id)
+    if (!match || !name) continue
+    const onRed = (match.red_team || []).includes(name)
+    const onBlue = (match.blue_team || []).includes(name)
+    if (!onRed && !onBlue) continue
+    const myScore = onRed ? match.red_score : match.blue_score
+    const oppScore = onRed ? match.blue_score : match.red_score
+    candidates.push({
+      playerId: row.player_id,
+      matchId: match.id,
+      date: match.created_at,
+      ctx: { won: myScore > oppScore, lost: oppScore > myScore, myScore, oppScore },
+      stat: toAchStat(row),
+    })
+  }
+  return candidates
 }
 
 // ---------------------------------------------------------------------------
@@ -806,41 +850,13 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
       oppScore: onRed ? match.blue_score : match.red_score,
       teammates: o.teammates,
       opponents: o.opponents,
-      stat: row
-        ? {
-            score: row.score,
-            captures: row.captures,
-            returns: row.returns,
-            base_cleaner: row.base_cleaner,
-            assists: row.assists,
-            kills: row.kills,
-            deaths: row.deaths,
-            flag_hold_ms: row.flag_hold_ms,
-            dbs_returns: row.dbs_returns,
-            yellow_kills: row.yellow_kills,
-            turret_kills: row.turret_kills,
-            mine_returns: row.mine_returns,
-            mine_kills: row.mine_kills,
-            blue_returns: row.blue_returns,
-            blubs_returns: row.blubs_returns,
-            upcut_kills: row.upcut_kills,
-            bs_kills: row.bs_kills,
-            dbs_kills: row.dbs_kills,
-            red_kills: row.red_kills,
-            blue_kills: row.blue_kills,
-            ydfa_kills: row.ydfa_kills,
-            doom_kills: row.doom_kills,
-            mine_grabs_red: row.mine_grabs_red,
-            mine_grabs_blue: row.mine_grabs_blue,
-            dfa_kills: row.dfa_kills,
-            dfa_attempts: row.dfa_attempts,
-            blocks_enemy: row.blocks_enemy,
-            time_played: row.time_played,
-          }
-        : null,
+      stat: row ? toAchStat(row) : null,
     })
   }
-  const achievements = computeAchievements(achSeq)
+  // Secret crests are resolved globally, then only the holder is handed a view — so
+  // for everyone else they don't exist, and can't leak through the earned/total count.
+  const secretHolders = resolveSecretHolders(secretCandidates(playable, stats, nameById))
+  const achievements = computeAchievements(achSeq, secretViewsFor(player.id, secretHolders))
 
   const honours = computeMonthlyHonours(playable, stats, nameById, tierByName)
 

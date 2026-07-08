@@ -1,6 +1,12 @@
 import { createClient } from "@/lib/supabase/server"
-import { computeAchievements, type AchievementView } from "@/lib/achievements"
-import type { AchMatch, AchStat } from "@/lib/achievement-meta"
+import {
+  computeAchievements,
+  resolveSecretHolders,
+  secretViewsFor,
+  type AchievementView,
+  type SecretCandidate,
+} from "@/lib/achievements"
+import { RARITY_META, type AchMatch, type AchStat } from "@/lib/achievement-meta"
 
 // Server-side achievement computation, for the Discord bot flows (unlock pings +
 // =achievements). Reuses the pure computeAchievements over the full history; the
@@ -106,8 +112,12 @@ export async function computeAllPlayerAchievements(): Promise<Map<string, Player
       : null
 
   // Build each player's chronological match sequence in a single pass over
-  // matches (ascending), appending an entry to every participant.
+  // matches (ascending), appending an entry to every participant. The same pass
+  // collects the flat (player, match, stat) rows that the one-of-one crests are
+  // resolved from — they ask "was anyone earlier?", which no single player's
+  // sequence can answer.
   const seqByPlayer = new Map<string, AchMatch[]>()
+  const candidates: SecretCandidate[] = []
   for (const m of matches) {
     if (!m.red_team?.length || !m.blue_team?.length) continue
     for (const [team, other, myScore, oppScore] of [
@@ -127,25 +137,43 @@ export async function computeAllPlayerAchievements(): Promise<Map<string, Player
           seq = []
           seqByPlayer.set(pid, seq)
         }
+        const stat = toAchStat(statByKey.get(`${m.id}:${pid}`))
+        const won = myScore > oppScore
+        const lost = oppScore > myScore
         seq.push({
           matchId: m.id,
           date: m.created_at,
           played: true,
-          won: myScore > oppScore,
-          lost: oppScore > myScore,
+          won,
+          lost,
           myScore,
           oppScore,
           teammates: mine.filter((n) => n !== name),
           opponents: theirs.filter((n) => n !== name),
-          stat: toAchStat(statByKey.get(`${m.id}:${pid}`)),
+          stat,
         })
+        if (stat) {
+          candidates.push({
+            playerId: pid,
+            matchId: m.id,
+            date: m.created_at,
+            ctx: { won, lost, myScore, oppScore },
+            stat,
+          })
+        }
       }
     }
   }
 
+  const holders = resolveSecretHolders(candidates)
+
   const result = new Map<string, PlayerAchievements>()
   for (const [pid, seq] of seqByPlayer) {
-    result.set(pid, { playerId: pid, name: nameById.get(pid) ?? "Unknown", views: computeAchievements(seq) })
+    result.set(pid, {
+      playerId: pid,
+      name: nameById.get(pid) ?? "Unknown",
+      views: computeAchievements(seq, secretViewsFor(pid, holders)),
+    })
   }
   return result
 }
@@ -159,7 +187,9 @@ export interface Unlock {
 
 // Achievements freshly unlocked in a specific match: any player whose current
 // rank was crossed by exactly that match. `n` = how many players have reached
-// at least that rank (the "Nth player to do so").
+// at least that rank (the "Nth player to do so"). Secret one-of-one crests fall
+// out of this for free — their view carries `earned` and the claiming matchId,
+// and only one player is ever handed one, so `n` is always 1.
 export async function computeMatchUnlocks(matchId: string): Promise<Unlock[]> {
   const byPlayer = await computeAllPlayerAchievements()
 
@@ -182,6 +212,10 @@ export async function computeMatchUnlocks(matchId: string): Promise<Unlock[]> {
       unlocks.push({ playerId, playerName: name, view: v, n })
     }
   }
-  // Rarest first so a combined message leads with the biggest flex.
-  return unlocks.sort((a, b) => b.view.value - a.view.value)
+  // Rarest first so a combined message leads with the biggest flex. Rarity, not raw
+  // value: a One of One has value 1 and would otherwise sort below a 250-kill Rambo.
+  return unlocks.sort((a, b) => {
+    const r = RARITY_META[b.view.rarity].order - RARITY_META[a.view.rarity].order
+    return r || b.view.value - a.view.value
+  })
 }
