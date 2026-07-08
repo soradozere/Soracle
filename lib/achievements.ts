@@ -26,6 +26,7 @@ export interface AchievementView {
   earned: boolean
   earnedDate: string | null
   earnedMatchId: string | null // the match that crossed the current rank (for unlock pings)
+  earnedRequirement: string | null // the threshold that defines the current rank (e.g. "80+"), for tiered crests
   progressPct: number | null // toward the next (earned) / first (locked) threshold
   progressLabel: string | null
   value: number // raw current metric value
@@ -189,6 +190,9 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
       earned,
       earnedDate: earned ? crossingDate(cur.threshold) : null,
       earnedMatchId: earned ? crossingMatchId(cur.threshold) : null,
+      // The current rank's own threshold — the number the tile's next/MAXED label
+      // doesn't show once you've climbed past a rank (e.g. Batcher II = 80+).
+      earnedRequirement: earned ? `${fmtVal(cur.threshold, def)}+` : null,
       progressPct,
       progressLabel,
       value,
@@ -214,6 +218,9 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
     earned,
     earnedDate: earned ? crossingDate(threshold) : null,
     earnedMatchId: earned ? crossingMatchId(threshold) : null,
+    // Untiered conditions already spell out their number ("Score 2000+"), so
+    // there's nothing extra to surface.
+    earnedRequirement: null,
     // Boolean feats have no meaningful partial progress; scalar ones do.
     progressPct: earned ? 1 : predicate ? null : clampPct(value / threshold),
     progressLabel: earned || predicate ? null : label(threshold, null),

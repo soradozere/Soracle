@@ -299,7 +299,7 @@ export const PlayerCard = memo(function PlayerCard({
       <ContextMenuContent className="bg-[#1f2833]/95 backdrop-blur-md border-[#66fcf1]/30 text-[#c5c6c7]">
         <ContextMenuItem
           className="gap-2 focus:bg-[#66fcf1]/10 focus:text-[#66fcf1]"
-          onSelect={() => window.open(`/player/${playerSlug(player.name)}`, "_blank")}
+          onSelect={() => window.open(`/player/${playerSlug(player.name)}`, "_self")}
         >
           <UserSearch className="w-4 h-4" />
           Show Profile

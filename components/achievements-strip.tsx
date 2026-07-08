@@ -36,12 +36,13 @@ function CrestIcon({ icon, color, locked }: { icon: string; color: string; locke
 function Crest({ a }: { a: AchievementView }) {
   const color = RARITY_META[a.rarity].color
   const pending = a.pending && !a.earned
-  const legendaryEarned = a.earned && a.rarity === "legendary"
+  // Legendary + mythic get the holo-sheen sweep; mythic layers a wispy shimmer.
+  const sheenEarned = a.earned && (a.rarity === "legendary" || a.rarity === "mythic")
   const classes = [
     "ach-tile",
     a.earned ? "earned" : "locked",
     a.rarity,
-    a.earned && (a.rarity === "epic" || a.rarity === "legendary") ? "pulse" : "",
+    a.earned && (a.rarity === "epic" || a.rarity === "legendary" || a.rarity === "mythic") ? "pulse" : "",
     pending ? "pending" : "",
   ]
     .filter(Boolean)
@@ -53,7 +54,8 @@ function Crest({ a }: { a: AchievementView }) {
         <div className={classes} style={{ "--rc": color } as React.CSSProperties}>
           <div className="ach-ring" />
           <div className="ach-bodyfill" />
-          {legendaryEarned && <div className="ach-sheen" />}
+          {sheenEarned && <div className="ach-sheen" />}
+          {a.earned && a.rarity === "mythic" && <div className="ach-wisp" />}
           <div className="ach-face">
             {a.tiered && a.earned && <div className="ach-rank">{roman(a.rank)}</div>}
             <CrestIcon icon={a.icon} color={color} locked={!a.earned} />
@@ -96,7 +98,7 @@ function Crest({ a }: { a: AchievementView }) {
         <div className="mt-0.5">{a.condition}</div>
         <div className="mt-1 text-[#8892a0]">
           {a.earned
-            ? `Earned ${fmtDate(a.earnedDate)}${a.tiered ? ` · rank ${a.rank}/${a.totalRanks}` : ""}`
+            ? `${a.earnedRequirement ? `Reached ${a.earnedRequirement} · ` : ""}Earned ${fmtDate(a.earnedDate)}${a.tiered ? ` · rank ${a.rank}/${a.totalRanks}` : ""}`
             : pending
               ? "Starts tracking once scoreboards carry this stat"
               : a.progressLabel
@@ -158,6 +160,18 @@ const ACH_CSS = `
 @keyframes achPulse{0%,100%{filter:none}50%{filter:brightness(1.09)}}
 .ach-sheen{inset:5px;background:linear-gradient(115deg,transparent 30%,rgba(255,255,255,.5) 47%,rgba(255,255,255,.04) 55%,transparent 70%);background-size:250% 250%;mix-blend-mode:overlay;animation:achSweep 3.6s linear infinite;pointer-events:none}
 @keyframes achSweep{0%{background-position:150% 0}100%{background-position:-90% 0}}
+.ach-tile.mythic{--rc:#eaeeff}
+/* Ring kept a soft pearl-silver (not pure white) so the bright orbiting whisp reads against it. */
+.ach-tile.mythic.earned .ach-ring{background:linear-gradient(150deg,#cfd7f0 0%,#b3bfe2 32%,#c9bce4 54%,#aec4ea 74%,#95a4cf 100%);filter:drop-shadow(0 0 10px rgba(226,232,255,.7)) drop-shadow(0 0 22px rgba(200,180,255,.4))}
+.ach-tile.mythic.earned .ach-bodyfill{background:radial-gradient(130% 100% at 30% 8%,rgba(226,230,255,.28) 0%,transparent 52%),linear-gradient(180deg,#1a2030 0%,#12141f 50%,#0b0d15 100%)}
+.ach-tile.mythic.earned .ach-name{color:#f4f6ff;text-shadow:0 0 8px rgba(226,230,255,.5)}
+.ach-tile.mythic.earned .ach-tag{background:#0c0e17;border-color:#dfe4ff;color:#f4f6ff;box-shadow:0 0 12px rgba(226,230,255,.5)}
+/* A glowing whisp that orbits the hexagon outline — offset-path traces the six
+   edges, offset-rotate:auto keeps the streak tangent so it bends around each
+   corner. Its blur/glow spills past the edge onto the dark card, so the motion
+   is obvious. The hex path matches .ach-ring's clip-path at 150x176. */
+.ach-wisp{position:absolute;top:0;left:0;width:34px;height:9px;border-radius:9px;pointer-events:none;z-index:4;mix-blend-mode:screen;background:linear-gradient(90deg,transparent 0%,rgba(178,204,255,.35) 42%,rgba(230,240,255,.9) 82%,#ffffff 100%);filter:blur(1.6px) drop-shadow(0 0 6px rgba(233,240,255,.95)) drop-shadow(0 0 12px rgba(188,210,255,.65));offset-path:path("M75 0 L150 44 L150 132 L75 176 L0 132 L0 44 Z");offset-rotate:auto;offset-anchor:center;animation:achOrbit 3.2s linear infinite}
+@keyframes achOrbit{from{offset-distance:0%}to{offset-distance:100%}}
 .ach-tile.locked{filter:grayscale(.85);opacity:.6}
 .ach-tile.locked .ach-bodyfill{background:linear-gradient(180deg,#141a22,#0a0e13)}
 .ach-tile.locked .ach-ring{background:linear-gradient(150deg,#33404e,#1a222c)}
