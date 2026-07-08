@@ -10,7 +10,12 @@ function embedFor(u: Unlock) {
   return {
     author: { name: u.playerName },
     title: displayName(u.view),
-    url: profileUrl(u.playerName),
+    // Discord MERGES embeds that share a `url` (it's how the 4-image trick works),
+    // so two unlocks by the same player in one message would collapse into one and
+    // the second would silently vanish. Interlude unlocking 1500 Club and Batcher
+    // III in the same game showed only 1500 Club. The query param keeps every link
+    // pointing at the profile while making each embed's url distinct.
+    url: `${profileUrl(u.playerName)}?ach=${u.view.id}`,
     description: `${u.view.condition}\n**${ordinal(u.n)}** player to unlock this`,
     color: colorInt(u.view),
     thumbnail: { url: imageUrl(u.view) },
