@@ -231,6 +231,10 @@ const ACH_CSS = `
 .ach-glow i{position:absolute;inset:0;display:block;background:var(--rc)}
 /* Rare glows at half strength — enough to lift it off common, not enough to reach epic. */
 .ach-tile.rare .ach-glow{filter:drop-shadow(0 0 6px color-mix(in srgb,var(--rc) 38%,transparent)) drop-shadow(0 0 14px color-mix(in srgb,var(--rc) 16%,transparent))}
+/* Epic sits between rare and the full-strength default: its purple is the most
+   saturated hue in the ladder AND the nebula adds inner light, so the stock glow
+   read hotter than Legendary's. */
+.ach-tile.epic .ach-glow{filter:drop-shadow(0 0 7px color-mix(in srgb,var(--rc) 48%,transparent)) drop-shadow(0 0 16px color-mix(in srgb,var(--rc) 22%,transparent))}
 
 /* ---- rare: a scan line passes down the face ---- */
 .ach-scan{position:absolute;inset:5px;z-index:3;pointer-events:none;overflow:hidden}
