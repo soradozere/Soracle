@@ -115,6 +115,7 @@ export interface MatchStats {
 
   // Network
   time_played: number | null
+  ping_mean: number | null
 
   created_at: string
 }
