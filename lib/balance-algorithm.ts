@@ -9,12 +9,9 @@ const CONFIG = {
     OVER_MAX_PENALTY: 200,
     TOP_3_WEIGHT: 3.0,
     BOTTOM_3_WEIGHT: 2.5,
-    VARIANCE_WEIGHT: 1.5,
   },
   elite: {
     THRESHOLD: 8,
-    CONCENTRATION_WEIGHT: 4.0,
-    TOP_TIER_WEIGHT: 1.5,
     STACK_PENALTY: 1500, // flat penalty when one team has 3+ elites and the other is short by 2+
   },
   roles: {
@@ -28,7 +25,6 @@ const CONFIG = {
   // pool so the best cappers get split across teams.
   capper: {
     ELITE_THRESHOLD: 8, // a capper rated 8+ is elite and scarce
-    BEST_WEIGHT: 5.0, // balance each team's single best capper
     TOP_2_WEIGHT: 2.5, // balance each team's top-2 capper pool
     CONCENTRATION_WEIGHT: 300, // squared diff in elite-capper COUNT per team (2-v-0 ≈ 1200)
   },
@@ -42,9 +38,7 @@ const CONFIG = {
   },
   cluster: {
     TOP_TWO_PENALTY: 8000,
-  },
-  mic: {
-    WEIGHT: 0.3,
+    BOTTOM_CLUSTER_PENALTY: 8000,
   },
 }
 
@@ -65,6 +59,32 @@ function getCombinations<T>(arr: T[], k: number): T[][] {
 
   recurse(0, [])
   return result
+}
+
+// Bottom-cluster separation — the mirror of the top-player rule in section 6. Manual
+// drafts split the final picks across teams by construction; a scoring search has no
+// such structure, so nothing stopped it pooling the weakest players on one side to pay
+// for stacking the other (July 2026: both tier-5s landed together against the lobby's
+// only tier-10, and the community noticed). The cluster is everyone at the lowest tier,
+// widened to include the second-lowest tier when a single player sits alone at the
+// bottom. Skipped when the cluster is half the lobby or more — splitting it evenly is
+// then unavoidable and the check is noise, matching the top-cluster guard. The penalty
+// scales with how much more clustered the group is than the most even possible split,
+// so odd-sized clusters aren't punished for their unavoidable 2-v-1.
+function bottomClusterPenalty(team1: Player[], team2: Player[]): number {
+  const everyone = [...team1, ...team2]
+  const lowestTier = Math.min(...everyone.map((p) => p.tierValue))
+  let cluster = everyone.filter((p) => p.tierValue === lowestTier)
+  if (cluster.length === 1) {
+    const nextTier = Math.min(...everyone.filter((p) => p.tierValue > lowestTier).map((p) => p.tierValue))
+    cluster = everyone.filter((p) => p.tierValue <= nextTier)
+  }
+  if (cluster.length < 2 || cluster.length >= everyone.length / 2) return 0
+
+  const inTeam1 = team1.filter((p) => cluster.includes(p)).length
+  const imbalance = Math.abs(inTeam1 * 2 - cluster.length) // == |count in team1 - count in team2|
+  const excess = imbalance - (cluster.length % 2)
+  return excess > 0 ? excess * CONFIG.cluster.BOTTOM_CLUSTER_PENALTY * 0.5 : 0
 }
 
 export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Player, topCluster: Player[]) {
@@ -108,9 +128,6 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const cappers1 = team1.map((p) => Math.max(p.roles.Capper, 0)).sort((a, b) => b - a)
   const cappers2 = team2.map((p) => Math.max(p.roles.Capper, 0)).sort((a, b) => b - a)
 
-  const bestCapperDiff = Math.abs(cappers1[0] - cappers2[0])
-  score += Math.pow(bestCapperDiff, 2) * CONFIG.capper.BEST_WEIGHT
-
   const top2Capper1 = cappers1.slice(0, 2).reduce((a, b) => a + b, 0)
   const top2Capper2 = cappers2.slice(0, 2).reduce((a, b) => a + b, 0)
   score += Math.pow(top2Capper1 - top2Capper2, 2) * CONFIG.capper.TOP_2_WEIGHT
@@ -130,64 +147,53 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   // We compare by rating value (not identity) so role ties are handled order-independently,
   // mirroring the elite-capper count fix above: the penalty only fires when one side has
   // BOTH and the other has NEITHER. If a role is tied across both teams, each side already
-  // holds one and nothing trips. If the same lone player is both the best capper and best
-  // chaser, they can't be split — but then the penalty is constant across every split and
-  // can't change the ranking.
-  const bestCapperVal = Math.max(...[...team1, ...team2].map((p) => Math.max(p.roles.Capper, 0)))
-  const bestChaseVal = Math.max(...[...team1, ...team2].map((p) => Math.max(p.roles.Chase, 0)))
-  const hasTopCapper = (team: Player[]) => team.some((p) => p.roles.Capper === bestCapperVal)
-  const hasTopChase = (team: Player[]) => team.some((p) => p.roles.Chase === bestChaseVal)
-  const team1Both = hasTopCapper(team1) && hasTopChase(team1)
-  const team2Both = hasTopCapper(team2) && hasTopChase(team2)
-  const team1Neither = !hasTopCapper(team1) && !hasTopChase(team1)
-  const team2Neither = !hasTopCapper(team2) && !hasTopChase(team2)
-  if ((team1Both && team2Neither) || (team2Both && team1Neither)) {
-    score += CONFIG.split.CAPPER_CHASE_PENALTY
+  // holds one and nothing trips. When the same lone player is best at both they can't be
+  // split, so the penalty would fire on every split — a constant that can't change the
+  // ranking but inflates every score (and anything derived from it, like the confidence
+  // display). Skip it entirely in that case.
+  const everyone = [...team1, ...team2]
+  const bestCapperVal = Math.max(...everyone.map((p) => Math.max(p.roles.Capper, 0)))
+  const bestChaseVal = Math.max(...everyone.map((p) => Math.max(p.roles.Chase, 0)))
+  const topCappers = everyone.filter((p) => Math.max(p.roles.Capper, 0) === bestCapperVal)
+  const topChasers = everyone.filter((p) => Math.max(p.roles.Chase, 0) === bestChaseVal)
+  const sameLonePlayer = topCappers.length === 1 && topChasers.length === 1 && topCappers[0] === topChasers[0]
+  if (!sameLonePlayer) {
+    const hasTopCapper = (team: Player[]) => team.some((p) => p.roles.Capper === bestCapperVal)
+    const hasTopChase = (team: Player[]) => team.some((p) => p.roles.Chase === bestChaseVal)
+    const team1Both = hasTopCapper(team1) && hasTopChase(team1)
+    const team2Both = hasTopCapper(team2) && hasTopChase(team2)
+    const team1Neither = !hasTopCapper(team1) && !hasTopChase(team1)
+    const team2Neither = !hasTopCapper(team2) && !hasTopChase(team2)
+    if ((team1Both && team2Neither) || (team2Both && team1Neither)) {
+      score += CONFIG.split.CAPPER_CHASE_PENALTY
+    }
   }
 
-  // 4a. Top-tier distribution (dynamic threshold)
-  const allTiers = [...team1, ...team2].map((p) => p.tierValue).sort((a, b) => b - a)
-  const eliteThreshold = allTiers[Math.floor(allTiers.length * 0.25) - 1] // Top 25%
-  const top1 = team1.filter((p) => p.tierValue >= eliteThreshold).length
-  const top2 = team2.filter((p) => p.tierValue >= eliteThreshold).length
-  score += Math.pow(top1 - top2, 2) * CONFIG.elite.TOP_TIER_WEIGHT
-
-  // 4b. Top-3 strength balance
+  // 4a. Top-3 strength balance
   const sortedTier1 = team1.map((p) => p.tierValue).sort((a, b) => b - a)
   const sortedTier2 = team2.map((p) => p.tierValue).sort((a, b) => b - a)
   const top3sum1 = sortedTier1.slice(0, 3).reduce((a, b) => a + b, 0)
   const top3sum2 = sortedTier2.slice(0, 3).reduce((a, b) => a + b, 0)
   score += Math.pow(top3sum1 - top3sum2, 2) * CONFIG.tier.TOP_3_WEIGHT
 
-  // 4c. Tier variance balance
-  const variance = (tiers: number[]) => {
-    const mean = tiers.reduce((a, b) => a + b, 0) / tiers.length
-    return Math.sqrt(tiers.reduce((sum, t) => sum + Math.pow(t - mean, 2), 0) / tiers.length)
-  }
-  const var1 = variance(team1.map((p) => p.tierValue))
-  const var2 = variance(team2.map((p) => p.tierValue))
-  score += Math.pow(var1 - var2, 2) * CONFIG.tier.VARIANCE_WEIGHT
-
-  // 4d. Bottom-3 strength balance — prevent one team having a much higher floor
+  // 4b. Bottom-3 strength balance — prevent one team having a much higher floor
   const bottom3sum1 = sortedTier1.slice(-3).reduce((a, b) => a + b, 0)
   const bottom3sum2 = sortedTier2.slice(-3).reduce((a, b) => a + b, 0)
   score += Math.pow(bottom3sum1 - bottom3sum2, 2) * CONFIG.tier.BOTTOM_3_WEIGHT
 
-  // 4e. Elite concentration penalty — prevent stacking 3+ elite players on one team
+  // 4c. Elite stack penalty — one team must not hoard the tier-8+ players. Flat and
+  // constraint-like on purpose: a graduated count-difference term is worth only single
+  // digits at 3-v-1 and gets routinely outbid by role-sum smoothing; the flat penalty
+  // is what actually enforces the rule.
   const elites1 = team1.filter((p) => p.tierValue >= CONFIG.elite.THRESHOLD).length
   const elites2 = team2.filter((p) => p.tierValue >= CONFIG.elite.THRESHOLD).length
-  const eliteDiff = Math.abs(elites1 - elites2)
-  score += Math.pow(eliteDiff, 2) * CONFIG.elite.CONCENTRATION_WEIGHT
-
-  // Extra flat penalty when one team has 3+ elites and the other has fewer by 2+
   if ((elites1 >= 3 && elites2 < elites1 - 1) || (elites2 >= 3 && elites1 < elites2 - 1)) {
     score += CONFIG.elite.STACK_PENALTY
   }
 
-  // 5. Mic balance
+  // Mic counts are reported for display only — they no longer affect the score.
   const mic1 = team1.filter((p) => p.mic).length
   const mic2 = team2.filter((p) => p.mic).length
-  score += Math.pow(mic1 - mic2, 2) * CONFIG.mic.WEIGHT
 
   // 6. Top player separation — the #1 player should not be teamed with too many other top-cluster players.
   // Only applies when the top cluster is a genuine minority; if half or more of the lobby is at the top tier,
@@ -206,13 +212,17 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
     }
   }
 
+  // 7. Bottom-cluster separation — the weakest players must be spread across teams,
+  // like a draft's final picks. See bottomClusterPenalty.
+  score += bottomClusterPenalty(team1, team2)
+
   return { score, tier1, tier2, tierDiff, mic1, mic2 }
 }
 
 // Role-blind evaluation for the "Off-Role" option: all the tier-derived terms from
-// evaluateSplit (tier diff, top/bottom-3 strength, variance, elite spread, mic balance,
-// top-player separation) with the role and capper terms switched off. For nights when
-// players are off-role or swapping roles, the role ratings carry no signal.
+// evaluateSplit (tier diff, top/bottom-3 strength, elite stack, top- and bottom-cluster
+// separation) with the role and capper terms switched off. For nights when players are
+// off-role or swapping roles, the role ratings carry no signal.
 function evaluateOffRoleSplit(team1: Player[], team2: Player[], topPlayer: Player, topCluster: Player[]) {
   const tier1 = team1.reduce((s, p) => s + p.tierValue, 0)
   const tier2 = team2.reduce((s, p) => s + p.tierValue, 0)
@@ -223,12 +233,6 @@ function evaluateOffRoleSplit(team1: Player[], team2: Player[], topPlayer: Playe
     score += Math.pow(tierDiff - CONFIG.tier.MAX_DIFF, 2) * CONFIG.tier.OVER_MAX_PENALTY
   }
 
-  const allTiers = [...team1, ...team2].map((p) => p.tierValue).sort((a, b) => b - a)
-  const eliteThreshold = allTiers[Math.floor(allTiers.length * 0.25) - 1]
-  const top1 = team1.filter((p) => p.tierValue >= eliteThreshold).length
-  const top2 = team2.filter((p) => p.tierValue >= eliteThreshold).length
-  score += Math.pow(top1 - top2, 2) * CONFIG.elite.TOP_TIER_WEIGHT
-
   const sortedTier1 = team1.map((p) => p.tierValue).sort((a, b) => b - a)
   const sortedTier2 = team2.map((p) => p.tierValue).sort((a, b) => b - a)
   const top3Diff = sortedTier1.slice(0, 3).reduce((a, b) => a + b, 0) - sortedTier2.slice(0, 3).reduce((a, b) => a + b, 0)
@@ -237,22 +241,14 @@ function evaluateOffRoleSplit(team1: Player[], team2: Player[], topPlayer: Playe
     sortedTier1.slice(-3).reduce((a, b) => a + b, 0) - sortedTier2.slice(-3).reduce((a, b) => a + b, 0)
   score += Math.pow(bottom3Diff, 2) * CONFIG.tier.BOTTOM_3_WEIGHT
 
-  const variance = (tiers: number[]) => {
-    const mean = tiers.reduce((a, b) => a + b, 0) / tiers.length
-    return Math.sqrt(tiers.reduce((sum, t) => sum + Math.pow(t - mean, 2), 0) / tiers.length)
-  }
-  score += Math.pow(variance(sortedTier1) - variance(sortedTier2), 2) * CONFIG.tier.VARIANCE_WEIGHT
-
   const elites1 = team1.filter((p) => p.tierValue >= CONFIG.elite.THRESHOLD).length
   const elites2 = team2.filter((p) => p.tierValue >= CONFIG.elite.THRESHOLD).length
-  score += Math.pow(elites1 - elites2, 2) * CONFIG.elite.CONCENTRATION_WEIGHT
   if ((elites1 >= 3 && elites2 < elites1 - 1) || (elites2 >= 3 && elites1 < elites2 - 1)) {
     score += CONFIG.elite.STACK_PENALTY
   }
 
   const mic1 = team1.filter((p) => p.mic).length
   const mic2 = team2.filter((p) => p.mic).length
-  score += Math.pow(mic1 - mic2, 2) * CONFIG.mic.WEIGHT
 
   const totalPlayers = team1.length + team2.length
   if (topCluster.length < totalPlayers / 2) {
@@ -264,6 +260,8 @@ function evaluateOffRoleSplit(team1: Player[], team2: Player[], topPlayer: Playe
       score += (clusterWithTop - clusterWithOther) * CONFIG.cluster.TOP_TWO_PENALTY * 0.5
     }
   }
+
+  score += bottomClusterPenalty(team1, team2)
 
   return { score, tier1, tier2, tierDiff, mic1, mic2 }
 }
@@ -534,13 +532,12 @@ const ELO_CONFIG = {
   CAPPER_BEST_WEIGHT: 2.0, // split each team's single best capper (scarcest role)
   CAPPER_STACK_PENALTY: 50, // per elite-capper (8+) count difference between teams
   CAPPER_CHASE_PENALTY: 80, // flat: one side holds both the best capper and best chaser
-  MIC_WEIGHT: 0.3,
 }
 
 /**
  * Score one 6v6 split for ELO mode. Primary term is the team-average ELO gap; the rest
  * mirror the tier balancer's role logic (critical-role coverage, per-role strength
- * balance, capper top-end split + elite-capper stack penalty, mic). Returns the full
+ * balance, capper top-end split + elite-capper stack penalty). Returns the full
  * score (used for ranking and the confidence %) plus avgDiff (the raw ELO gap, shown on
  * the card) and the team ELO sums.
  */
@@ -593,22 +590,25 @@ function evaluateEloSplit(team1: Player[], team2: Player[], eloOf: (p: Player) =
   // Best-capper / best-chaser separation — keep one side from owning both pivotal duel
   // roles (mirrors the tier balancer's 3c). Compare by rating value so role ties are
   // order-independent; only fires when one team has both and the other has neither.
-  const bestCapperVal = Math.max(...[...team1, ...team2].map((p) => Math.max(p.roles.Capper, 0)))
-  const bestChaseVal = Math.max(...[...team1, ...team2].map((p) => Math.max(p.roles.Chase, 0)))
-  const hasTopCapper = (team: Player[]) => team.some((p) => p.roles.Capper === bestCapperVal)
-  const hasTopChase = (team: Player[]) => team.some((p) => p.roles.Chase === bestChaseVal)
-  const team1Both = hasTopCapper(team1) && hasTopChase(team1)
-  const team2Both = hasTopCapper(team2) && hasTopChase(team2)
-  const team1Neither = !hasTopCapper(team1) && !hasTopChase(team1)
-  const team2Neither = !hasTopCapper(team2) && !hasTopChase(team2)
-  if ((team1Both && team2Neither) || (team2Both && team1Neither)) {
-    score += ELO_CONFIG.CAPPER_CHASE_PENALTY
+  // Skipped when the same lone player is best at both, as in 3c: unsplittable, so the
+  // penalty would just be a constant on every split.
+  const everyone = [...team1, ...team2]
+  const bestCapperVal = Math.max(...everyone.map((p) => Math.max(p.roles.Capper, 0)))
+  const bestChaseVal = Math.max(...everyone.map((p) => Math.max(p.roles.Chase, 0)))
+  const topCappers = everyone.filter((p) => Math.max(p.roles.Capper, 0) === bestCapperVal)
+  const topChasers = everyone.filter((p) => Math.max(p.roles.Chase, 0) === bestChaseVal)
+  const sameLonePlayer = topCappers.length === 1 && topChasers.length === 1 && topCappers[0] === topChasers[0]
+  if (!sameLonePlayer) {
+    const hasTopCapper = (team: Player[]) => team.some((p) => p.roles.Capper === bestCapperVal)
+    const hasTopChase = (team: Player[]) => team.some((p) => p.roles.Chase === bestChaseVal)
+    const team1Both = hasTopCapper(team1) && hasTopChase(team1)
+    const team2Both = hasTopCapper(team2) && hasTopChase(team2)
+    const team1Neither = !hasTopCapper(team1) && !hasTopChase(team1)
+    const team2Neither = !hasTopCapper(team2) && !hasTopChase(team2)
+    if ((team1Both && team2Neither) || (team2Both && team1Neither)) {
+      score += ELO_CONFIG.CAPPER_CHASE_PENALTY
+    }
   }
-
-  // Mic balance — light tiebreaker.
-  const mic1 = team1.filter((p) => p.mic).length
-  const mic2 = team2.filter((p) => p.mic).length
-  score += Math.abs(mic1 - mic2) * ELO_CONFIG.MIC_WEIGHT
 
   return { score, avgDiff, sum1, sum2 }
 }
