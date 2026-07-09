@@ -50,6 +50,7 @@ export interface AchStat {
   mine_kills: number
   blue_returns: number
   blubs_returns: number
+  blubs_kills: number
   upcut_kills: number
   bs_kills: number
   dbs_kills: number
@@ -63,6 +64,7 @@ export interface AchStat {
   dfa_attempts: number
   blocks_enemy: number
   time_played: number | null
+  ping_mean: number | null
 }
 
 // One match from the player's perspective, chronological. `stat` is their
@@ -231,12 +233,15 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   },
   {
     // A deliberate challenge run: land a kill with every saber/weapon style in one
-    // match. YDFA and blue-stance kills are the rare ones — you have to go for it.
+    // match. YDFA and blue-stance (both plain and backstab) kills are the rare
+    // ones — you have to go for it. Deliberately excludes IDLE-KILLS/UNKN-KILLS:
+    // those aren't a style a player chooses, just the scoreboard's catch-all for
+    // an AFK/unattributable kill, so they'd cheapen a "landed every real style" flex.
     id: "nah-youre-hacking",
     title: "Nah, You're Hacking",
     category: "match",
     icon: "lord-revan",
-    condition: "One match, a kill with all 10 styles",
+    condition: "One match, a kill with all 12 styles",
     metric: {
       type: "matchPredicate",
       test: (s) =>
@@ -247,9 +252,11 @@ export const ACHIEVEMENTS: AchievementDef[] = [
         s.red_kills > 0 &&
         s.yellow_kills > 0 &&
         s.blue_kills > 0 &&
+        s.blubs_kills > 0 &&
         s.mine_kills > 0 &&
         s.turret_kills > 0 &&
-        s.upcut_kills > 0,
+        s.upcut_kills > 0 &&
+        s.doom_kills > 0,
     },
     threshold: 1,
     rarity: "mythic",
@@ -863,7 +870,7 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
   },
   {
     id: "prime-vo",
-    title: "Prime [ v O ]",
+    title: "HE'S SCRIPTING!!!!",
     category: "match",
     icon: "sith-order", // shares DBS Enjoyer's crest — it's a DBS feat
     condition: "20+ DBS kills in a single match",
@@ -879,27 +886,60 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
   },
   {
     id: "cheese-is-hacking",
-    title: "Cheese is Hacking",
+    title: "Embrace Cheese, reject masculinity",
     category: "match",
     icon: "mandalorian-mysteries", // shares Cheese's Dream's crest, naturally
     condition: "100+ DFA kills in a single match",
     claim: (s) => s.dfa_kills >= 100,
   },
   {
+    // Interlude already did this on 8 Jun 2026 (2 caps, 20 returns, 119 kills) —
+    // forward-only so it has to be re-earned live rather than handed out silently
+    // on deploy (see agent-zero).
     id: "protector-of-yavin",
     title: "Protector of Yavin",
     category: "match",
     icon: "rebel-alliance", // Yavin IV — the Rebel base
-    condition: "3+ caps, 20+ returns and 100+ kills in one match",
-    claim: (s) => s.captures >= 3 && s.returns >= 20 && s.kills >= 100,
+    condition: "2+ caps, 20+ returns and 100+ kills in one match",
+    from: "2026-07-09T00:00:00.000Z",
+    claim: (s) => s.captures >= 2 && s.returns >= 20 && s.kills >= 100,
   },
   {
     id: "mayhem-4",
-    title: "Mayhem 4 Incoming",
+    title: "Mayhem'd",
     category: "match",
     icon: "sith-era", // shares DOOM's crest — it's a doom feat
-    condition: "5+ dooms, 20+ DBS kills and a cap in one match",
-    claim: (s) => s.doom_kills >= 5 && s.dbs_kills >= 20 && s.captures >= 1,
+    condition: "3+ dooms, 15+ DBS kills and a cap in one match",
+    claim: (s) => s.doom_kills >= 3 && s.dbs_kills >= 15 && s.captures >= 1,
+  },
+  {
+    id: "amor-special",
+    title: "Amor Special",
+    category: "match",
+    icon: "confederancy-of-independent-system", // the network crest — the connection joke
+    condition: "Average ping higher than your score in a 30+ min match",
+    claim: (s) =>
+      s.score > 0 && s.ping_mean != null && s.ping_mean > s.score && (s.time_played ?? 0) >= 30,
+  },
+  {
+    id: "queue-killer-3000",
+    title: "Queue Killer 3000",
+    category: "match",
+    icon: "sith-eternal", // shares Rambo's crest — an unstoppable-kills feat
+    condition: "Win a match with zero deaths (10+ min played)",
+    claim: (s, m) => m.won && s.deaths === 0 && (s.time_played ?? 0) >= 10,
+  },
+  {
+    // A team win is capped at 7 captures, so this is only reachable by personally
+    // accounting for every single one of them, at a blistering pace. The scoreboard
+    // has no per-capture timestamps, so "in 7 minutes" is approximated as the
+    // player's whole match — captures and all — fitting inside a 7-minute stint.
+    id: "im-blyating",
+    title: "I'm Blyating",
+    category: "match",
+    icon: "rebel-fist", // shares Kimbo Slice's crest — pure speed
+    condition: "Capture the flag 7 times in under 7 minutes",
+    claim: (s) => s.captures >= 7 && s.time_played != null && s.time_played <= 7,
   },
 ]
 

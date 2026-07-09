@@ -70,6 +70,7 @@ interface StatRow {
   mine_kills: number
   blue_returns: number
   blubs_returns: number
+  blubs_kills: number
   upcut_kills: number
   bs_kills: number
   dbs_kills: number
@@ -83,6 +84,7 @@ interface StatRow {
   dfa_attempts: number
   blocks_enemy: number
   time_played: number | null
+  ping_mean: number | null
 }
 
 export interface MonthStatTotals {
@@ -220,7 +222,7 @@ function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[] }
     fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
     fetchAllRows<StatRow>(
       "match_stats",
-      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, blubs_returns, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played",
+      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, blubs_returns, blubs_kills, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played, ping_mean",
     ),
   ]).then(([matches, stats]) => ({ matches, stats }))
   matchDataCache = { at: Date.now(), promise }

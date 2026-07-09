@@ -31,7 +31,7 @@ interface ServerStat extends AchStat {
 }
 
 const STAT_COLUMNS =
-  "match_id, player_id, score, captures, returns, base_cleaner, assists, kills, deaths, flag_hold_ms, dbs_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, blubs_returns, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played"
+  "match_id, player_id, score, captures, returns, base_cleaner, assists, kills, deaths, flag_hold_ms, dbs_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, blubs_returns, blubs_kills, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played, ping_mean"
 
 const PAGE_SIZE = 1000
 
@@ -95,6 +95,7 @@ export async function computeAllPlayerAchievements(): Promise<Map<string, Player
           mine_kills: s.mine_kills,
           blue_returns: s.blue_returns,
           blubs_returns: s.blubs_returns,
+          blubs_kills: s.blubs_kills,
           upcut_kills: s.upcut_kills,
           bs_kills: s.bs_kills,
           dbs_kills: s.dbs_kills,
@@ -108,6 +109,7 @@ export async function computeAllPlayerAchievements(): Promise<Map<string, Player
           dfa_attempts: s.dfa_attempts,
           blocks_enemy: s.blocks_enemy,
           time_played: s.time_played,
+          ping_mean: s.ping_mean,
         }
       : null
 
