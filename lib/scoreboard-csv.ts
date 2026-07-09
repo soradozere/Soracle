@@ -88,6 +88,15 @@ export function toInt(value: string | undefined): number {
   return Number.isFinite(n) ? n : 0
 }
 
+// Unlike toInt, an absent/unparseable value is null, not 0 — a ping of 0 isn't a
+// real reading, so we must never mistake "no data" for "no lag".
+export function toFloat(value: string | undefined): number | null {
+  const trimmed = (value ?? "").trim()
+  if (trimmed === "") return null
+  const n = parseFloat(trimmed)
+  return Number.isFinite(n) ? n : null
+}
+
 export function classifyTeam(row: CsvRow): TeamClass {
   const team = (row["LAST-NONSPEC-TEAM"] ?? "").trim()
   if (team === "Red") return "Red"
@@ -102,6 +111,18 @@ export function mergeRowData(rows: CsvRow[]): CsvRow {
   for (const col of SUMMABLE_COLUMNS) {
     merged[col] = String(rows.reduce((sum, r) => sum + toInt(r[col]), 0))
   }
+  // PING-MEAN is already an average, so a reconnect can't be summed like the
+  // other counters — weight each stint's average by its TIME-SUM instead.
+  let weightedPing = 0
+  let pingWeight = 0
+  for (const r of rows) {
+    const ping = toFloat(r["PING-MEAN"])
+    const weight = toInt(r["TIME-SUM"])
+    if (ping === null || weight <= 0) continue
+    weightedPing += ping * weight
+    pingWeight += weight
+  }
+  merged["PING-MEAN"] = pingWeight > 0 ? String(weightedPing / pingWeight) : ""
   return merged
 }
 
@@ -167,6 +188,11 @@ export function buildMatchStat(
     blocks_enemy: toInt(row["BLOCKS-ENEMY"]),
 
     time_played: toInt(row["TIME-SUM"]),
+
+    // Average ping for the match (PING-MEAN). Confirmed header, present on every
+    // scoreboard we've seen, but kept optional/nullable like the rest of this
+    // block in case an older build ever lacks it.
+    ping_mean: toFloat(row["PING-MEAN"]),
   }
 }
 
