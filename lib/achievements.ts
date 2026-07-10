@@ -185,7 +185,7 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
       // Top rank reached — no "next", so surface the achieved threshold instead
       // of a bare "MAXED" (which would hide the number the other states show).
       progressPct = 1
-      progressLabel = `MAXED · ${fmtVal(cur.threshold, def)}+`
+      progressLabel = `MAXED · ${fmtVal(cur.threshold, def)}${def.exact ? "" : "+"}`
     }
     return {
       id: def.id,
@@ -203,7 +203,7 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
       earnedMatchId: earned ? crossingMatchId(cur.threshold) : null,
       // The current rank's own threshold — the number the tile's next/MAXED label
       // doesn't show once you've climbed past a rank (e.g. Batcher II = 80+).
-      earnedRequirement: earned ? `${fmtVal(cur.threshold, def)}+` : null,
+      earnedRequirement: earned ? `${fmtVal(cur.threshold, def)}${def.exact ? "" : "+"}` : null,
       progressPct,
       progressLabel,
       value,
