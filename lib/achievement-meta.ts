@@ -233,33 +233,40 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   },
   {
     // A deliberate challenge run: land a kill with every saber/weapon style in one
-    // match. YDFA and blue-stance (both plain and backstab) kills are the rare
-    // ones — you have to go for it. Deliberately excludes IDLE-KILLS/UNKN-KILLS:
-    // those aren't a style a player chooses, just the scoreboard's catch-all for
-    // an AFK/unattributable kill, so they'd cheapen a "landed every real style" flex.
+    // match. The value is the count of DISTINCT styles landed in a single match, so
+    // the tile shows how close you got (Sora's best is 10). Legendary is all 11
+    // non-doom styles; Mythic adds the 12th (doom) on top. YDFA and blue-stance
+    // (both plain and backstab) are the rare ones — you have to go for them.
+    // Deliberately excludes IDLE-KILLS/UNKN-KILLS: those aren't a style a player
+    // chooses, just the scoreboard's catch-all for an AFK/unattributable kill, so
+    // they'd cheapen a "landed every real style" flex.
     id: "nah-youre-hacking",
     title: "Nah, You're Hacking",
     category: "match",
     icon: "lord-revan",
-    condition: "One match, a kill with all 12 styles",
+    condition: "Distinct kill styles landed in a single match",
     metric: {
-      type: "matchPredicate",
-      test: (s) =>
-        s.dfa_kills > 0 &&
-        s.ydfa_kills > 0 &&
-        s.dbs_kills > 0 &&
-        s.bs_kills > 0 &&
-        s.red_kills > 0 &&
-        s.yellow_kills > 0 &&
-        s.blue_kills > 0 &&
-        s.blubs_kills > 0 &&
-        s.mine_kills > 0 &&
-        s.turret_kills > 0 &&
-        s.upcut_kills > 0 &&
-        s.doom_kills > 0,
+      type: "matchMax",
+      get: (s) =>
+        [
+          s.dfa_kills,
+          s.ydfa_kills,
+          s.dbs_kills,
+          s.bs_kills,
+          s.red_kills,
+          s.yellow_kills,
+          s.blue_kills,
+          s.blubs_kills,
+          s.mine_kills,
+          s.turret_kills,
+          s.upcut_kills,
+          s.doom_kills,
+        ].filter((k) => k > 0).length,
     },
-    threshold: 1,
-    rarity: "mythic",
+    ranks: [
+      { threshold: 11, rarity: "legendary" },
+      { threshold: 12, rarity: "mythic", title: "Nah, You're DEFINITELY Hacking" },
+    ],
   },
   {
     id: "batcher",
