@@ -31,6 +31,9 @@ export interface AchievementView {
   earnedDate: string | null
   earnedMatchId: string | null // the match that crossed the current rank (for unlock pings)
   earnedRequirement: string | null // the threshold that defines the current rank (e.g. "80+"), for tiered crests
+  // For pair crests: the partner note the tooltip shows ("with bizzle" / "against
+  // arhont") — the team-mate/opponent whose run reached the current rank. Null otherwise.
+  earnedWith: string | null
   progressPct: number | null // toward the next (earned) / first (locked) threshold
   progressLabel: string | null
   value: number // raw current metric value
@@ -43,8 +46,11 @@ const romanFor = (rank: number) => ROMAN[rank - 1] ?? String(rank)
 // value of this family's metric. Because every metric here is effectively
 // monotonic in its own progression, `value` = the max seen and the earliest
 // crossing of a threshold T = the first entry whose value ≥ T.
-function progressionFor(def: AchievementDef, seq: AchMatch[]): { v: number; date: string; matchId: string }[] {
-  const out: { v: number; date: string; matchId: string }[] = []
+function progressionFor(
+  def: AchievementDef,
+  seq: AchMatch[],
+): { v: number; date: string; matchId: string; who?: string }[] {
+  const out: { v: number; date: string; matchId: string; who?: string }[] = []
   const m = def.metric
   switch (m.type) {
     case "careerSum": {
@@ -153,6 +159,13 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
   const value = prog.reduce((mx, e) => Math.max(mx, e.v), 0)
   const crossingDate = (t: number) => prog.find((e) => e.v >= t)?.date ?? null
   const crossingMatchId = (t: number) => prog.find((e) => e.v >= t)?.matchId ?? null
+  // The partner note for pair crests, e.g. "with bizzle" — the team-mate/opponent
+  // whose run first reached threshold `t`. Only pair metrics carry a `who`.
+  const crossingWith = (t: number): string | null => {
+    if (!def.pairRelation) return null
+    const who = prog.find((e) => e.v >= t)?.who
+    return who ? `${def.pairRelation} ${who}` : null
+  }
   const best =
     def.metric.type === "matchMax" ||
     def.metric.type === "matchPredicate" ||
@@ -204,6 +217,7 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
       // The current rank's own threshold — the number the tile's next/MAXED label
       // doesn't show once you've climbed past a rank (e.g. Batcher II = 80+).
       earnedRequirement: earned ? `${fmtVal(cur.threshold, def)}${def.exact ? "" : "+"}` : null,
+      earnedWith: earned ? crossingWith(cur.threshold) : null,
       progressPct,
       progressLabel,
       value,
@@ -232,6 +246,7 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
     // Untiered conditions already spell out their number ("Score 2000+"), so
     // there's nothing extra to surface.
     earnedRequirement: null,
+    earnedWith: earned ? crossingWith(threshold) : null,
     // Boolean feats have no meaningful partial progress; scalar ones do.
     progressPct: earned ? 1 : predicate ? null : clampPct(value / threshold),
     progressLabel: earned || predicate ? null : label(threshold, null),
@@ -327,6 +342,7 @@ export function secretViewsFor(playerId: string, holders: Map<string, SecretHold
       earnedDate: holder.date,
       earnedMatchId: holder.matchId,
       earnedRequirement: null,
+      earnedWith: null,
       progressPct: 1,
       progressLabel: null,
       value: 1,
