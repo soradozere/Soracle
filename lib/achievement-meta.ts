@@ -127,6 +127,7 @@ export interface AchievementDef {
   rarity?: Rarity
   pending?: boolean // forward-only: needs a column populated only by new uploads
   unit?: "hours" // display hint for value/threshold formatting
+  exact?: boolean // threshold is a fixed count, not a minimum — drops the "+" suffix
 }
 
 // Team-mate / opponent achievements are FORWARD-ONLY. The match history is full
@@ -232,14 +233,16 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     rarity: "epic",
   },
   {
-    // A deliberate challenge run: land a kill with every saber/weapon style in one
-    // match. The value is the count of DISTINCT styles landed in a single match, so
-    // the tile shows how close you got (Sora's best is 10). Legendary is all 11
-    // non-doom styles; Mythic adds the 12th (doom) on top. YDFA and blue-stance
-    // (both plain and backstab) are the rare ones — you have to go for them.
-    // Deliberately excludes IDLE-KILLS/UNKN-KILLS: those aren't a style a player
-    // chooses, just the scoreboard's catch-all for an AFK/unattributable kill, so
-    // they'd cheapen a "landed every real style" flex.
+    // A deliberate challenge run: land a kill with a specific SET of styles in one
+    // match. Legendary is the 10 "ordinary" styles (yellow, red, blue, mine, turret,
+    // blue backstab, uppercut, DFA, DBS, backstab); Mythic adds the two hardest —
+    // yellow DFA and doom — for the full 12. The value counts how many of the set
+    // you've landed so the tile shows how close you got, but the extra two only
+    // count once the base 10 are all in (see the get below), so 10 always means
+    // "all ten Legendary styles", never nine-plus-a-doom. Excludes IDLE/UNKN kills:
+    // those aren't a style you choose, just the scoreboard's catch-all for an
+    // AFK/unattributable kill, so they'd cheapen a "landed every real style" flex.
+    // `exact` because the number is a fixed set size, not a "10 or more" floor.
     id: "nah-youre-hacking",
     title: "Nah, You're Hacking",
     category: "match",
@@ -247,24 +250,30 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Distinct kill styles landed in a single match",
     metric: {
       type: "matchMax",
-      get: (s) =>
-        [
-          s.dfa_kills,
-          s.ydfa_kills,
-          s.dbs_kills,
-          s.bs_kills,
-          s.red_kills,
+      get: (s) => {
+        const legendaryStyles = [
           s.yellow_kills,
+          s.red_kills,
           s.blue_kills,
-          s.blubs_kills,
           s.mine_kills,
           s.turret_kills,
-          s.upcut_kills,
-          s.doom_kills,
-        ].filter((k) => k > 0).length,
+          s.blubs_kills, // blue backstab
+          s.upcut_kills, // uppercut
+          s.dfa_kills,
+          s.dbs_kills,
+          s.bs_kills, // backstab
+        ]
+        const base = legendaryStyles.filter((k) => k > 0).length
+        // Below the full 10, report raw progress. The two Mythic-only styles
+        // (yellow DFA + doom) only add once every Legendary style is present, so a
+        // near-miss on the base set can never masquerade as a higher tier.
+        if (base < 10) return base
+        return 10 + (s.ydfa_kills > 0 ? 1 : 0) + (s.doom_kills > 0 ? 1 : 0)
+      },
     },
+    exact: true,
     ranks: [
-      { threshold: 11, rarity: "legendary" },
+      { threshold: 10, rarity: "legendary" },
       { threshold: 12, rarity: "mythic", title: "Nah, You're DEFINITELY Hacking" },
     ],
   },
