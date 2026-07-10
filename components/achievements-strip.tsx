@@ -154,7 +154,7 @@ function Crest({ a }: { a: AchievementView }) {
           {a.rarity === "oneofone"
             ? `The only player who will ever hold this · Claimed ${fmtDate(a.earnedDate)}`
             : earned
-              ? `${a.earnedRequirement ? `Reached ${a.earnedRequirement} · ` : ""}Earned ${fmtDate(a.earnedDate)}${a.tiered ? ` · rank ${a.rank}/${a.totalRanks}` : ""}`
+              ? `${a.earnedRequirement ? `Reached ${a.earnedRequirement} · ` : ""}${a.earnedWith ? `${a.earnedWith} · ` : ""}Earned ${fmtDate(a.earnedDate)}${a.tiered ? ` · rank ${a.rank}/${a.totalRanks}` : ""}`
               : pending
                 ? "Starts tracking once scoreboards carry this stat"
                 : a.progressLabel
