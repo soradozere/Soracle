@@ -189,7 +189,14 @@ const PAGE_CSS = `
 .ach-count b{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:24px;font-variant-numeric:tabular-nums;color:#66fcf1}
 .ach-count span{font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:#8892a0;font-weight:700}
 
-.ach-feed{list-style:none;margin:0;padding:0;border:1px solid #2a3542;border-radius:8px;overflow:hidden;background:#151b24}
+/* Capped at ~6 rows and scrolled internally: the feed is deep enough now that a
+   full-height list would bury the crest grid. max-height, not a fixed one, so a
+   short list (a new season, a fresh database) still collapses to its content. */
+.ach-feed{list-style:none;margin:0;padding:0;border:1px solid #2a3542;border-radius:8px;background:#151b24;max-height:420px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#2a3542 #0b0c10}
+.ach-feed::-webkit-scrollbar{width:6px}
+.ach-feed::-webkit-scrollbar-track{background:#0b0c10;border-radius:999px;margin:4px 0}
+.ach-feed::-webkit-scrollbar-thumb{background:#2a3542;border-radius:999px;border:1px solid #0b0c10}
+.ach-feed::-webkit-scrollbar-thumb:hover{background:#3d4855}
 .ach-feed-row{display:grid;grid-template-columns:34px 1fr auto auto;gap:12px;align-items:center;padding:10px 14px;border-top:1px solid #2a3542;color:#c5c6c7;text-decoration:none}
 .ach-feed li:first-child .ach-feed-row{border-top:0}
 .ach-feed-row:hover{background:#1f2833}
