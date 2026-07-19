@@ -102,10 +102,12 @@ export type Metric =
   // time the tracked value improves (same contract as the built-in passes: the
   // earliest crossing of a threshold T is the first entry with v >= T).
   // `best` marks the value as a personal best ("best 9 / 12") rather than a total.
+  // `who` names the team-mate/opponent whose entry moved the value — surfaced in
+  // the tooltip ("with bizzle" / "against arhont") for the pair crests.
   | {
       type: "seqDerived"
       best?: boolean
-      compute: (seq: AchMatch[]) => { v: number; date: string; matchId: string }[]
+      compute: (seq: AchMatch[]) => { v: number; date: string; matchId: string; who?: string }[]
     }
 
 export interface Rank {
@@ -128,6 +130,9 @@ export interface AchievementDef {
   pending?: boolean // forward-only: needs a column populated only by new uploads
   unit?: "hours" // display hint for value/threshold formatting
   exact?: boolean // threshold is a fixed count, not a minimum — drops the "+" suffix
+  // For pair crests (seqDerived with a `who`): the preposition the tooltip uses
+  // before the partner's name — "with" a team-mate, "against" an opponent.
+  pairRelation?: "with" | "against"
 }
 
 // Team-mate / opponent achievements are FORWARD-ONLY. The match history is full
@@ -492,11 +497,12 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     icon: "old-galactic-republic",
     condition: "Career matches played alongside one team-mate",
     pending: true, // forward-only, see PAIR_ACHIEVEMENTS_FROM
+    pairRelation: "with",
     metric: {
       type: "seqDerived",
       best: true,
       compute: (seq) => {
-        const out: { v: number; date: string; matchId: string }[] = []
+        const out: { v: number; date: string; matchId: string; who?: string }[] = []
         const games = new Map<string, number>()
         let best = 0
         for (const m of seq) {
@@ -506,7 +512,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
             games.set(mate, g)
             if (g > best) {
               best = g
-              out.push({ v: best, date: m.date, matchId: m.matchId })
+              out.push({ v: best, date: m.date, matchId: m.matchId, who: mate })
             }
           }
         }
@@ -531,10 +537,11 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     icon: "raziel-clan",
     condition: "End an opponent's 3+ win streak over you",
     pending: true, // forward-only, see PAIR_ACHIEVEMENTS_FROM
+    pairRelation: "against",
     metric: {
       type: "seqDerived",
       compute: (seq) => {
-        const out: { v: number; date: string; matchId: string }[] = []
+        const out: { v: number; date: string; matchId: string; who?: string }[] = []
         const losingTo = new Map<string, number>()
         let n = 0
         for (const m of seq) {
@@ -543,7 +550,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
             for (const opp of m.opponents) {
               if ((losingTo.get(opp) ?? 0) >= 3) {
                 n++
-                out.push({ v: n, date: m.date, matchId: m.matchId })
+                out.push({ v: n, date: m.date, matchId: m.matchId, who: opp })
               }
               losingTo.set(opp, 0)
             }
@@ -644,9 +651,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Career enemy blocks",
     metric: { type: "careerSum", get: (s) => s.blocks_enemy },
     ranks: [
-      { threshold: 250, rarity: "rare" },
-      { threshold: 500, rarity: "epic" },
-      { threshold: 1000, rarity: "legendary" },
+      { threshold: 250, rarity: "common" },
+      { threshold: 500, rarity: "rare" },
+      { threshold: 1000, rarity: "epic" },
     ],
     pending: true,
   },
@@ -690,11 +697,12 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     icon: "rebel-alliance",
     condition: "Consecutive wins alongside the same team-mate",
     pending: true, // forward-only, see PAIR_ACHIEVEMENTS_FROM
+    pairRelation: "with",
     metric: {
       type: "seqDerived",
       best: true,
       compute: (seq) => {
-        const out: { v: number; date: string; matchId: string }[] = []
+        const out: { v: number; date: string; matchId: string; who?: string }[] = []
         const streak = new Map<string, number>()
         let best = 0
         for (const m of seq) {
@@ -705,7 +713,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
               streak.set(mate, s)
               if (s > best) {
                 best = s
-                out.push({ v: best, date: m.date, matchId: m.matchId })
+                out.push({ v: best, date: m.date, matchId: m.matchId, who: mate })
               }
             }
           } else if (m.lost) {
@@ -732,11 +740,12 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     icon: "general-grevious",
     condition: "Consecutive wins against the same opponent",
     pending: true, // forward-only, see PAIR_ACHIEVEMENTS_FROM
+    pairRelation: "against",
     metric: {
       type: "seqDerived",
       best: true,
       compute: (seq) => {
-        const out: { v: number; date: string; matchId: string }[] = []
+        const out: { v: number; date: string; matchId: string; who?: string }[] = []
         const streak = new Map<string, number>()
         let best = 0
         for (const m of seq) {
@@ -747,7 +756,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
               streak.set(opp, s)
               if (s > best) {
                 best = s
-                out.push({ v: best, date: m.date, matchId: m.matchId })
+                out.push({ v: best, date: m.date, matchId: m.matchId, who: opp })
               }
             }
           } else if (m.lost) {

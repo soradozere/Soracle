@@ -7,6 +7,11 @@ import type { AchievementView } from "@/lib/achievements"
 const ROMAN = ["I", "II", "III", "IV", "V", "VI"]
 export const roman = (n: number) => ROMAN[n - 1] ?? String(n)
 
+// Lives here rather than in a component so server and client renderers can share
+// it — a "use client" module's exports cannot be called during a server render.
+export const fmtDate = (iso: string | null) =>
+  iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : ""
+
 export const appUrl = () => (process.env.NEXT_PUBLIC_APP_URL ?? "https://jk2ctf.vercel.app").replace(/\/$/, "")
 export const slug = (name: string) => encodeURIComponent(name.trim().toLowerCase().replace(/\s+/g, "-"))
 export const profileUrl = (name: string) => `${appUrl()}/player/${slug(name)}`
