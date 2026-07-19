@@ -651,9 +651,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Career enemy blocks",
     metric: { type: "careerSum", get: (s) => s.blocks_enemy },
     ranks: [
-      { threshold: 250, rarity: "rare" },
-      { threshold: 500, rarity: "epic" },
-      { threshold: 1000, rarity: "legendary" },
+      { threshold: 250, rarity: "common" },
+      { threshold: 500, rarity: "rare" },
+      { threshold: 1000, rarity: "epic" },
     ],
     pending: true,
   },
