@@ -3,6 +3,7 @@
 import { forwardRef } from "react"
 import { Lock } from "lucide-react"
 import { RARITY_META } from "@/lib/achievement-meta"
+import { roman } from "@/lib/achievement-format"
 import type { AchievementView } from "@/lib/achievements"
 
 // The crest tile itself, shared by every surface that draws one: the profile
@@ -30,12 +31,6 @@ import type { AchievementView } from "@/lib/achievements"
 // Every animation below moves only `transform` or `opacity` (the compositor
 // handles those off the main thread); the sole exception is the legendary sheen,
 // which animates `background-position` and always has.
-
-const ROMAN = ["I", "II", "III", "IV", "V", "VI"]
-export const roman = (n: number) => ROMAN[n - 1] ?? String(n)
-
-export const fmtDate = (iso: string | null) =>
-  iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : ""
 
 const rep = (n: number) => Array.from({ length: n })
 
@@ -176,6 +171,10 @@ export const ACH_CSS = `
    pins the first tile to the border edge, force-scrolling past the left padding and
    clipping the very glow it was added for. */
 .ach-strip{display:flex;gap:14px;overflow-x:auto;padding:26px 16px 30px;margin:0 -16px;scroll-snap-type:x proximity;scroll-padding-inline:16px;scrollbar-width:thin;scrollbar-color:#2a3542 #0b0c10}
+.ach-strip-link{flex:0 0 auto;display:block;scroll-snap-align:start;border-radius:6px}
+.ach-strip-link:focus-visible{outline:2px solid #66fcf1;outline-offset:6px}
+.ach-strip-link .ach-tile{transition:transform .18s ease}
+.ach-strip-link:hover .ach-tile{transform:translateY(-3px)}
 .ach-strip::-webkit-scrollbar{height:6px}
 .ach-strip::-webkit-scrollbar-track{background:#0b0c10;border-radius:999px;margin:0 4px}
 .ach-strip::-webkit-scrollbar-thumb{background:#2a3542;border-radius:999px;border:1px solid #0b0c10}

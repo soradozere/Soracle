@@ -1,7 +1,9 @@
 "use client"
 
+import Link from "next/link"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Crest, CrestStyles, fmtDate, roman } from "@/components/achievement-crest"
+import { Crest, CrestStyles } from "@/components/achievement-crest"
+import { fmtDate, roman } from "@/lib/achievement-format"
 import type { AchievementView } from "@/lib/achievements"
 
 // Horizontal, scrollable strip of achievement crests for the Career section, one
@@ -15,7 +17,9 @@ function StripCrest({ a }: { a: AchievementView }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Crest a={a} />
+        <Link href={`/achievements/${a.id}`} className="ach-strip-link" aria-label={a.title}>
+          <Crest a={a} />
+        </Link>
       </TooltipTrigger>
       <TooltipContent className="bg-[#1f2833] border border-[#66fcf1]/30 text-[#c5c6c7] text-xs max-w-64">
         <div className="font-bold text-[#e6edf3]">
