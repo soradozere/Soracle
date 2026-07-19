@@ -8,6 +8,7 @@ import {
   type AchMatch,
   type AchStat,
   type ClaimContext,
+  type Rank,
   type Rarity,
 } from "@/lib/achievement-meta"
 
@@ -153,6 +154,50 @@ function progressionFor(
 
 const clampPct = (x: number) => Math.max(0, Math.min(1, x))
 const fmtVal = (v: number, def: AchievementDef) => (def.unit === "hours" ? `${Math.round(v)}h` : `${Math.round(v)}`)
+
+// One rank of one crest, crossed by one player, in one match.
+export interface UnlockEvent {
+  achId: string
+  rank: number // 1..totalRanks
+  totalRanks: number
+  rarity: Rarity
+  title: string // the rank's own title, e.g. "Unstoppable" for On Fire II
+  date: string
+  matchId: string
+}
+
+// Every rank this player has ever crossed, in chronological order — including the
+// ones they've since climbed past. A view only carries the CURRENT rank's date,
+// which is all a profile needs but loses the history the ledger is built from: if
+// someone reached Batcher III today, the view can't say when they got I or II.
+//
+// A single match can cross several ranks at once (a 140-block game takes a player
+// from nothing to Batcher IV), so each crossed rank gets its own event, all sharing
+// that match's date. Ordering within such a group is by rank, ascending.
+export function unlockEventsFor(def: AchievementDef, seq: AchMatch[]): UnlockEvent[] {
+  const prog = progressionFor(def, seq)
+  if (!prog.length) return []
+
+  // Untiered families are a one-rank ladder, so both shapes walk the same loop.
+  const ranks: Rank[] = def.ranks?.length ? def.ranks : [{ threshold: def.threshold ?? 1, rarity: def.rarity ?? "common" }]
+  const out: UnlockEvent[] = []
+  for (let i = 0; i < ranks.length; i++) {
+    // progressionFor's contract: entries are pushed only when the tracked value
+    // improves, so the FIRST entry at or above a threshold is the crossing.
+    const crossing = prog.find((e) => e.v >= ranks[i].threshold)
+    if (!crossing) break // thresholds ascend — nothing above this is reachable either
+    out.push({
+      achId: def.id,
+      rank: i + 1,
+      totalRanks: ranks.length,
+      rarity: ranks[i].rarity,
+      title: ranks[i].title ?? def.title,
+      date: crossing.date,
+      matchId: crossing.matchId,
+    })
+  }
+  return out
+}
 
 function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
   const prog = progressionFor(def, seq)
