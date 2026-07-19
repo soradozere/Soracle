@@ -14,7 +14,9 @@ export const metadata: Metadata = {
 // of staleness costs nothing.
 export const revalidate = 300
 
-const FEED_SIZE = 10
+// Deep enough to read as a running history rather than a snapshot; the list
+// scrolls in its own pane so it can't push the crest grid off the page.
+const FEED_SIZE = 30
 
 export default async function AchievementsPage() {
   const ledger = await computeAchievementLedger()
