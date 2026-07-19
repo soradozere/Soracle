@@ -3,10 +3,20 @@ import {
   computeAchievements,
   resolveSecretHolders,
   secretViewsFor,
+  unlockEventsFor,
   type AchievementView,
   type SecretCandidate,
+  type SecretHolder,
+  type UnlockEvent,
 } from "@/lib/achievements"
-import { RARITY_META, type AchMatch, type AchStat } from "@/lib/achievement-meta"
+import {
+  ACHIEVEMENTS,
+  RARITY_META,
+  SECRET_ACHIEVEMENTS,
+  SECRET_RARITY,
+  type AchMatch,
+  type AchStat,
+} from "@/lib/achievement-meta"
 
 // Server-side achievement computation, for the Discord bot flows (unlock pings +
 // =achievements). Reuses the pure computeAchievements over the full history; the
@@ -60,9 +70,17 @@ export interface PlayerAchievements {
   views: AchievementView[]
 }
 
-// Compute every player's achievements in one pass over the full match history.
-// Keyed by player id; players with no recorded matches are absent.
-export async function computeAllPlayerAchievements(): Promise<Map<string, PlayerAchievements>> {
+// The whole history, reshaped into what every achievement computation needs: each
+// player's chronological match sequence, their name, and the resolved one-of-one
+// holders. Built once and shared, because the three table reads behind it are the
+// expensive part — the pure passes over the result are not.
+interface HistoryIndex {
+  seqByPlayer: Map<string, AchMatch[]>
+  nameById: Map<string, string>
+  holders: Map<string, SecretHolder>
+}
+
+async function buildHistoryIndex(): Promise<HistoryIndex> {
   const supabase = await createClient()
   const [matches, stats, players] = await Promise.all([
     fetchAll<ServerMatch>(supabase, "matches", "id, red_team, blue_team, red_score, blue_score, created_at"),
@@ -167,7 +185,13 @@ export async function computeAllPlayerAchievements(): Promise<Map<string, Player
     }
   }
 
-  const holders = resolveSecretHolders(candidates)
+  return { seqByPlayer, nameById, holders: resolveSecretHolders(candidates) }
+}
+
+// Compute every player's achievements in one pass over the full match history.
+// Keyed by player id; players with no recorded matches are absent.
+export async function computeAllPlayerAchievements(): Promise<Map<string, PlayerAchievements>> {
+  const { seqByPlayer, nameById, holders } = await buildHistoryIndex()
 
   const result = new Map<string, PlayerAchievements>()
   for (const [pid, seq] of seqByPlayer) {
@@ -220,4 +244,92 @@ export async function computeMatchUnlocks(matchId: string): Promise<Unlock[]> {
     const r = RARITY_META[b.view.rarity].order - RARITY_META[a.view.rarity].order
     return r || b.view.value - a.view.value
   })
+}
+
+// ---------------------------------------------------------------------------
+// Achievement ledger — the public /achievements pages
+// ---------------------------------------------------------------------------
+
+// One player crossing one rank. The ledger is the flat list of every one of these
+// that has ever happened, which is what "who holds this, and who got there first"
+// is answered from.
+export interface LedgerEntry extends UnlockEvent {
+  playerId: string
+  playerName: string
+}
+
+export interface AchievementLedger {
+  // Keyed by achievement id, chronological. Families nobody has touched are absent.
+  byAchievement: Map<string, LedgerEntry[]>
+  // Every entry, most recent first — the "latest earned" feed reads off the front.
+  recent: LedgerEntry[]
+  // One-of-ones that have actually been claimed. Unclaimed ones are deliberately
+  // absent: the page publishes a sealed count, never a condition (see the vault).
+  claimedSecrets: LedgerEntry[]
+  playerCount: number
+}
+
+// Two players can cross the same rank in the same match, so date alone doesn't
+// order them. Same total, stable rule as the one-of-one tiebreak in
+// lib/achievements.ts — the "3rd to reach this" ordinals must not reshuffle
+// between renders.
+function compareEntries(a: LedgerEntry, b: LedgerEntry): number {
+  const t = Date.parse(a.date) - Date.parse(b.date)
+  if (t) return t
+  if (a.matchId !== b.matchId) return a.matchId < b.matchId ? -1 : 1
+  if (a.rank !== b.rank) return a.rank - b.rank
+  return a.playerId < b.playerId ? -1 : a.playerId > b.playerId ? 1 : 0
+}
+
+// Every rank ever crossed, by every player, over the full history. Same three
+// table reads as computeAllPlayerAchievements — the extra work is a pure pass.
+export async function computeAchievementLedger(): Promise<AchievementLedger> {
+  const { seqByPlayer, nameById, holders } = await buildHistoryIndex()
+
+  const all: LedgerEntry[] = []
+  for (const [playerId, seq] of seqByPlayer) {
+    const playerName = nameById.get(playerId) ?? "Unknown"
+    for (const def of ACHIEVEMENTS) {
+      for (const ev of unlockEventsFor(def, seq)) all.push({ ...ev, playerId, playerName })
+    }
+  }
+
+  // Claimed one-of-ones aren't rank crossings, so they don't come out of
+  // unlockEventsFor — they're resolved globally, first-past-the-post.
+  const claimedSecrets: LedgerEntry[] = []
+  for (const def of SECRET_ACHIEVEMENTS) {
+    const holder = holders.get(def.id)
+    if (!holder) continue
+    claimedSecrets.push({
+      achId: def.id,
+      rank: 1,
+      totalRanks: 1,
+      rarity: SECRET_RARITY,
+      title: def.title,
+      date: holder.date,
+      matchId: holder.matchId,
+      playerId: holder.playerId,
+      playerName: nameById.get(holder.playerId) ?? "Unknown",
+    })
+  }
+  all.push(...claimedSecrets)
+
+  all.sort(compareEntries)
+
+  const byAchievement = new Map<string, LedgerEntry[]>()
+  for (const e of all) {
+    let list = byAchievement.get(e.achId)
+    if (!list) {
+      list = []
+      byAchievement.set(e.achId, list)
+    }
+    list.push(e)
+  }
+
+  return {
+    byAchievement,
+    recent: [...all].reverse(),
+    claimedSecrets: claimedSecrets.sort(compareEntries),
+    playerCount: seqByPlayer.size,
+  }
 }
