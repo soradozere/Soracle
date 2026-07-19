@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server"
+import { createAnonClient } from "@/lib/supabase/anon"
 import {
   computeAchievements,
   resolveSecretHolders,
@@ -46,7 +46,7 @@ const STAT_COLUMNS =
 const PAGE_SIZE = 1000
 
 async function fetchAll<T>(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: ReturnType<typeof createAnonClient>,
   table: string,
   columns: string,
 ): Promise<T[]> {
@@ -81,7 +81,10 @@ interface HistoryIndex {
 }
 
 async function buildHistoryIndex(): Promise<HistoryIndex> {
-  const supabase = await createClient()
+  // Anon, not the cookie-backed server client: every one of these reads is public
+  // and identical for all callers, and reading cookies would force the pages that
+  // depend on this to re-render per request instead of honouring `revalidate`.
+  const supabase = createAnonClient()
   const [matches, stats, players] = await Promise.all([
     fetchAll<ServerMatch>(supabase, "matches", "id, red_team, blue_team, red_score, blue_score, created_at"),
     fetchAll<ServerStat>(supabase, "match_stats", STAT_COLUMNS),
