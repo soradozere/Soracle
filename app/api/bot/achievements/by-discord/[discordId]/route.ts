@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server"
 import { fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
 import { computeAllPlayerAchievements } from "@/lib/achievements-server"
+import { resolveEquippedTitle } from "@/lib/titles-server"
+import { createAnonClient } from "@/lib/supabase/anon"
 import { displayName, imageUrl, profileUrl } from "@/lib/achievement-format"
 
 // A player's achievements, resolved by Discord ID — powers the bot's
@@ -36,9 +38,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
   const views = byPlayer.get(player.id)?.views ?? []
   const earned = views.filter((v) => v.earned)
 
+  // Equipped title (name + rarity + source), same shape the =tier endpoint uses.
+  const title = await resolveEquippedTitle(createAnonClient(), player.id, player.title ?? null)
+
   return NextResponse.json({
     player: player.name,
     profileUrl: profileUrl(player.name),
+    title,
     earnedCount: earned.length,
     total: views.length,
     top: earned.slice(0, 5).map((v) => ({
