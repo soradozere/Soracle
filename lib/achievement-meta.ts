@@ -290,7 +290,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Base cleans in a single match",
     metric: { type: "matchMax", get: (s) => s.base_cleaner },
     ranks: [
-      { threshold: 50, rarity: "epic", title: "Janitor" },
+      { threshold: 50, rarity: "rare", title: "Janitor" },
       { threshold: 80, rarity: "epic", title: "Base Protector" },
       { threshold: 100, rarity: "legendary", title: "Batcher" },
       { threshold: 140, rarity: "mythic", title: "Lord Batcher" },
