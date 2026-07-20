@@ -25,9 +25,12 @@ export function ordinal(n: number): string {
 
 // Families with a per-rank title override use that title alone (Unstoppable, Cap
 // Legend, MF DOOM); otherwise append the roman numeral for tiered ranks above I.
+//
+// Keyed off `titled`, not off comparing the title to the family name: a rank may
+// deliberately BE the family name (Batcher III is "Batcher", Veteran III is
+// "Veteran"), and string equality would wrongly number those.
 export function displayName(v: AchievementView): string {
-  const base = findAchievementDef(v.id)?.title
-  if (v.tiered && v.rank > 1 && v.title === base) return `${v.title} ${roman(v.rank)}`
+  if (v.tiered && v.rank > 1 && !v.titled) return `${v.title} ${roman(v.rank)}`
   return v.title
 }
 

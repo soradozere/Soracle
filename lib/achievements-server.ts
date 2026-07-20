@@ -339,6 +339,7 @@ export async function computeAchievementLedger(): Promise<AchievementLedger> {
       totalRanks: 1,
       rarity: SECRET_RARITY,
       title: def.title,
+      titled: true, // a one-of-one's name is its own; there is no family to number against
       date: holder.date,
       matchId: holder.matchId,
       playerId: holder.playerId,
@@ -421,8 +422,10 @@ export async function computePlayersDirectory(): Promise<PlayerRow[]> {
         // A rank without its own bespoke title reuses the family name, so a
         // tiered one needs its numeral back to be distinguishable ("On Fire II"
         // rather than a second "On Fire").
+        // Mirrors displayName: rank I never takes a numeral, since an unnamed
+        // first rank simply IS the family name.
         const label =
-          ev.totalRanks > 1 && ev.title === def.title ? `${ev.title} ${roman(ev.rank)}` : ev.title
+          ev.totalRanks > 1 && ev.rank > 1 && !ev.titled ? `${ev.title} ${roman(ev.rank)}` : ev.title
         if (
           !topEvent ||
           RARITY_META[ev.rarity].order > RARITY_META[topEvent.rarity].order ||
