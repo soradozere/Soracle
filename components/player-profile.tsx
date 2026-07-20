@@ -15,6 +15,20 @@ import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucid
 import { BADGE_META } from "@/lib/badge-meta"
 import { BadgeIcon } from "@/components/badge-icon"
 import { AchievementsStrip } from "@/components/achievements-strip"
+import { TitleProgression } from "@/components/title-progression"
+import {
+  SCORE_LADDER,
+  THEMES,
+  earnedTitles,
+  seasonFor,
+  themeById,
+  unlockedThemes,
+  type EarnedTitle,
+  type ThemeId,
+} from "@/lib/titles"
+import { scoreFromViews } from "@/lib/achievement-score"
+import { RARITY_META } from "@/lib/achievement-meta"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { createClient } from "@/lib/supabase/client"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -46,10 +60,13 @@ interface PlayerProfileProps {
 }
 
 // Admin-editable presentation fields, held in local state so edits show live.
+// title / profile_theme hold ids ("" = none); entitlement is checked at render.
 interface EditableFields {
   tooltip: string
   avatar_url: string
   spotlight_url: string
+  title: string
+  profile_theme: string
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -103,7 +120,7 @@ function StatTile({ label, value, hint }: { label: string; value: string | numbe
           <div className="text-[10px] uppercase tracking-wider text-[#8892a0] mt-1">{label}</div>
         </div>
       </TooltipTrigger>
-      <TooltipContent className="bg-[#1f2833] border border-[#66fcf1]/30 text-[#c5c6c7] text-xs max-w-56">
+      <TooltipContent className="bg-[#1f2833] border border-[var(--pa30,#66fcf14d)] text-[#c5c6c7] text-xs max-w-56">
         {hint}
       </TooltipContent>
     </Tooltip>
@@ -114,7 +131,7 @@ function SectionCard({ title, children }: { title: string; children: React.React
   return (
     <div className="bg-[#1f2833]/40 border border-[#3d4855] rounded-lg backdrop-blur-lg">
       <div className="px-4 py-3 border-b border-[#3d4855]">
-        <h2 className="text-sm font-bold font-mono tracking-wider text-[#66fcf1]">{title}</h2>
+        <h2 className="text-sm font-bold font-mono tracking-wider text-[var(--pa,#66fcf1)]">{title}</h2>
       </div>
       <div className="p-4">{children}</div>
     </div>
@@ -139,7 +156,7 @@ function BadgeChip({ badge }: { badge: ProfileBadge }) {
           )}
         </div>
       </TooltipTrigger>
-      <TooltipContent className="bg-[#1f2833] border border-[#66fcf1]/30 p-3">
+      <TooltipContent className="bg-[#1f2833] border border-[var(--pa30,#66fcf14d)] p-3">
         <div className="space-y-1">
           {badge.entries.map((entry) => (
             <div key={entry.month} className="flex items-center justify-between gap-4 text-xs">
@@ -194,7 +211,7 @@ function HistoryTeam({
           name === playerName ? (
             <span
               key={`${name}-${i}`}
-              className="text-xs font-bold bg-[#66fcf1] text-[#0b0c10] px-2 py-0.5 rounded"
+              className="text-xs font-bold bg-[var(--pa,#66fcf1)] text-[#0b0c10] px-2 py-0.5 rounded"
             >
               {name}
             </span>
@@ -202,7 +219,7 @@ function HistoryTeam({
             <Link
               key={`${name}-${i}`}
               href={`/player/${playerSlug(name)}`}
-              className="text-xs text-[#c5c6c7] bg-[#1f2833] px-2 py-0.5 rounded hover:text-[#66fcf1] transition-colors"
+              className="text-xs text-[#c5c6c7] bg-[#1f2833] px-2 py-0.5 rounded hover:text-[var(--pa,#66fcf1)] transition-colors"
             >
               {name}
             </Link>
@@ -251,7 +268,7 @@ function HistoryRow({ entry, playerName }: { entry: ProfileMatchEntry; playerNam
 
       {entry.my && (
         <div className="mt-3 pt-3 border-t border-[#3d4855] text-xs font-mono text-[#8892a0]">
-          <span className="text-[#66fcf1] font-bold">{entry.my.score}</span> pts
+          <span className="text-[var(--pa,#66fcf1)] font-bold">{entry.my.score}</span> pts
           {" · "}
           {entry.my.captures} caps
           {" · "}
@@ -285,7 +302,7 @@ function MatchHistorySection({ entries, playerName }: { entries: ProfileMatchEnt
       {visible < entries.length && (
         <button
           onClick={() => setVisible((v) => v + HISTORY_PAGE_SIZE)}
-          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-[#3d4855] text-sm text-[#8892a0] hover:text-[#66fcf1] hover:border-[#66fcf1]/50 transition-colors"
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg border border-[#3d4855] text-sm text-[#8892a0] hover:text-[var(--pa,#66fcf1)] hover:border-[var(--pa50,#66fcf180)] transition-colors"
         >
           <ChevronDown className="w-4 h-4" />
           Show more ({entries.length - visible} older)
@@ -300,8 +317,8 @@ function ChartTooltipContent({ active, payload, label }: any) {
   const point = payload[0]?.payload
   if (!point) return null
   return (
-    <div className="bg-[#1f2833]/95 border border-[#66fcf1]/30 rounded-lg px-3 py-2 text-xs text-[#c5c6c7] shadow-lg">
-      <div className="font-bold text-[#66fcf1] mb-1">{label}</div>
+    <div className="bg-[#1f2833]/95 border border-[var(--pa30,#66fcf14d)] rounded-lg px-3 py-2 text-xs text-[#c5c6c7] shadow-lg">
+      <div className="font-bold text-[var(--pa,#66fcf1)] mb-1">{label}</div>
       {point.games > 0 ? (
         <>
           <div>
@@ -339,7 +356,7 @@ function Spotlight({ url }: { url: string }) {
           href={url}
           target="_blank"
           rel="noopener noreferrer"
-          className="text-sm text-[#66fcf1] hover:underline break-all"
+          className="text-sm text-[var(--pa,#66fcf1)] hover:underline break-all"
         >
           {url}
         </a>
@@ -357,6 +374,8 @@ function EditProfileDialog({
   playerId,
   playerName,
   initial,
+  titleOptions,
+  themeOptions,
   onSaved,
 }: {
   open: boolean
@@ -364,6 +383,10 @@ function EditProfileDialog({
   playerId: string
   playerName: string
   initial: EditableFields
+  // What this player is entitled to right now — the dropdowns only ever offer
+  // these, so an admin can't equip something unearned by accident.
+  titleOptions: EarnedTitle[]
+  themeOptions: ThemeId[]
   onSaved: (fields: EditableFields) => void
 }) {
   const [fields, setFields] = useState<EditableFields>(initial)
@@ -386,6 +409,8 @@ function EditProfileDialog({
       tooltip: fields.tooltip.trim() || null,
       avatar_url: fields.avatar_url.trim() || null,
       spotlight_url: fields.spotlight_url.trim() || null,
+      title: fields.title || null,
+      profile_theme: fields.profile_theme || null,
     }
     const supabase = createClient()
     const { error } = await supabase.from("players").update(payload).eq("id", playerId)
@@ -398,6 +423,8 @@ function EditProfileDialog({
       tooltip: payload.tooltip ?? "",
       avatar_url: payload.avatar_url ?? "",
       spotlight_url: payload.spotlight_url ?? "",
+      title: payload.title ?? "",
+      profile_theme: payload.profile_theme ?? "",
     })
     onOpenChange(false)
   }
@@ -406,9 +433,9 @@ function EditProfileDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-[#0b0c10]/95 backdrop-blur-md border-[#66fcf1]/30 text-[#c5c6c7]">
+      <DialogContent className="bg-[#0b0c10]/95 backdrop-blur-md border-[var(--pa30,#66fcf14d)] text-[#c5c6c7]">
         <DialogHeader>
-          <DialogTitle className="text-[#66fcf1] font-mono">Edit profile — {playerName}</DialogTitle>
+          <DialogTitle className="text-[var(--pa,#66fcf1)] font-mono">Edit profile — {playerName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
@@ -453,6 +480,57 @@ function EditProfileDialog({
               </p>
             )}
           </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-[#8892a0]">Title</Label>
+            {/* Radix reserves "" for clearing, so "none" is the no-title sentinel. */}
+            <Select
+              value={fields.title || "none"}
+              onValueChange={(v) => setFields((f) => ({ ...f, title: v === "none" ? "" : v }))}
+            >
+              <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                <SelectValue placeholder="No title" />
+              </SelectTrigger>
+              <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                <SelectItem value="none">No title</SelectItem>
+                {titleOptions.map((t) => (
+                  <SelectItem key={t.id} value={t.id}>
+                    <span style={{ color: RARITY_META[t.rarity].color }}>{t.title}</span>
+                    <span className="text-[#8892a0] text-xs ml-2">{t.source}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-[#8892a0]">
+              Only titles this player has earned are listed. Seasonal ones lapse when the month ends.
+            </p>
+          </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-[#8892a0]">Profile theme</Label>
+            <Select
+              value={fields.profile_theme || "none"}
+              onValueChange={(v) => setFields((f) => ({ ...f, profile_theme: v === "none" ? "" : v }))}
+            >
+              <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                <SelectValue placeholder="Default (cyan)" />
+              </SelectTrigger>
+              <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                <SelectItem value="none">Default (cyan)</SelectItem>
+                {THEMES.map((t) => {
+                  const locked = !themeOptions.includes(t.id)
+                  return (
+                    <SelectItem key={t.id} value={t.id} disabled={locked}>
+                      <span className="inline-block w-2.5 h-2.5 rounded-full mr-2" style={{ background: t.accent }} />
+                      {t.label}
+                      {locked && <span className="text-[#8892a0] text-xs ml-2">locked</span>}
+                    </SelectItem>
+                  )
+                })}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-[#8892a0]">
+              Unlocked by all-time Achievement Score — recolours the whole profile, stars included.
+            </p>
+          </div>
           {saveError && <p className="text-xs text-[#ff4757]">{saveError}</p>}
         </div>
         <DialogFooter>
@@ -480,12 +558,16 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
     tooltip: player.tooltip ?? "",
     avatar_url: player.avatar_url ?? "",
     spotlight_url: player.spotlight_url ?? "",
+    title: player.title ?? "",
+    profile_theme: player.profile_theme ?? "",
   })
   useEffect(() => {
     setFields({
       tooltip: player.tooltip ?? "",
       avatar_url: player.avatar_url ?? "",
       spotlight_url: player.spotlight_url ?? "",
+      title: player.title ?? "",
+      profile_theme: player.profile_theme ?? "",
     })
   }, [player.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -506,6 +588,45 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
     }
   }, [player.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Derived from the views the profile already loaded, so the titles panel costs
+  // no extra fetch. The season is whichever month we're in now — a month with no
+  // catalogue entry simply has no seasonal ladder.
+  const achievementScore = data ? scoreFromViews(data.achievements) : 0
+  const season = seasonFor(new Date().toISOString())
+  const monthScore = data?.currentMonth.stats?.score ?? 0
+
+  // Entitlements, recomputed on render — the stored title/theme are only choices,
+  // and one the player no longer qualifies for simply doesn't display.
+  const earned = data ? earnedTitles(achievementScore, monthScore, season) : []
+  const equippedTitle = fields.title ? earned.find((t) => t.id === fields.title) ?? null : null
+  const availableThemes = data ? unlockedThemes(achievementScore) : []
+  const theme = themeById(fields.profile_theme)
+  const activeTheme = theme && availableThemes.includes(theme.id) ? theme : null
+
+  // Recolour the whole page — chrome AND starfield — by writing the accent vars
+  // to the document root. It has to be the root, not a wrapper: tooltips and the
+  // edit dialog render through portals outside this subtree, and
+  // BackgroundParticles watches --color-primary there (via MutationObserver).
+  useEffect(() => {
+    if (!activeTheme) return
+    const root = document.documentElement
+    const prevPrimary = root.style.getPropertyValue("--color-primary")
+    root.style.setProperty("--color-primary", activeTheme.accent)
+    const alphas: [string, string][] = [
+      ["--pa", ""],
+      ["--pa30", "4d"],
+      ["--pa40", "66"],
+      ["--pa50", "80"],
+      ["--pa80", "cc"],
+    ]
+    for (const [k, a] of alphas) root.style.setProperty(k, activeTheme.accent + a)
+    return () => {
+      if (prevPrimary) root.style.setProperty("--color-primary", prevPrimary)
+      else root.style.removeProperty("--color-primary")
+      for (const [k] of alphas) root.style.removeProperty(k)
+    }
+  }, [activeTheme])
+
   const initials = player.name
     .split(/\s+/)
     .map((w) => w[0])
@@ -525,14 +646,14 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
         <div className="flex flex-col sm:flex-row gap-5">
           {/* Custom avatar image if set, else initials (in-game 3D models are a later phase) */}
           <div
-            className="w-24 h-24 shrink-0 rounded-xl border-2 border-[#66fcf1]/40 bg-[#0b0c10] flex items-center justify-center overflow-hidden"
+            className="w-24 h-24 shrink-0 rounded-xl border-2 border-[var(--pa40,#66fcf166)] bg-[#0b0c10] flex items-center justify-center overflow-hidden"
             style={{ boxShadow: "0 0 20px rgba(102,252,241,0.15)" }}
           >
             {fields.avatar_url ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img src={fields.avatar_url} alt={player.name} className="w-full h-full object-cover" />
             ) : (
-              <span className="text-4xl font-bold font-mono text-[#66fcf1]">{initials}</span>
+              <span className="text-4xl font-bold font-mono text-[var(--pa,#66fcf1)]">{initials}</span>
             )}
           </div>
 
@@ -542,7 +663,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
               {isAdmin && (
                 <button
                   onClick={() => setEditOpen(true)}
-                  className="flex items-center gap-1 text-xs text-[#8892a0] hover:text-[#66fcf1] transition-colors border border-[#3d4855] hover:border-[#66fcf1]/50 rounded px-2 py-1"
+                  className="flex items-center gap-1 text-xs text-[#8892a0] hover:text-[var(--pa,#66fcf1)] transition-colors border border-[#3d4855] hover:border-[var(--pa50,#66fcf180)] rounded px-2 py-1"
                   title="Edit slogan, avatar and spotlight"
                 >
                   <Pencil className="w-3.5 h-3.5" />
@@ -552,14 +673,28 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
             </div>
 
             {fields.tooltip && (
-              <p className="text-sm italic text-[#66fcf1]/80 mt-2">“{fields.tooltip}”</p>
+              <p className="text-sm italic text-[var(--pa80,#66fcf1cc)] mt-2">“{fields.tooltip}”</p>
             )}
 
             <div className="flex items-center gap-2 mt-3">
-              <span className="px-3 py-1 rounded-md text-xs font-bold bg-[#66fcf1] text-[#0b0c10]">
+              <span className="px-3 py-1 rounded-md text-xs font-bold bg-[var(--pa,#66fcf1)] text-[#0b0c10]">
                 Tier {player.tierValue} — {TIER_NAMES[player.tierValue] ?? "Unranked"}
               </span>
             </div>
+
+            {equippedTitle && (
+              <div
+                className="mt-2 text-sm font-bold tracking-wide"
+                style={{
+                  color: RARITY_META[equippedTitle.rarity].color,
+                  fontFamily: "var(--font-orbitron)",
+                  textShadow: `0 0 12px ${RARITY_META[equippedTitle.rarity].color}66`,
+                }}
+                title={`${equippedTitle.title} — ${equippedTitle.source}`}
+              >
+                {equippedTitle.title}
+              </div>
+            )}
           </div>
 
           {/* Role ratings */}
@@ -706,7 +841,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
                 </div>
               </div>
                 </TooltipTrigger>
-                <TooltipContent className="bg-[#1f2833] border border-[#66fcf1]/30 text-[#c5c6c7] text-xs max-w-64">
+                <TooltipContent className="bg-[#1f2833] border border-[var(--pa30,#66fcf14d)] text-[#c5c6c7] text-xs max-w-64">
                   Best single-match scoreboard score. Only matches with an uploaded stats CSV count.
                 </TooltipContent>
               </Tooltip>
@@ -723,6 +858,19 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
               </div>
             </SectionCard>
 
+          {/* ---- Title progression: this month's season + all-time score ---- */}
+          {data && (
+            <SectionCard title="TITLES">
+              <TitleProgression
+                seasonName={season?.name ?? null}
+                seasonLadder={season?.ladder ?? null}
+                monthScore={data.currentMonth.stats?.score ?? 0}
+                scoreLadder={SCORE_LADDER}
+                achievementScore={achievementScore}
+              />
+            </SectionCard>
+          )}
+
           {/* ---- Spotlight (player's chosen highlight clip) ---- */}
           {fields.spotlight_url ? (
             <SectionCard title="SPOTLIGHT">
@@ -733,7 +881,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
               <SectionCard title="SPOTLIGHT">
                 <button
                   onClick={() => setEditOpen(true)}
-                  className="w-full flex items-center justify-center gap-2 py-6 rounded-lg border border-dashed border-[#3d4855] text-sm text-[#8892a0] hover:text-[#66fcf1] hover:border-[#66fcf1]/50 transition-colors"
+                  className="w-full flex items-center justify-center gap-2 py-6 rounded-lg border border-dashed border-[#3d4855] text-sm text-[#8892a0] hover:text-[var(--pa,#66fcf1)] hover:border-[var(--pa50,#66fcf180)] transition-colors"
                 >
                   <Video className="w-4 h-4" />
                   Add a spotlight clip (Vimeo, YouTube or Streamable)
@@ -778,7 +926,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
                       yAxisId="winrate"
                       dataKey="winRate"
                       name="Win rate"
-                      fill="#66fcf1"
+                      fill="var(--pa,#66fcf1)"
                       fillOpacity={0.35}
                       radius={[3, 3, 0, 0]}
                       maxBarSize={28}
@@ -796,7 +944,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
                 </ResponsiveContainer>
                 <div className="flex gap-4 justify-center mt-1 text-[10px] text-[#8892a0]">
                   <span>
-                    <span className="inline-block w-2.5 h-2.5 rounded-sm bg-[#66fcf1]/40 mr-1 align-middle" />
+                    <span className="inline-block w-2.5 h-2.5 rounded-sm bg-[var(--pa40,#66fcf166)] mr-1 align-middle" />
                     Monthly win rate
                   </span>
                   <span>
@@ -825,7 +973,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
                         <Heart className="w-4 h-4 text-[#27ae60]" />
                         <Link
                           href={`/player/${playerSlug(friend.name)}`}
-                          className="text-sm font-bold text-[#c5c6c7] hover:text-[#66fcf1] transition-colors"
+                          className="text-sm font-bold text-[#c5c6c7] hover:text-[var(--pa,#66fcf1)] transition-colors"
                         >
                           {friend.name}
                         </Link>
@@ -856,7 +1004,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
                         <Swords className="w-4 h-4 text-[#ff4757]" />
                         <Link
                           href={`/player/${playerSlug(nemesis.name)}`}
-                          className="text-sm font-bold text-[#c5c6c7] hover:text-[#66fcf1] transition-colors"
+                          className="text-sm font-bold text-[#c5c6c7] hover:text-[var(--pa,#66fcf1)] transition-colors"
                         >
                           {nemesis.name}
                         </Link>
@@ -887,6 +1035,8 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
           playerId={player.id}
           playerName={player.name}
           initial={fields}
+          titleOptions={earned}
+          themeOptions={availableThemes}
           onSaved={setFields}
         />
       )}

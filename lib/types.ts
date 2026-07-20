@@ -19,6 +19,10 @@ export interface Player {
   // Profile presentation (migration 014), admin-editable from the profile page.
   avatar_url?: string | null
   spotlight_url?: string | null
+  // Equipped title id + profile theme (migration 018). Entitlement to either is
+  // recomputed on render, so these are only the player's CHOICE.
+  title?: string | null
+  profile_theme?: string | null
 }
 
 export interface BalanceResult {

@@ -1,4 +1,4 @@
-import { RARITY_META, type Rarity } from "@/lib/achievement-meta"
+import { ACHIEVEMENTS, RARITY_META, type Rarity } from "@/lib/achievement-meta"
 
 // Achievement Score turns a player's crest collection into one comparable number.
 //
@@ -40,3 +40,25 @@ export function bestRarity(rarities: Iterable<Rarity>): Rarity | null {
 export const RARITY_ORDER: Rarity[] = (Object.keys(RARITY_META) as Rarity[]).sort(
   (a, b) => RARITY_META[a].order - RARITY_META[b].order,
 )
+
+// The same score the /players board computes, but derived from a single player's
+// AchievementView[] instead of the server ledger — the profile already holds
+// those, so this saves the page a second full history walk.
+//
+// A view reports only the CURRENT rank, but reaching rank N means every rank
+// below it was crossed too, so each one is worth its own points. That is exactly
+// what the ledger stores per-event, which is why the two agree.
+export function scoreFromViews(views: { id: string; rank: number; rarity: Rarity }[]): number {
+  let total = 0
+  for (const v of views) {
+    if (v.rank < 1) continue // locked
+    const def = ACHIEVEMENTS.find((d) => d.id === v.id)
+    if (def?.ranks?.length) {
+      for (let i = 0; i < v.rank && i < def.ranks.length; i++) total += RARITY_POINTS[def.ranks[i].rarity]
+    } else {
+      // Untiered crests and claimed one-of-ones are a single rank worth their own rarity.
+      total += RARITY_POINTS[v.rarity]
+    }
+  }
+  return total
+}
