@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useMemo, useRef, useCallback } from "react"
+import Link from "next/link"
 import { PlayerCard } from "@/components/player-card"
 import { TeamDisplay } from "@/components/team-display"
 import { FilterPanel } from "@/components/filter-panel"
@@ -15,7 +16,7 @@ import { loadPlayerBadges, type BadgeId } from "@/lib/player-profile"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import { checkIsAdmin } from "@/lib/is-admin"
 import type { Player, BalanceOption, BalanceHistoryEntry } from "@/lib/types"
-import { Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, TrendingUp } from "lucide-react"
+import { Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, TrendingUp, HelpCircle } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { useCurrentTheme } from "@/hooks/use-current-theme"
 import { useSessionState } from "@/hooks/use-session-state"
@@ -378,6 +379,17 @@ export default function TeamBalancer() {
   return (
     <div className="container mx-auto px-4 py-8 relative z-10">
           <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4 mb-6 sticky top-[100px] md:top-[120px] z-40">
+            {/* Docked here rather than the global nav — this page is the only
+                thing "How It Works" actually explains. */}
+            <div className="flex justify-end mb-3">
+              <Link
+                href="/how-it-works"
+                className="px-3 py-1.5 rounded-md text-sm transition-all font-medium flex items-center gap-1.5 bg-[#2a3441]/60 backdrop-blur-sm text-[#c5c6c7] hover:bg-[#3d4855] border border-[#3d4855]"
+              >
+                <HelpCircle className="w-4 h-4" />
+                How It Works
+              </Link>
+            </div>
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
               <div className="flex items-center gap-2 flex-1 min-w-[200px]">
                 <Users className="w-5 h-5" style={{ color: "var(--color-primary)" }} />

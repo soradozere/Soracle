@@ -57,6 +57,9 @@ interface PlayerProfileProps {
   // Admins get an inline editor for slogan / avatar / spotlight (RLS enforces
   // the write; this only decides whether the pencil is shown).
   isAdmin?: boolean
+  // A player logged in as themselves gets the same editor minus the slogan
+  // field — enforced server-side by /api/player-profile, not just by hiding it.
+  isOwner?: boolean
 }
 
 // Admin-editable presentation fields, held in local state so edits show live.
@@ -376,6 +379,7 @@ function EditProfileDialog({
   initial,
   titleOptions,
   themeOptions,
+  canEditTooltip,
   onSaved,
 }: {
   open: boolean
@@ -387,6 +391,9 @@ function EditProfileDialog({
   // these, so an admin can't equip something unearned by accident.
   titleOptions: EarnedTitle[]
   themeOptions: ThemeId[]
+  // Only a full admin can set the slogan — it's Sam's signature line, not a
+  // self-service field. A player editing their own profile never sees it.
+  canEditTooltip: boolean
   onSaved: (fields: EditableFields) => void
 }) {
   const [fields, setFields] = useState<EditableFields>(initial)
@@ -405,26 +412,49 @@ function EditProfileDialog({
     setSaving(true)
     setSaveError(null)
     // Empty string → null so cleared fields actually clear in the DB.
-    const payload = {
-      tooltip: fields.tooltip.trim() || null,
-      avatar_url: fields.avatar_url.trim() || null,
-      spotlight_url: fields.spotlight_url.trim() || null,
-      title: fields.title || null,
-      profile_theme: fields.profile_theme || null,
+    const avatar_url = fields.avatar_url.trim() || null
+    const spotlight_url = fields.spotlight_url.trim() || null
+    const title = fields.title || null
+    const profile_theme = fields.profile_theme || null
+
+    if (canEditTooltip) {
+      // Admin path: writes straight to the players table via the browser
+      // client — the players update RLS policy is admin-only, so this is safe.
+      const tooltip = fields.tooltip.trim() || null
+      const supabase = createClient()
+      const { error } = await supabase
+        .from("players")
+        .update({ tooltip, avatar_url, spotlight_url, title, profile_theme })
+        .eq("id", playerId)
+      setSaving(false)
+      if (error) {
+        setSaveError(error.message)
+        return
+      }
+      onSaved({ tooltip: tooltip ?? "", avatar_url: avatar_url ?? "", spotlight_url: spotlight_url ?? "", title: title ?? "", profile_theme: profile_theme ?? "" })
+      onOpenChange(false)
+      return
     }
-    const supabase = createClient()
-    const { error } = await supabase.from("players").update(payload).eq("id", playerId)
+
+    // Player-owner path: no direct table access, and no tooltip field at all.
+    // The route re-validates title/theme entitlement server-side.
+    const res = await fetch("/api/player-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ avatar_url, spotlight_url, title, profile_theme }),
+    })
+    const data = await res.json()
     setSaving(false)
-    if (error) {
-      setSaveError(error.message)
+    if (!res.ok) {
+      setSaveError(data.error || "Failed to save")
       return
     }
     onSaved({
-      tooltip: payload.tooltip ?? "",
-      avatar_url: payload.avatar_url ?? "",
-      spotlight_url: payload.spotlight_url ?? "",
-      title: payload.title ?? "",
-      profile_theme: payload.profile_theme ?? "",
+      tooltip: initial.tooltip,
+      avatar_url: avatar_url ?? "",
+      spotlight_url: spotlight_url ?? "",
+      title: title ?? "",
+      profile_theme: profile_theme ?? "",
     })
     onOpenChange(false)
   }
@@ -438,19 +468,21 @@ function EditProfileDialog({
           <DialogTitle className="text-[var(--pa,#66fcf1)] font-mono">Edit profile — {playerName}</DialogTitle>
         </DialogHeader>
         <div className="space-y-4 py-2">
-          <div className="space-y-1.5">
-            <Label htmlFor="edit-slogan" className="text-xs text-[#8892a0]">
-              Slogan
-            </Label>
-            <Textarea
-              id="edit-slogan"
-              value={fields.tooltip}
-              onChange={(e) => setFields((f) => ({ ...f, tooltip: e.target.value }))}
-              placeholder="Their one-liner (also shown as the Balancer tooltip)"
-              className="bg-[#1f2833] border-[#3d4855]"
-              rows={2}
-            />
-          </div>
+          {canEditTooltip && (
+            <div className="space-y-1.5">
+              <Label htmlFor="edit-slogan" className="text-xs text-[#8892a0]">
+                Slogan
+              </Label>
+              <Textarea
+                id="edit-slogan"
+                value={fields.tooltip}
+                onChange={(e) => setFields((f) => ({ ...f, tooltip: e.target.value }))}
+                placeholder="Their one-liner (also shown as the Balancer tooltip)"
+                className="bg-[#1f2833] border-[#3d4855]"
+                rows={2}
+              />
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="edit-avatar" className="text-xs text-[#8892a0]">
               Avatar image URL
@@ -547,7 +579,8 @@ function EditProfileDialog({
   )
 }
 
-export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerProfileProps) {
+export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = false }: PlayerProfileProps) {
+  const canEdit = isAdmin || isOwner
   const [data, setData] = useState<PlayerProfileData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
@@ -660,11 +693,11 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
               <h1 className="text-3xl font-bold text-white" style={{ fontFamily: "var(--font-orbitron)" }}>{player.name}</h1>
-              {isAdmin && (
+              {canEdit && (
                 <button
                   onClick={() => setEditOpen(true)}
                   className="flex items-center gap-1 text-xs text-[#8892a0] hover:text-[var(--pa,#66fcf1)] transition-colors border border-[#3d4855] hover:border-[var(--pa50,#66fcf180)] rounded px-2 py-1"
-                  title="Edit slogan, avatar and spotlight"
+                  title={isAdmin ? "Edit slogan, avatar and spotlight" : "Edit avatar, spotlight, title and theme"}
                 >
                   <Pencil className="w-3.5 h-3.5" />
                   Edit
@@ -877,7 +910,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
               <Spotlight url={fields.spotlight_url} />
             </SectionCard>
           ) : (
-            isAdmin && (
+            canEdit && (
               <SectionCard title="SPOTLIGHT">
                 <button
                   onClick={() => setEditOpen(true)}
@@ -1028,7 +1061,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
         </>
       )}
 
-      {isAdmin && (
+      {canEdit && (
         <EditProfileDialog
           open={editOpen}
           onOpenChange={setEditOpen}
@@ -1037,6 +1070,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
           initial={fields}
           titleOptions={earned}
           themeOptions={availableThemes}
+          canEditTooltip={isAdmin}
           onSaved={setFields}
         />
       )}
