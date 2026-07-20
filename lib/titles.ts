@@ -232,6 +232,20 @@ export function earnedTitles(achievementScore: number, monthScore: number, seaso
   return out
 }
 
+// Resolve a title id to its display info straight from the catalogue — the
+// score ladder plus every season still defined. Returns null for a title whose
+// season has since been removed; those live only in player_titles, so the bot
+// path prefers that snapshot (see resolveEquippedTitle in lib/titles-server).
+export function catalogueTitleById(id: string): { title: string; rarity: Rarity; source: string } | null {
+  const scoreTier = SCORE_LADDER.tiers.find((t) => t.id === id)
+  if (scoreTier) return { title: scoreTier.title, rarity: scoreTier.rarity, source: SCORE_LADDER.label }
+  for (const season of Object.values(SEASONS)) {
+    const tier = season.ladder.tiers.find((t) => t.id === id)
+    if (tier) return { title: tier.title, rarity: tier.rarity, source: season.name }
+  }
+  return null
+}
+
 export function progressFor(ladder: TitleLadder, value: number): LadderProgress {
   const earned = ladder.tiers.filter((t) => value >= t.threshold)
   const current = earned.length ? earned[earned.length - 1] : null
