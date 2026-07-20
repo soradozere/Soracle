@@ -59,6 +59,7 @@ export default async function AchievementPage({ params }: { params: Promise<{ id
   const view: AchievementView = {
     id: def.id,
     title: (top ? cur.title : undefined) ?? def.title,
+    titled: !!(top && cur.title),
     category: def.category,
     rarity: cur.rarity,
     icon: def.icon,

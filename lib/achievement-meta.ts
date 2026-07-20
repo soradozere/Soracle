@@ -219,9 +219,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: { type: "matchMax", get: (s) => s.kills },
     ranks: [
       { threshold: 100, rarity: "rare" },
-      { threshold: 150, rarity: "epic" },
-      { threshold: 200, rarity: "legendary" },
-      { threshold: 250, rarity: "mythic" },
+      { threshold: 150, rarity: "epic", title: "Terminator" },
+      { threshold: 200, rarity: "legendary", title: "Killimanjaro" },
+      { threshold: 250, rarity: "mythic", title: "Berserker" },
     ],
   },
   {
@@ -290,10 +290,10 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Base cleans in a single match",
     metric: { type: "matchMax", get: (s) => s.base_cleaner },
     ranks: [
-      { threshold: 50, rarity: "epic" },
-      { threshold: 80, rarity: "epic" },
-      { threshold: 100, rarity: "legendary" },
-      { threshold: 140, rarity: "mythic" },
+      { threshold: 50, rarity: "epic", title: "Janitor" },
+      { threshold: 80, rarity: "epic", title: "Base Protector" },
+      { threshold: 100, rarity: "legendary", title: "Batcher" },
+      { threshold: 140, rarity: "mythic", title: "Lord Batcher" },
     ],
   },
   {
@@ -331,7 +331,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: { type: "matchMax", get: (s) => s.turret_kills },
     ranks: [
       { threshold: 5, rarity: "epic" },
-      { threshold: 8, rarity: "legendary" },
+      { threshold: 8, rarity: "legendary", title: "Batcher Sentry Expert" },
     ],
   },
   {
@@ -428,8 +428,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: { type: "careerSum", get: (s) => s.captures },
     ranks: [
       { threshold: 50, rarity: "common" },
-      { threshold: 150, rarity: "rare" },
-      { threshold: 250, rarity: "epic" },
+      { threshold: 150, rarity: "rare", title: "Capper Main" },
+      { threshold: 250, rarity: "epic", title: "Cap Hero" },
       { threshold: 500, rarity: "legendary", title: "Cap Legend" },
     ],
   },
@@ -443,7 +443,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ranks: [
       { threshold: 500, rarity: "common" },
       { threshold: 1000, rarity: "epic" },
-      { threshold: 2500, rarity: "legendary" },
+      { threshold: 2500, rarity: "legendary", title: "RET GOD" },
     ],
   },
   {
@@ -455,8 +455,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: { type: "careerSum", get: (s) => s.bs_kills },
     ranks: [
       { threshold: 100, rarity: "common" },
-      { threshold: 250, rarity: "rare" },
-      { threshold: 500, rarity: "epic" },
+      { threshold: 250, rarity: "rare", title: "BS Artist" },
+      { threshold: 500, rarity: "epic", title: "Backslash Merchant" },
     ],
   },
   {
@@ -468,8 +468,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: { type: "careerSum", get: (s) => s.yellow_kills },
     ranks: [
       { threshold: 1000, rarity: "rare" },
-      { threshold: 2500, rarity: "epic" },
-      { threshold: 5000, rarity: "legendary" },
+      { threshold: 2500, rarity: "epic", title: "Yellow Swordsman" },
+      { threshold: 5000, rarity: "legendary", title: "Yellow Maestro" },
     ],
   },
   {
@@ -482,8 +482,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: { type: "careerSum", get: (s) => s.mine_kills },
     ranks: [
       { threshold: 500, rarity: "epic" },
-      { threshold: 1000, rarity: "legendary" },
-      { threshold: 2500, rarity: "mythic" },
+      { threshold: 1000, rarity: "legendary", title: "Detonation Expert" },
+      { threshold: 2500, rarity: "mythic", title: "Trip Mine Architect" },
     ],
   },
   {
@@ -521,9 +521,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     },
     ranks: [
       { threshold: 25, rarity: "common" },
-      { threshold: 40, rarity: "rare" },
-      { threshold: 60, rarity: "epic" },
-      { threshold: 100, rarity: "legendary" },
+      { threshold: 40, rarity: "rare", title: "Double Act" },
+      { threshold: 60, rarity: "epic", title: "Two of a Kind" },
+      { threshold: 100, rarity: "legendary", title: "Soulbound" },
     ],
   },
   {
@@ -576,9 +576,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: { type: "careerSum", get: (s) => s.assists },
     ranks: [
       { threshold: 100, rarity: "common" },
-      { threshold: 250, rarity: "rare" },
-      { threshold: 500, rarity: "epic" },
-      { threshold: 1000, rarity: "legendary" },
+      { threshold: 250, rarity: "rare", title: "Wingman" },
+      { threshold: 500, rarity: "epic", title: "Assist Machine" },
+      { threshold: 1000, rarity: "legendary", title: "Altruist" },
     ],
   },
   {
@@ -616,8 +616,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: { type: "careerSum", get: (s) => s.mine_grabs_red + s.mine_grabs_blue },
     ranks: [
       { threshold: 100, rarity: "rare" },
-      { threshold: 1000, rarity: "epic" },
-      { threshold: 2500, rarity: "legendary" },
+      { threshold: 1000, rarity: "epic", title: "Minewhore" },
+      { threshold: 2500, rarity: "legendary", title: "Mine Dominatrix" },
     ],
   },
   {
@@ -628,9 +628,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Matches played",
     metric: { type: "matchCount" },
     ranks: [
-      { threshold: 100, rarity: "common" },
-      { threshold: 500, rarity: "rare" },
-      { threshold: 1000, rarity: "legendary" },
+      { threshold: 100, rarity: "common", title: "Community Stalwart" },
+      { threshold: 500, rarity: "rare", title: "VIP Discord Member" },
+      { threshold: 1000, rarity: "legendary", title: "Veteran" },
     ],
   },
   {
@@ -652,8 +652,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: { type: "careerSum", get: (s) => s.blocks_enemy },
     ranks: [
       { threshold: 250, rarity: "common" },
-      { threshold: 500, rarity: "rare" },
-      { threshold: 1000, rarity: "epic" },
+      { threshold: 500, rarity: "rare", title: "Brick Wall" },
+      { threshold: 1000, rarity: "epic", title: "Immovable Object" },
     ],
     pending: true,
   },
@@ -666,8 +666,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: { type: "careerSum", get: (s) => s.kills },
     ranks: [
       { threshold: 1000, rarity: "common" },
-      { threshold: 5000, rarity: "epic" },
-      { threshold: 10000, rarity: "legendary" },
+      { threshold: 5000, rarity: "epic", title: "Headhunter" },
+      { threshold: 10000, rarity: "legendary", title: "Mandalorian" },
     ],
   },
   {
@@ -681,8 +681,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     unit: "hours",
     ranks: [
       { threshold: 100, rarity: "common" },
-      { threshold: 500, rarity: "epic" },
-      { threshold: 1000, rarity: "legendary" },
+      { threshold: 500, rarity: "epic", title: "Touch Grass" },
+      { threshold: 1000, rarity: "legendary", title: "Terminally Online" },
     ],
   },
   // -------------------------------------------------------------------- Streaks
@@ -725,9 +725,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     },
     ranks: [
       { threshold: 5, rarity: "rare" },
-      { threshold: 8, rarity: "epic" },
-      { threshold: 12, rarity: "legendary" },
-      { threshold: 15, rarity: "mythic" },
+      { threshold: 8, rarity: "epic", title: "Dynamic Duo" },
+      { threshold: 12, rarity: "legendary", title: "Unbreakable Bond" },
+      { threshold: 15, rarity: "mythic", title: "Til Death" },
     ],
   },
   {
@@ -770,7 +770,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       { threshold: 5, rarity: "rare" },
       { threshold: 8, rarity: "epic" },
       { threshold: 12, rarity: "legendary" },
-      { threshold: 15, rarity: "mythic" },
+      { threshold: 15, rarity: "mythic", title: "Giga Owneds" },
     ],
   },
   {

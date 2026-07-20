@@ -54,7 +54,7 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
   const galaxiesRef = useRef<Galaxy[]>([])
   const hyperspaceRef = useRef(false)
   const hyperspaceTimeoutRef = useRef<NodeJS.Timeout>()
-  const animationFrameIdRef = useRef<number>()
+  const animationFrameIdRef = useRef<number | undefined>(undefined)
   const currentColorRef = useRef<string>("102, 252, 241")
 
   useImperativeHandle(ref, () => ({
@@ -376,10 +376,30 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       animationFrameIdRef.current = requestAnimationFrame(animate)
     }
 
+    // requestAnimationFrame stops in a hidden tab, but meteors are advanced per
+    // FRAME and only retired once a frame finds them off-screen. So everything in
+    // flight when you switch away freezes mid-arc and stays active, and the whole
+    // lot resumes at once when you come back — the "shower" on return. Park the
+    // loop while hidden, and clear the sky before restarting so nothing survives
+    // the gap. The spawn clock is rebased too, or the first frame back would fire
+    // immediately on a stale timestamp.
+    const handleVisibility = () => {
+      if (document.hidden) {
+        if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current)
+        animationFrameIdRef.current = undefined
+        return
+      }
+      meteorsRef.current.forEach((m) => (m.active = false))
+      lastMeteorTime = Date.now()
+      if (animationFrameIdRef.current === undefined) animate()
+    }
+    document.addEventListener("visibilitychange", handleVisibility)
+
     animate()
 
     return () => {
       window.removeEventListener("resize", resizeCanvas)
+      document.removeEventListener("visibilitychange", handleVisibility)
       observer.disconnect()
       if (animationFrameIdRef.current) {
         cancelAnimationFrame(animationFrameIdRef.current)
@@ -391,7 +411,16 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
   }, [])
 
   return (
-    <canvas ref={canvasRef} className="fixed inset-0 pointer-events-none z-0" style={{ background: "transparent" }} />
+    // will-change pins the starfield to its own compositing layer. Without it,
+    // hovering anything that transforms (the /players rows) promotes that element
+    // and forces the canvas underneath to re-rasterize, which reads as the
+    // background shifting behind whatever you point at. Cards with translucent
+    // backgrounds make it especially visible, since the sky shows through them.
+    <canvas
+      ref={canvasRef}
+      className="fixed inset-0 pointer-events-none z-0"
+      style={{ background: "transparent", willChange: "transform" }}
+    />
   )
 })
 
