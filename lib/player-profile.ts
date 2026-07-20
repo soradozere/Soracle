@@ -9,6 +9,7 @@ import {
   type SecretCandidate,
 } from "@/lib/achievements"
 import type { AchMatch, AchStat } from "@/lib/achievement-meta"
+import type { RecordedTitle } from "@/lib/titles"
 import type { Player } from "@/lib/types"
 
 // Everything a player profile shows, computed client-side from one pass over
@@ -180,6 +181,9 @@ export interface PlayerProfileData {
   achievements: AchievementView[]
   totals: ProfileTotals
   matches: ProfileMatchEntry[]
+  // Seasonal titles this player has banked. Read rather than computed: past
+  // seasons are gone from the catalogue, so they can only come from the table.
+  recordedTitles: RecordedTitle[]
 }
 
 // ---------------------------------------------------------------------------
@@ -657,8 +661,34 @@ function recordHolders(
   }
 }
 
+// Seasonal titles this player has banked (public-readable). Queried here rather
+// than via lib/titles-server.ts so this module — which runs in the browser —
+// keeps its own client and can't pull a server-only import into the bundle.
+async function fetchRecordedTitlesFor(playerId: string): Promise<RecordedTitle[]> {
+  const supabase = createClient()
+  const { data, error } = await supabase
+    .from("player_titles")
+    .select("title_id, season_key, season_name, title, rarity, earned_at")
+    .eq("player_id", playerId)
+    .order("earned_at", { ascending: false })
+  // Degrade to "no banked titles" rather than breaking the whole profile —
+  // this also keeps profiles rendering before migration 020 is applied.
+  if (error) return []
+  return (data ?? []).map((r) => ({
+    titleId: r.title_id,
+    seasonKey: r.season_key,
+    seasonName: r.season_name,
+    title: r.title,
+    rarity: r.rarity,
+    earnedAt: r.earned_at,
+  }))
+}
+
 export async function loadPlayerProfile(player: Player, allPlayers: Player[]): Promise<PlayerProfileData> {
-  const { matches, stats } = await fetchMatchData()
+  const [{ matches, stats }, recordedTitles] = await Promise.all([
+    fetchMatchData(),
+    fetchRecordedTitlesFor(player.id),
+  ])
 
   const name = player.name
   const nameById = new Map(allPlayers.map((p) => [p.id, p.name]))
@@ -884,6 +914,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
     badges,
     achievements,
     matches: matchHistory,
+    recordedTitles,
     totals: {
       ...totals,
       winRate: totals.games > 0 ? Math.round((totals.wins / totals.games) * 100) : null,
