@@ -1,5 +1,7 @@
 import { NextResponse } from "next/server"
 import { fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
+import { createAnonClient } from "@/lib/supabase/anon"
+import { resolveEquippedTitle } from "@/lib/titles-server"
 
 export async function GET(request: Request, { params }: { params: Promise<{ discordId: string }> }) {
   const unauthorized = requireBotAuth(request)
@@ -20,5 +22,15 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
     return NextResponse.json({ error: "unlinked" }, { status: 404 })
   }
 
-  return NextResponse.json({ name: player.name, tier: player.tierValue, roles: player.roles, tooltip: player.tooltip ?? null })
+  // The equipped title, resolved to display info the bot can render directly
+  // (name + rarity + source). null when nothing is equipped.
+  const title = await resolveEquippedTitle(createAnonClient(), player.id, player.title ?? null)
+
+  return NextResponse.json({
+    name: player.name,
+    tier: player.tierValue,
+    roles: player.roles,
+    tooltip: player.tooltip ?? null,
+    title,
+  })
 }

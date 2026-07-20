@@ -1,6 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Rarity } from "@/lib/achievement-meta"
-import { SEASONS, progressFor, type RecordedTitle } from "@/lib/titles"
+import { SEASONS, progressFor, catalogueTitleById, type RecordedTitle } from "@/lib/titles"
 
 // Recording earned seasonal titles.
 //
@@ -120,6 +120,27 @@ export async function recordSeasonalTitlesSafely(
   } catch (err) {
     console.warn("Seasonal title recording failed:", err)
   }
+}
+
+/**
+ * The display info for a player's currently equipped title, or null. Prefers
+ * the banked player_titles snapshot — it's authoritative and survives a season
+ * leaving the catalogue — and falls back to the live catalogue for score-ladder
+ * titles and for a seasonal one equipped before its first match banked it.
+ *
+ * Never throws: fetchRecordedTitles swallows its own errors, so a missing table
+ * (pre-migration) or a read hiccup just yields the catalogue answer or null.
+ */
+export async function resolveEquippedTitle(
+  supabase: SupabaseClient,
+  playerId: string,
+  titleId: string | null,
+): Promise<{ title: string; rarity: Rarity; source: string } | null> {
+  if (!titleId) return null
+  const recorded = await fetchRecordedTitles(supabase, playerId)
+  const rec = recorded.find((t) => t.titleId === titleId)
+  if (rec) return { title: rec.title, rarity: rec.rarity, source: rec.seasonName }
+  return catalogueTitleById(titleId)
 }
 
 /** A player's recorded titles, newest first. Public data (select-all RLS). */
