@@ -16,7 +16,10 @@ import {
   SECRET_RARITY,
   type AchMatch,
   type AchStat,
+  type Rarity,
 } from "@/lib/achievement-meta"
+import { RARITY_ORDER, bestRarity, scoreFor } from "@/lib/achievement-score"
+import { roman } from "@/lib/achievement-format"
 
 // Server-side achievement computation, for the Discord bot flows (unlock pings +
 // =achievements). Reuses the pure computeAchievements over the full history; the
@@ -74,9 +77,17 @@ export interface PlayerAchievements {
 // player's chronological match sequence, their name, and the resolved one-of-one
 // holders. Built once and shared, because the three table reads behind it are the
 // expensive part — the pure passes over the result are not.
+interface PlayerMeta {
+  name: string
+  tierValue: number
+  avatarUrl: string | null
+  manuallyInactive: boolean
+}
+
 interface HistoryIndex {
   seqByPlayer: Map<string, AchMatch[]>
   nameById: Map<string, string>
+  metaById: Map<string, PlayerMeta>
   holders: Map<string, SecretHolder>
 }
 
@@ -88,11 +99,30 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
   const [matches, stats, players] = await Promise.all([
     fetchAll<ServerMatch>(supabase, "matches", "id, red_team, blue_team, red_score, blue_score, created_at"),
     fetchAll<ServerStat>(supabase, "match_stats", STAT_COLUMNS),
-    fetchAll<{ id: string; name: string }>(supabase, "players", "id, name, created_at"),
+    // tier_value / avatar_url / manually_inactive ride along for the /players
+    // board: same row, same round-trip, and the achievement passes ignore them.
+    fetchAll<{
+      id: string
+      name: string
+      tier_value: number
+      avatar_url: string | null
+      manually_inactive: boolean | null
+    }>(supabase, "players", "id, name, created_at, tier_value, avatar_url, manually_inactive"),
   ])
 
   const idByName = new Map(players.map((p) => [p.name, p.id]))
   const nameById = new Map(players.map((p) => [p.id, p.name]))
+  const metaById = new Map<string, PlayerMeta>(
+    players.map((p) => [
+      p.id,
+      {
+        name: p.name,
+        tierValue: p.tier_value,
+        avatarUrl: p.avatar_url ?? null,
+        manuallyInactive: !!p.manually_inactive,
+      },
+    ]),
+  )
 
   // stat row per (matchId, playerId)
   const statByKey = new Map<string, ServerStat>()
@@ -188,7 +218,7 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
     }
   }
 
-  return { seqByPlayer, nameById, holders: resolveSecretHolders(candidates) }
+  return { seqByPlayer, nameById, metaById, holders: resolveSecretHolders(candidates) }
 }
 
 // Compute every player's achievements in one pass over the full match history.
@@ -335,4 +365,107 @@ export async function computeAchievementLedger(): Promise<AchievementLedger> {
     claimedSecrets: claimedSecrets.sort(compareEntries),
     playerCount: seqByPlayer.size,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Players directory
+// ---------------------------------------------------------------------------
+
+// One row of the /players board. Everything here comes off the same three table
+// reads the ledger uses, so the board costs no extra round-trips.
+export interface PlayerRow {
+  id: string
+  name: string
+  tierValue: number
+  avatarUrl: string | null
+  score: number
+  unlocks: number
+  best: Rarity | null
+  // The rarest crest the player holds, named — the board's Title column. Ties on
+  // rarity go to the higher rank, then the earlier unlock.
+  title: string | null
+  rarityCounts: Record<Rarity, number>
+  // Most recent first, capped at FORM_WINDOW — the pip row on the board.
+  form: ("W" | "L" | "D")[]
+  formWins: number
+  formLosses: number
+  matches: number
+  lastPlayed: string | null
+  inactive: boolean
+}
+
+const FORM_WINDOW = 5
+
+// Mirrors isPlayerInactive in lib/fetch-players-db.ts. Duplicated rather than
+// imported because that module builds a browser Supabase client at import time,
+// which a server component must not pull in.
+const INACTIVE_DAYS = 27
+
+// The board in one pass: achievement score per player plus their recent form.
+// Players who have never played are omitted — they'd be an empty row with a
+// zero score and no form, which says nothing.
+export async function computePlayersDirectory(): Promise<PlayerRow[]> {
+  const { seqByPlayer, metaById, holders } = await buildHistoryIndex()
+
+  const inactiveBefore = Date.now() - INACTIVE_DAYS * 86_400_000
+  const rows: PlayerRow[] = []
+  for (const [pid, seq] of seqByPlayer) {
+    const meta = metaById.get(pid)
+    if (!meta) continue
+
+    const rarities: Rarity[] = []
+    let topEvent: { rarity: Rarity; rank: number; date: string; label: string } | null = null
+    for (const def of ACHIEVEMENTS) {
+      for (const ev of unlockEventsFor(def, seq)) {
+        rarities.push(ev.rarity)
+        // A rank without its own bespoke title reuses the family name, so a
+        // tiered one needs its numeral back to be distinguishable ("On Fire II"
+        // rather than a second "On Fire").
+        const label =
+          ev.totalRanks > 1 && ev.title === def.title ? `${ev.title} ${roman(ev.rank)}` : ev.title
+        if (
+          !topEvent ||
+          RARITY_META[ev.rarity].order > RARITY_META[topEvent.rarity].order ||
+          (ev.rarity === topEvent.rarity &&
+            (ev.rank > topEvent.rank || (ev.rank === topEvent.rank && ev.date < topEvent.date)))
+        ) {
+          topEvent = { rarity: ev.rarity, rank: ev.rank, date: ev.date, label }
+        }
+      }
+    }
+    // A claimed one-of-one outranks everything, so it takes the title outright.
+    for (const def of SECRET_ACHIEVEMENTS) {
+      if (holders.get(def.id)?.playerId !== pid) continue
+      rarities.push(SECRET_RARITY)
+      topEvent = { rarity: SECRET_RARITY, rank: 1, date: holders.get(def.id)!.date, label: def.title }
+    }
+
+    const rarityCounts = Object.fromEntries(RARITY_ORDER.map((r) => [r, 0])) as Record<Rarity, number>
+    for (const r of rarities) rarityCounts[r]++
+
+    // seq is chronological, so the tail is the recent end.
+    const lastPlayed = seq.length ? seq[seq.length - 1].date : null
+    const recent = seq.slice(-FORM_WINDOW).reverse()
+    const form = recent.map((m) => (m.won ? "W" : m.lost ? "L" : "D") as "W" | "L" | "D")
+
+    rows.push({
+      id: pid,
+      name: meta.name,
+      tierValue: meta.tierValue,
+      avatarUrl: meta.avatarUrl,
+      score: scoreFor(rarities),
+      unlocks: rarities.length,
+      best: bestRarity(rarities),
+      title: topEvent?.label ?? null,
+      rarityCounts,
+      form,
+      formWins: form.filter((f) => f === "W").length,
+      formLosses: form.filter((f) => f === "L").length,
+      matches: seq.length,
+      lastPlayed,
+      inactive: meta.manuallyInactive || !lastPlayed || Date.parse(lastPlayed) < inactiveBefore,
+    })
+  }
+
+  return rows.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
 }

@@ -169,7 +169,6 @@ export interface ProfileTotals {
 }
 
 export interface PlayerProfileData {
-  aliases: string[]
   currentMonth: MonthRecord
   careerHigh: CareerHigh | null
   series: SeriesPoint[]
@@ -231,16 +230,6 @@ function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[] }
     if (matchDataCache?.promise === promise) matchDataCache = null
   })
   return promise
-}
-
-async function fetchAliases(playerId: string): Promise<string[]> {
-  const supabase = createClient()
-  const { data, error } = await supabase
-    .from("player_aliases")
-    .select("alias")
-    .eq("player_id", playerId)
-  if (error) throw new Error(`Failed to fetch aliases: ${error.message}`)
-  return (data ?? []).map((r) => r.alias)
 }
 
 // ---------------------------------------------------------------------------
@@ -667,7 +656,7 @@ function recordHolders(
 }
 
 export async function loadPlayerProfile(player: Player, allPlayers: Player[]): Promise<PlayerProfileData> {
-  const [{ matches, stats }, aliases] = await Promise.all([fetchMatchData(), fetchAliases(player.id)])
+  const { matches, stats } = await fetchMatchData()
 
   const name = player.name
   const nameById = new Map(allPlayers.map((p) => [p.id, p.name]))
@@ -884,7 +873,6 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
   badges.sort((a, b) => BADGE_PRIORITY.indexOf(a.id) - BADGE_PRIORITY.indexOf(b.id))
 
   return {
-    aliases,
     currentMonth: current,
     careerHigh,
     series,
