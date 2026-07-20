@@ -781,7 +781,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Consecutive wins in a row",
     metric: { type: "winStreak" },
     ranks: [
-      { threshold: 5, rarity: "epic" },
+      { threshold: 5, rarity: "common" },
       { threshold: 8, rarity: "legendary", title: "Unstoppable" },
       { threshold: 12, rarity: "legendary", title: "Titan" },
     ],
