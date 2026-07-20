@@ -3,7 +3,8 @@ import { cookies } from "next/headers"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
 import { computePlayersDirectory } from "@/lib/achievements-server"
-import { earnedTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
+import { earnedTitles, mergeRecordedTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
+import { fetchRecordedTitles } from "@/lib/titles-server"
 
 // Self-service profile save for a logged-in player (not an admin). Deliberately
 // narrower than the admin path: no tooltip (that stays an admin-only "signature"),
@@ -50,7 +51,10 @@ export async function POST(request: Request) {
 
   if (titleId) {
     const season = seasonFor(now.toISOString())
-    const earned = earnedTitles(achievementScore, monthScore, season)
+    // Banked seasonal titles count too — otherwise a player wearing a past
+    // season's title would be rejected the next time they saved anything.
+    const recorded = await fetchRecordedTitles(supabase, playerId)
+    const earned = mergeRecordedTitles(earnedTitles(achievementScore, monthScore, season), recorded)
     if (!earned.some((t) => t.id === titleId)) {
       return NextResponse.json({ error: "Title not earned" }, { status: 403 })
     }
