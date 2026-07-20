@@ -24,11 +24,13 @@ export default async function PlayersPage() {
     score: r.score,
     unlocks: r.unlocks,
     best: r.best,
+    title: r.title,
     rarityCounts: r.rarityCounts,
     form: r.form,
     formWins: r.formWins,
     formLosses: r.formLosses,
     matches: r.matches,
+    inactive: r.inactive,
   }))
 
   return (

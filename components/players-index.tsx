@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { Search, Trophy, ArrowRight } from "lucide-react"
 import { RARITY_META, type Rarity } from "@/lib/achievement-meta"
@@ -17,11 +17,13 @@ export interface BoardRow {
   score: number
   unlocks: number
   best: Rarity | null
+  title: string | null
   rarityCounts: Record<Rarity, number>
   form: ("W" | "L" | "D")[]
   formWins: number
   formLosses: number
   matches: number
+  inactive: boolean
 }
 
 type SortKey = "score" | "form" | "tier" | "name"
@@ -41,12 +43,27 @@ const MEDALS = ["#f5c542", "#c7d0da", "#cd7f32"]
 
 function Avatar({ row }: { row: BoardRow }) {
   const accent = accentFor(row.best)
-  if (row.avatarUrl) {
+  // Avatars are Discord CDN proxy links, which are signed and do expire — a dead
+  // one must degrade to the monogram rather than leaving a broken-image box.
+  const [failed, setFailed] = useState(false)
+  const imgRef = useRef<HTMLImageElement>(null)
+
+  // onError alone isn't enough: the markup is server-rendered, so an image can
+  // finish failing before React hydrates and attaches the handler, and that
+  // error event is never replayed. Re-check the resolved state on mount.
+  useEffect(() => {
+    const img = imgRef.current
+    if (img?.complete && img.naturalWidth === 0) setFailed(true)
+  }, [])
+
+  if (row.avatarUrl && !failed) {
     return (
       // eslint-disable-next-line @next/next/no-img-element -- avatars are arbitrary admin-set URLs
       <img
+        ref={imgRef}
         src={row.avatarUrl}
         alt=""
+        onError={() => setFailed(true)}
         className="w-11 h-11 rounded-full object-cover shrink-0"
         style={{ border: `2px solid ${accent}`, boxShadow: `0 0 12px ${accent}40` }}
       />
@@ -212,8 +229,9 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
       <div className="pl-head" aria-hidden="true">
         <span>#</span>
         <span>Player</span>
+        <span>Title</span>
         <span>Tier</span>
-        <span>Form (last 10)</span>
+        <span>Form (last 5)</span>
         <span>Crests</span>
         <span className="pl-head-score">Score</span>
       </div>
@@ -224,7 +242,12 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
           const accent = accentFor(row.best)
           return (
             <li key={row.id}>
-              <Link href={`/player/${slug(row.name)}`} className="pl-row" style={{ ["--accent" as string]: accent }}>
+              <Link
+                href={`/player/${slug(row.name)}`}
+                className={`pl-row ${row.inactive ? "is-inactive" : ""}`}
+                style={{ ["--accent" as string]: accent }}
+                title={row.inactive ? `${row.name} — inactive` : undefined}
+              >
                 <span
                   className="pl-rank tabular-nums"
                   style={rank <= 3 ? { color: MEDALS[rank - 1], borderColor: `${MEDALS[rank - 1]}66` } : undefined}
@@ -244,6 +267,10 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
                       {row.matches} matches
                     </span>
                   </span>
+                </span>
+
+                <span className="pl-title" style={{ color: accent }} title={row.title ?? undefined}>
+                  {row.title ?? "—"}
                 </span>
 
                 <span className="pl-tier tabular-nums">T{row.tierValue}</span>
@@ -311,7 +338,7 @@ const PLAYERS_CSS = `
 
 /* One grid template shared by the header and every row, so the columns line up
    without the header having to know the row markup. */
-.pl-head,.pl-row{display:grid;grid-template-columns:44px minmax(160px,1.4fr) 60px minmax(150px,1fr) minmax(110px,.8fr) 96px;gap:14px;align-items:center}
+.pl-head,.pl-row{display:grid;grid-template-columns:44px minmax(150px,1.3fr) minmax(120px,1.1fr) 52px minmax(104px,.7fr) minmax(100px,.7fr) 92px;gap:12px;align-items:center}
 .pl-head{padding:0 14px 8px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#5a6472}
 .pl-head-score{text-align:right}
 
@@ -326,7 +353,14 @@ const PLAYERS_CSS = `
 .pl-who-text strong{color:#e8ecf1;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl-who-text span{font-size:11px;color:#8892a0}
 .pl-tier-inline{display:none;font-style:normal;color:#66fcf1}
+.pl-title{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl-tier{font-family:var(--font-orbitron);font-size:13px;color:#66fcf1;text-align:center}
+
+/* Inactive players stay on the board — their score is still earned — but drop
+   back so the active roster reads first. Hovering restores full opacity, so a
+   dimmed row is never harder to actually read. */
+.pl-row.is-inactive{opacity:.45;filter:saturate(.55)}
+.pl-row.is-inactive:hover,.pl-row.is-inactive:focus-visible{opacity:1;filter:none}
 .pl-score{display:flex;flex-direction:column;align-items:flex-end}
 .pl-score b{font-family:var(--font-orbitron);font-size:19px;line-height:1.1}
 .pl-score span{font-size:10px;color:#8892a0}
@@ -337,10 +371,11 @@ const PLAYERS_CSS = `
    on top, form and crests beneath. The grid columns would be unreadable here. */
 @media (max-width:860px){
   .pl-head{display:none}
-  .pl-row{grid-template-columns:40px 1fr auto;grid-template-areas:"rank who score" ". form form" ". crests crests";row-gap:8px}
+  .pl-row{grid-template-columns:40px 1fr auto;grid-template-areas:"rank who score" ". title title" ". form form" ". crests crests";row-gap:6px}
   .pl-rank{grid-area:rank}
   .pl-who{grid-area:who}
   .pl-score{grid-area:score}
+  .pl-title{grid-area:title;white-space:normal}
   .pl-form{grid-area:form}
   .pl-crests{grid-area:crests}
   .pl-tier{display:none}
