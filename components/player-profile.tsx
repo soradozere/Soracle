@@ -520,7 +520,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
   return (
     <TooltipProvider delayDuration={200}>
     <div className="space-y-4 text-[#c5c6c7]">
-      {/* ---- Header: avatar, name, aliases, slogan, tier + roles ---- */}
+      {/* ---- Header: avatar, name, slogan, tier + roles ---- */}
       <div className="bg-[#1f2833]/40 border border-[#3d4855] rounded-lg backdrop-blur-lg p-5">
         <div className="flex flex-col sm:flex-row gap-5">
           {/* Custom avatar image if set, else initials (in-game 3D models are a later phase) */}
@@ -550,12 +550,6 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false }: PlayerPro
                 </button>
               )}
             </div>
-
-            {data && data.aliases.length > 0 && (
-              <div className="text-sm text-[#8892a0] mt-1">
-                aka {data.aliases.join(", ")}
-              </div>
-            )}
 
             {fields.tooltip && (
               <p className="text-sm italic text-[#66fcf1]/80 mt-2">“{fields.tooltip}”</p>

@@ -6,6 +6,7 @@ import { TeamDisplay } from "@/components/team-display"
 import { FilterPanel } from "@/components/filter-panel"
 import { BalanceOptions } from "@/components/balance-options"
 import { BalanceHistory } from "@/components/balance-history"
+import { HelpFab } from "@/components/help-fab"
 import { TierListView } from "@/components/tier-list-view"
 import { getMonthlyPlayerStats } from "@/app/admin/actions"
 import { balanceTeamsWithOptions, balanceTeamsCompetitive, balanceTeamsByElo } from "@/lib/balance-algorithm"
@@ -655,6 +656,8 @@ export default function TeamBalancer() {
             onRestore={handleRestoreFromHistory}
             onClear={handleClearHistory}
           />
+
+          <HelpFab />
     </div>
   )
 }
