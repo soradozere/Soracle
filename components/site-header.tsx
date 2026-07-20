@@ -8,7 +8,7 @@ import { ThemeSelector } from "@/components/theme-selector"
 import { AdminNavButton } from "@/components/admin-nav-button"
 import { themes, applyTheme, type ThemeName } from "@/lib/themes"
 import { useToast } from "@/hooks/use-toast"
-import { History, BarChart3 } from "lucide-react"
+import { History, BarChart3, Users } from "lucide-react"
 
 // Shared masthead + nav for the main site pages. Each former tab is now its own
 // route, so nav items are plain links and the active state comes from the URL —
@@ -16,6 +16,7 @@ import { History, BarChart3 } from "lucide-react"
 const NAV = [
   { href: "/", label: "Team Balancer", icon: null },
   { href: "/matches", label: "Match History", icon: History },
+  { href: "/players", label: "Players", icon: Users },
   { href: "/stats", label: "Stats", icon: BarChart3 },
   { href: "/how-it-works", label: "How It Works", icon: null },
 ] as const
@@ -57,8 +58,14 @@ export function SiteHeader() {
         }}
       >
         <div className="container mx-auto px-4 py-4 md:py-6">
-          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div className="flex items-center gap-3 md:gap-4 min-w-0">
+          {/* No breakpoint here on purpose. The masthead claims a 420px basis —
+              enough for the title to stay on one line — and the nav refuses to
+              shrink, so the nav drops to its own row exactly when the two stop
+              fitting together, at whatever width that happens to be. A fixed
+              breakpoint would have to be re-guessed every time a nav item is
+              added. */}
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="flex items-center gap-3 md:gap-4 min-w-0 flex-1 basis-[420px]">
               <Image
                 src="/logo.png"
                 alt="JK2 Logo"
@@ -73,7 +80,10 @@ export function SiteHeader() {
                 >
                   JK2 CAPTURE THE FLAG
                 </h1>
-                <p className="text-xs md:text-sm" style={{ color: "var(--color-text-dim)" }}>
+                {/* Truncates rather than wraps: this line is the widest thing in
+                    the masthead, and letting it demand its full width is what
+                    starves the nav. */}
+                <p className="text-xs md:text-sm truncate" style={{ color: "var(--color-text-dim)" }}>
                   Jedi Knight 2: Jedi Outcast • 6v6 Competitive • Also known as Soracle • With thanks to TomArrow
                 </p>
               </div>
@@ -81,7 +91,11 @@ export function SiteHeader() {
             {/* wrap + shrink-0: the masthead beside this is wide, so at mid
                 widths the nav has to fall to a second row rather than push the
                 page into a horizontal scroll. */}
-            <div className="flex flex-wrap gap-2 md:justify-end shrink-0">
+            {/* Shrinkable on purpose: `shrink-0` would pin this to the width of
+                all five buttons in a row, which is wider than a phone, and its
+                own flex-wrap would then never fire. Allowed to shrink, it wraps
+                its buttons internally once it has dropped to its own line. */}
+            <div className="flex flex-wrap gap-2 justify-end">
               <ThemeSelector currentTheme={currentTheme} onThemeChange={handleThemeChange} />
               {NAV.map(({ href, label, icon: Icon }) => {
                 const active = pathname === href

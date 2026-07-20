@@ -16,7 +16,9 @@ import {
   SECRET_RARITY,
   type AchMatch,
   type AchStat,
+  type Rarity,
 } from "@/lib/achievement-meta"
+import { RARITY_ORDER, bestRarity, scoreFor } from "@/lib/achievement-score"
 
 // Server-side achievement computation, for the Discord bot flows (unlock pings +
 // =achievements). Reuses the pure computeAchievements over the full history; the
@@ -74,9 +76,16 @@ export interface PlayerAchievements {
 // player's chronological match sequence, their name, and the resolved one-of-one
 // holders. Built once and shared, because the three table reads behind it are the
 // expensive part — the pure passes over the result are not.
+interface PlayerMeta {
+  name: string
+  tierValue: number
+  avatarUrl: string | null
+}
+
 interface HistoryIndex {
   seqByPlayer: Map<string, AchMatch[]>
   nameById: Map<string, string>
+  metaById: Map<string, PlayerMeta>
   holders: Map<string, SecretHolder>
 }
 
@@ -88,11 +97,20 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
   const [matches, stats, players] = await Promise.all([
     fetchAll<ServerMatch>(supabase, "matches", "id, red_team, blue_team, red_score, blue_score, created_at"),
     fetchAll<ServerStat>(supabase, "match_stats", STAT_COLUMNS),
-    fetchAll<{ id: string; name: string }>(supabase, "players", "id, name, created_at"),
+    // tier_value / avatar_url ride along for the /players board: same row, same
+    // round-trip, and the achievement passes simply ignore them.
+    fetchAll<{ id: string; name: string; tier_value: number; avatar_url: string | null }>(
+      supabase,
+      "players",
+      "id, name, created_at, tier_value, avatar_url",
+    ),
   ])
 
   const idByName = new Map(players.map((p) => [p.name, p.id]))
   const nameById = new Map(players.map((p) => [p.id, p.name]))
+  const metaById = new Map<string, PlayerMeta>(
+    players.map((p) => [p.id, { name: p.name, tierValue: p.tier_value, avatarUrl: p.avatar_url ?? null }]),
+  )
 
   // stat row per (matchId, playerId)
   const statByKey = new Map<string, ServerStat>()
@@ -188,7 +206,7 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
     }
   }
 
-  return { seqByPlayer, nameById, holders: resolveSecretHolders(candidates) }
+  return { seqByPlayer, nameById, metaById, holders: resolveSecretHolders(candidates) }
 }
 
 // Compute every player's achievements in one pass over the full match history.
@@ -335,4 +353,82 @@ export async function computeAchievementLedger(): Promise<AchievementLedger> {
     claimedSecrets: claimedSecrets.sort(compareEntries),
     playerCount: seqByPlayer.size,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Players directory
+// ---------------------------------------------------------------------------
+
+// One row of the /players board. Everything here comes off the same three table
+// reads the ledger uses, so the board costs no extra round-trips.
+export interface PlayerRow {
+  id: string
+  name: string
+  tierValue: number
+  avatarUrl: string | null
+  score: number
+  unlocks: number
+  best: Rarity | null
+  rarityCounts: Record<Rarity, number>
+  // Most recent first, capped at FORM_WINDOW — the pip row on the board.
+  form: ("W" | "L" | "D")[]
+  formWins: number
+  formLosses: number
+  matches: number
+  lastPlayed: string | null
+}
+
+// Ten is enough to read as a streak without the pip row wrapping on mobile.
+const FORM_WINDOW = 10
+
+// The board in one pass: achievement score per player plus their recent form.
+// Players who have never played are omitted — they'd be an empty row with a
+// zero score and no form, which says nothing.
+export async function computePlayersDirectory(): Promise<PlayerRow[]> {
+  const { seqByPlayer, metaById, holders } = await buildHistoryIndex()
+
+  // Claimed one-of-ones are resolved globally rather than per player, so collect
+  // them by holder before walking the players.
+  const secretsByPlayer = new Map<string, number>()
+  for (const def of SECRET_ACHIEVEMENTS) {
+    const holder = holders.get(def.id)
+    if (holder) secretsByPlayer.set(holder.playerId, (secretsByPlayer.get(holder.playerId) ?? 0) + 1)
+  }
+
+  const rows: PlayerRow[] = []
+  for (const [pid, seq] of seqByPlayer) {
+    const meta = metaById.get(pid)
+    if (!meta) continue
+
+    const rarities: Rarity[] = []
+    for (const def of ACHIEVEMENTS) {
+      for (const ev of unlockEventsFor(def, seq)) rarities.push(ev.rarity)
+    }
+    for (let i = 0; i < (secretsByPlayer.get(pid) ?? 0); i++) rarities.push(SECRET_RARITY)
+
+    const rarityCounts = Object.fromEntries(RARITY_ORDER.map((r) => [r, 0])) as Record<Rarity, number>
+    for (const r of rarities) rarityCounts[r]++
+
+    // seq is chronological, so the tail is the recent end.
+    const recent = seq.slice(-FORM_WINDOW).reverse()
+    const form = recent.map((m) => (m.won ? "W" : m.lost ? "L" : "D") as "W" | "L" | "D")
+
+    rows.push({
+      id: pid,
+      name: meta.name,
+      tierValue: meta.tierValue,
+      avatarUrl: meta.avatarUrl,
+      score: scoreFor(rarities),
+      unlocks: rarities.length,
+      best: bestRarity(rarities),
+      rarityCounts,
+      form,
+      formWins: form.filter((f) => f === "W").length,
+      formLosses: form.filter((f) => f === "L").length,
+      matches: seq.length,
+      lastPlayed: seq.length ? seq[seq.length - 1].date : null,
+    })
+  }
+
+  return rows.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
 }
