@@ -379,17 +379,6 @@ export default function TeamBalancer() {
   return (
     <div className="container mx-auto px-4 py-8 relative z-10">
           <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4 mb-6 sticky top-[100px] md:top-[120px] z-40">
-            {/* Docked here rather than the global nav — this page is the only
-                thing "How It Works" actually explains. */}
-            <div className="flex justify-end mb-3">
-              <Link
-                href="/how-it-works"
-                className="px-3 py-1.5 rounded-md text-sm transition-all font-medium flex items-center gap-1.5 bg-[#2a3441]/60 backdrop-blur-sm text-[#c5c6c7] hover:bg-[#3d4855] border border-[#3d4855]"
-              >
-                <HelpCircle className="w-4 h-4" />
-                How It Works
-              </Link>
-            </div>
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
               <div className="flex items-center gap-2 flex-1 min-w-[200px]">
                 <Users className="w-5 h-5" style={{ color: "var(--color-primary)" }} />
@@ -554,7 +543,10 @@ export default function TeamBalancer() {
             </div>
           )}
 
-          <div className="mb-6">
+          {/* View toggle on the left, How It Works on the right. It sits on this
+              row rather than in the global nav or the sticky panel: it explains
+              this page specifically, but isn't a control for it. */}
+          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
             <div
               className="inline-flex rounded-lg border p-1"
               style={{
@@ -605,6 +597,14 @@ export default function TeamBalancer() {
                 Tier List
               </button>
             </div>
+
+            <Link
+              href="/how-it-works"
+              className="px-3 py-1.5 rounded-md text-sm transition-all font-medium flex items-center gap-1.5 bg-[#2a3441]/60 backdrop-blur-sm text-[#c5c6c7] hover:bg-[#3d4855] border border-[#3d4855]"
+            >
+              <HelpCircle className="w-4 h-4" />
+              How It Works
+            </Link>
           </div>
 
           {playerView === "select" ? (

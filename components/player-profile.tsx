@@ -380,6 +380,7 @@ function EditProfileDialog({
   titleOptions,
   themeOptions,
   canEditTooltip,
+  canChangePassword,
   onSaved,
 }: {
   open: boolean
@@ -394,19 +395,68 @@ function EditProfileDialog({
   // Only a full admin can set the slogan — it's Sam's signature line, not a
   // self-service field. A player editing their own profile never sees it.
   canEditTooltip: boolean
+  // Password changes are for the logged-in player themselves. Admins reset
+  // passwords from the admin panel instead (they don't know the current one).
+  canChangePassword: boolean
   onSaved: (fields: EditableFields) => void
 }) {
   const [fields, setFields] = useState<EditableFields>(initial)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
 
+  // Password change is a separate sub-form with its own state and its own
+  // submit — it doesn't ride along with Save, so a failed password change
+  // can't lose the profile edits (or vice versa).
+  const [showPassword, setShowPassword] = useState(false)
+  const [currentPassword, setCurrentPassword] = useState("")
+  const [newPassword, setNewPassword] = useState("")
+  const [confirmPassword, setConfirmPassword] = useState("")
+  const [passwordSaving, setPasswordSaving] = useState(false)
+  const [passwordError, setPasswordError] = useState<string | null>(null)
+  const [passwordDone, setPasswordDone] = useState(false)
+
   // Re-seed the form whenever it's (re)opened for a player.
   useEffect(() => {
     if (open) {
       setFields(initial)
       setSaveError(null)
+      setShowPassword(false)
+      setCurrentPassword("")
+      setNewPassword("")
+      setConfirmPassword("")
+      setPasswordError(null)
+      setPasswordDone(false)
     }
   }, [open, initial])
+
+  const handleChangePassword = async () => {
+    setPasswordError(null)
+    if (newPassword !== confirmPassword) {
+      setPasswordError("New passwords don't match")
+      return
+    }
+    setPasswordSaving(true)
+    try {
+      const res = await fetch("/api/player-auth/change-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        setPasswordError(data.error || "Failed to change password")
+        return
+      }
+      setPasswordDone(true)
+      setCurrentPassword("")
+      setNewPassword("")
+      setConfirmPassword("")
+    } catch {
+      setPasswordError("Something went wrong. Try again.")
+    } finally {
+      setPasswordSaving(false)
+    }
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -563,6 +613,58 @@ function EditProfileDialog({
               Unlocked by all-time Achievement Score — recolours the whole profile, stars included.
             </p>
           </div>
+          {canChangePassword && (
+            <div className="pt-3 border-t border-[#3d4855]">
+              {!showPassword ? (
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(true)}
+                  className="text-xs text-[#8892a0] hover:text-[var(--pa,#66fcf1)] transition-colors"
+                >
+                  Change password
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <Label className="text-xs text-[#8892a0]">Change password</Label>
+                  <Input
+                    type="password"
+                    autoComplete="current-password"
+                    value={currentPassword}
+                    onChange={(e) => setCurrentPassword(e.target.value)}
+                    placeholder="Current password"
+                    className="bg-[#1f2833] border-[#3d4855]"
+                  />
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="New password (min 8 characters)"
+                    className="bg-[#1f2833] border-[#3d4855]"
+                  />
+                  <Input
+                    type="password"
+                    autoComplete="new-password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    placeholder="Confirm new password"
+                    className="bg-[#1f2833] border-[#3d4855]"
+                  />
+                  {passwordError && <p className="text-xs text-[#ff4757]">{passwordError}</p>}
+                  {passwordDone && <p className="text-xs text-[#27ae60]">✓ Password updated</p>}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={handleChangePassword}
+                    disabled={passwordSaving || !currentPassword || !newPassword || !confirmPassword}
+                  >
+                    {passwordSaving ? "Updating…" : "Update password"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
           {saveError && <p className="text-xs text-[#ff4757]">{saveError}</p>}
         </div>
         <DialogFooter>
@@ -1071,6 +1173,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
           titleOptions={earned}
           themeOptions={availableThemes}
           canEditTooltip={isAdmin}
+          canChangePassword={isOwner}
           onSaved={setFields}
         />
       )}
