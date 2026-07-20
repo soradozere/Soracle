@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
+import { resolveEquippedTitle } from "@/lib/titles-server"
 
 // Month-to-date stats for one player, resolved by Discord ID. Powers the
 // bot's /stats command. Aggregates match_stats rows whose parent match falls
@@ -108,10 +109,14 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
   results.sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0))
   const form = results.map((x) => x.r).slice(-20)
 
+  // Equipped title (name + rarity + source), same shape the =tier endpoint uses.
+  const title = await resolveEquippedTitle(supabase, player.id, player.title ?? null)
+
   return NextResponse.json({
     name: player.name,
     tier: player.tierValue,
     tooltip: player.tooltip ?? null,
+    title,
     month: now.toLocaleString("en-GB", { month: "long", year: "numeric" }),
     matches: statRows.length,
     wins,
