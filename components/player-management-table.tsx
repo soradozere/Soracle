@@ -6,7 +6,15 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, Trash2, Save, X, Download } from 'lucide-react'
+import { Plus, Trash2, Save, X, Download, KeyRound, Copy, Check } from 'lucide-react'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
 import { CSVUpload } from "@/components/csv-upload"
 
@@ -53,8 +61,41 @@ export function PlayerManagementTable() {
   const [discordInput, setDiscordInput] = useState("")
   const [isLoading, setIsLoading] = useState(true)
   const [isAdding, setIsAdding] = useState(false)
+  // Player-login password generation: which player the "new password" dialog
+  // is showing for, the plaintext (shown once, never re-fetchable), and
+  // whether it's mid-request.
+  const [passwordFor, setPasswordFor] = useState<Player | null>(null)
+  const [generatedPassword, setGeneratedPassword] = useState<string | null>(null)
+  const [generatingPassword, setGeneratingPassword] = useState(false)
+  const [copied, setCopied] = useState(false)
   const { toast } = useToast()
   const supabase = createClient()
+
+  async function generatePasswordFor(player: Player) {
+    setPasswordFor(player)
+    setGeneratedPassword(null)
+    setCopied(false)
+    setGeneratingPassword(true)
+    try {
+      const res = await fetch("/api/player-auth/password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ playerId: player.id }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        toast({ title: "Error", description: data.error || "Failed to generate password", variant: "destructive" })
+        setPasswordFor(null)
+        return
+      }
+      setGeneratedPassword(data.password)
+    } catch {
+      toast({ title: "Error", description: "Failed to generate password", variant: "destructive" })
+      setPasswordFor(null)
+    } finally {
+      setGeneratingPassword(false)
+    }
+  }
 
   useEffect(() => {
     fetchPlayers()
@@ -316,6 +357,7 @@ export function PlayerManagementTable() {
               <TableHead className="w-[180px]">Tooltip</TableHead>
               <TableHead className="w-[180px]">Discord IDs</TableHead>
               <TableHead className="w-[100px]">Inactive</TableHead>
+              <TableHead className="w-[110px]">Login</TableHead>
               <TableHead className="w-[120px]">Actions</TableHead>
             </TableRow>
           </TableHeader>
@@ -469,6 +511,9 @@ export function PlayerManagementTable() {
                       <SelectItem value="yes">Yes</SelectItem>
                     </SelectContent>
                   </Select>
+                </TableCell>
+                <TableCell>
+                  <span className="text-sm text-muted-foreground">Save first</span>
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-2">
@@ -697,6 +742,17 @@ export function PlayerManagementTable() {
                     )}
                   </TableCell>
                   <TableCell>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => generatePasswordFor(player)}
+                      disabled={editingId !== null || isAdding}
+                      title="Generate or reset this player's login password"
+                    >
+                      <KeyRound className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                  <TableCell>
                     {isEditing ? (
                       <div className="flex gap-2">
                         <Button size="sm" onClick={saveEdit}>
@@ -733,6 +789,41 @@ export function PlayerManagementTable() {
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={passwordFor !== null} onOpenChange={(open) => !open && setPasswordFor(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Login password — {passwordFor?.name}</DialogTitle>
+            <DialogDescription>
+              Shown once. Send it to {passwordFor?.name} directly — reopening this dialog generates a new one instead.
+            </DialogDescription>
+          </DialogHeader>
+          {generatingPassword ? (
+            <p className="text-sm text-muted-foreground py-4">Generating…</p>
+          ) : generatedPassword ? (
+            <div className="flex items-center gap-2 py-2">
+              <code className="flex-1 rounded-md border bg-muted px-3 py-2 text-lg tracking-wider">
+                {generatedPassword}
+              </code>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  navigator.clipboard.writeText(generatedPassword)
+                  setCopied(true)
+                }}
+              >
+                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+              </Button>
+            </div>
+          ) : null}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPasswordFor(null)}>
+              Done
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
