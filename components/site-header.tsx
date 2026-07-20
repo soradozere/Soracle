@@ -6,6 +6,7 @@ import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { ThemeSelector } from "@/components/theme-selector"
 import { AdminNavButton } from "@/components/admin-nav-button"
+import { PlayerNavButton } from "@/components/player-nav-button"
 import { themes, applyTheme, type ThemeName } from "@/lib/themes"
 import { useToast } from "@/hooks/use-toast"
 import { History, BarChart3, Users } from "lucide-react"
@@ -13,12 +14,15 @@ import { History, BarChart3, Users } from "lucide-react"
 // Shared masthead + nav for the main site pages. Each former tab is now its own
 // route, so nav items are plain links and the active state comes from the URL —
 // the Stats page (and its recharts bundle) only loads when visited.
+//
+// "How It Works" lives in the Team Balancer panel now, not here — it's
+// specifically about the balancer, so it makes more sense docked to that panel
+// than sitting in the global nav.
 const NAV = [
   { href: "/", label: "Team Balancer", icon: null },
   { href: "/matches", label: "Match History", icon: History },
   { href: "/players", label: "Players", icon: Users },
   { href: "/stats", label: "Stats", icon: BarChart3 },
-  { href: "/how-it-works", label: "How It Works", icon: null },
 ] as const
 
 export function SiteHeader() {
@@ -125,6 +129,7 @@ export function SiteHeader() {
                   </Link>
                 )
               })}
+              <PlayerNavButton />
               <AdminNavButton />
             </div>
           </div>
