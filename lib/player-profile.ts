@@ -89,6 +89,8 @@ interface StatRow {
 
 export interface MonthStatTotals {
   statMatches: number
+  // Summed scoreboard score for the month — the metric the seasonal titles run on.
+  score: number
   captures: number
   returns: number
   assists: number
@@ -773,6 +775,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
     const sum = (pick: (r: StatRow) => number) => monthRows.reduce((s, r) => s + pick(r), 0)
     current.stats = {
       statMatches: monthRows.length,
+      score: sum((r) => r.score),
       captures: sum((r) => r.captures),
       returns: sum((r) => r.returns),
       assists: sum((r) => r.assists),

@@ -1,0 +1,21 @@
+id,group,title,persistence,metric,threshold,rarity,condition,qualify_now,notes
+decorated,Score,Decorated,permanent,achievement_score,10,common,Achievement Score of 10+,28,"Broadest tier. 42% of ranked players."
+distinguished,Score,Distinguished,permanent,achievement_score,25,rare,Achievement Score of 25+,14,
+illustrious,Score,Illustrious,permanent,achievement_score,50,epic,Achievement Score of 50+,5,
+immortal,Score,Immortal,permanent,achievement_score,100,legendary,Achievement Score of 100+,1,"Only Interlude (170). Next highest is 87."
+two-time,Badge breadth,Two-Time,permanent,distinct_permanent_badges,2,rare,Hold 2 different permanent badges,4,"Permanent badges = champion / top5 / top-capper / top-kd. Ceiling is 4."
+triple-crown,Badge breadth,Triple Crown,permanent,distinct_permanent_badges,3,epic,Hold 3 different permanent badges,1,"Consider dropping to 2 — only 1 player qualifies."
+grand-slam,Badge breadth,Grand Slam,permanent,distinct_permanent_badges,4,legendary,Hold all 4 permanent badges,1,
+mainstay,Badge repetition,Mainstay,permanent,badge_count:top5,3,epic,Earn the Top 5 Finish badge 3 times,TBC,"Repeat counts not computed — loadPlayerBadges dedupes. Max 4 completed months of history."
+dynasty,Badge repetition,Dynasty,permanent,badge_count:champion,3,legendary,Win Champion 3 times,TBC,"Needs 3 of ~4 completed months. Nobody yet."
+cap-monopoly,Badge repetition,Cap Monopoly,permanent,badge_count:top-capper,3,epic,Earn Top Capper 3 times,TBC,
+executioner,Badge repetition,Executioner,permanent,badge_count:top-kd,3,epic,Earn Top K/D 3 times,TBC,
+high-scorer,Live,High Scorer,live,badge:highscore,,legendary,Hold the all-time High Score badge,1,"Transfers the moment the record is beaten."
+dbs-god,Live,DBS God,live,badge:dbs-god,,epic,Hold the all-time DBS God badge,1,"Transfers with the badge."
+star-player,Live,Star Player,live,badge:star,,rare,Be the current month's Star Player,1,"Resets monthly."
+apex,Live,Apex,live,rank:achievement_score,1,mythic,Rank #1 on the Achievement Score board,1,"Currently Interlude."
+s2026-07-ithacan,Seasonal 2026-07 (Odyssey),Ithacan,seasonal,month_score,5000,common,"5,000 in-game score during July 2026",18,"June equivalent: 24 players."
+s2026-07-philosopher,Seasonal 2026-07 (Odyssey),Philosopher,seasonal,month_score,12500,rare,"12,500 in-game score during July 2026",11,"June equivalent: 13 players."
+s2026-07-agamemnon,Seasonal 2026-07 (Odyssey),Agamemnon,seasonal,month_score,20000,epic,"20,000 in-game score during July 2026",3,"June equivalent: 8 players."
+s2026-07-achilles,Seasonal 2026-07 (Odyssey),Achilles,seasonal,month_score,27500,legendary,"27,500 in-game score during July 2026",1,"June equivalent: 3 players."
+s2026-07-odysseus,Seasonal 2026-07 (Odyssey),Odysseus,seasonal,month_score,35000,mythic,"35,000 in-game score during July 2026",0,"June equivalent: 1 player (Interlude, 39688). July leader on 28,323 with 11 days left."

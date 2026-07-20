@@ -15,6 +15,7 @@ export interface FeedItem {
   achId: string
   title: string
   tiered: boolean
+  titled: boolean // the rank carries its own name, so it takes no numeral
   rank: number
   rarity: Rarity
   icon: string
@@ -43,7 +44,7 @@ const ord = (n: number) => {
 
 function FeedRow({ item }: { item: FeedItem }) {
   const color = rarityColor(item.rarity)
-  const name = item.tiered && item.rank > 1 ? `${item.title} ${roman(item.rank)}` : item.title
+  const name = item.tiered && item.rank > 1 && !item.titled ? `${item.title} ${roman(item.rank)}` : item.title
   const mask = `url(/achievements/${item.icon}.svg) center / contain no-repeat`
 
   return (

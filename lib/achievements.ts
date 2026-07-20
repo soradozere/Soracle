@@ -20,6 +20,11 @@ import {
 export interface AchievementView {
   id: string
   title: string // resolved to the current rank's title where it overrides
+  // Whether that title came from the RANK rather than the family. Callers use
+  // this to decide on the roman numeral, and it cannot be inferred by comparing
+  // the two strings: a rank is allowed to be named the same as its family
+  // (Batcher III is literally "Batcher"), and that must not read as unnamed.
+  titled: boolean
   category: AchievementCategory
   rarity: Rarity // current rank's rarity when earned, else the entry rank's
   icon: string
@@ -162,6 +167,7 @@ export interface UnlockEvent {
   totalRanks: number
   rarity: Rarity
   title: string // the rank's own title, e.g. "Unstoppable" for On Fire II
+  titled: boolean // see AchievementView.titled
   date: string
   matchId: string
 }
@@ -192,6 +198,7 @@ export function unlockEventsFor(def: AchievementDef, seq: AchMatch[]): UnlockEve
       totalRanks: ranks.length,
       rarity: ranks[i].rarity,
       title: ranks[i].title ?? def.title,
+      titled: !!ranks[i].title,
       date: crossing.date,
       matchId: crossing.matchId,
     })
@@ -248,6 +255,7 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
     return {
       id: def.id,
       title: cur.title ?? def.title,
+      titled: !!cur.title,
       category: def.category,
       rarity: cur.rarity,
       icon: def.icon,
@@ -277,6 +285,7 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
   return {
     id: def.id,
     title: def.title,
+    titled: false, // untiered: the family name IS the name
     category: def.category,
     rarity,
     icon: def.icon,
@@ -375,6 +384,7 @@ export function secretViewsFor(playerId: string, holders: Map<string, SecretHold
     views.push({
       id: def.id,
       title: def.title,
+      titled: false,
       category: def.category,
       rarity: SECRET_RARITY,
       icon: def.icon,
