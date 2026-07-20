@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { normalizeName } from "@/lib/name-match"
 import { notifyAchievementUnlocks } from "@/lib/achievement-notify"
+import { recordSeasonalTitlesSafely } from "@/lib/titles-server"
 
 const PENDING_BUCKET = "pending-scoreboards"
 
@@ -430,6 +431,24 @@ async function persistMatchWithStats(
 
   // Best-effort achievement-unlock ping (never throws; no-op without a webhook).
   await notifyAchievementUnlocks(matchId)
+
+  // Best-effort seasonal-title recording (never throws). A player's seasonal
+  // standing can only move when a stats-backed match lands, so this is the
+  // moment to write it down — once the month's catalogue is replaced the
+  // unlock can no longer be recomputed. Dated by the match, not by today, so
+  // a backdated match still credits the season it belongs to.
+  const statPlayerIds = Array.from(
+    new Set(
+      payload.match_stats
+        .map((s) => s.player_id)
+        .filter((id): id is string => typeof id === "string" && id.length > 0),
+    ),
+  )
+  await recordSeasonalTitlesSafely(
+    supabase,
+    payload.played_at ?? new Date().toISOString(),
+    statPlayerIds,
+  )
 
   return { success: true, matchId }
 }

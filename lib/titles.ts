@@ -70,6 +70,60 @@ export const SEASONS: Record<string, Season> = {
       ],
     },
   },
+
+  // Scaffolds for the next three months, thresholds pre-filled from July's
+  // calibration. Swap `name` and the five `title`s for the month's theme; keep
+  // each `id` unique across ALL seasons — an id is what a banked title is keyed
+  // on in player_titles, so reusing one would collide with a past winner.
+  // A month left as-is still works; it just runs under a placeholder name.
+  "2026-08": {
+    key: "2026-08",
+    name: "Season 2 — TBC",
+    ladder: {
+      id: "s2026-08",
+      label: "Season 2 — TBC",
+      metric: "month_score",
+      tiers: [
+        { id: "s2026-08-1", title: "Tier One", threshold: 5000, rarity: "common" },
+        { id: "s2026-08-2", title: "Tier Two", threshold: 12500, rarity: "rare" },
+        { id: "s2026-08-3", title: "Tier Three", threshold: 20000, rarity: "epic" },
+        { id: "s2026-08-4", title: "Tier Four", threshold: 27500, rarity: "legendary" },
+        { id: "s2026-08-5", title: "Tier Five", threshold: 35000, rarity: "mythic" },
+      ],
+    },
+  },
+  "2026-09": {
+    key: "2026-09",
+    name: "Season 3 — TBC",
+    ladder: {
+      id: "s2026-09",
+      label: "Season 3 — TBC",
+      metric: "month_score",
+      tiers: [
+        { id: "s2026-09-1", title: "Tier One", threshold: 5000, rarity: "common" },
+        { id: "s2026-09-2", title: "Tier Two", threshold: 12500, rarity: "rare" },
+        { id: "s2026-09-3", title: "Tier Three", threshold: 20000, rarity: "epic" },
+        { id: "s2026-09-4", title: "Tier Four", threshold: 27500, rarity: "legendary" },
+        { id: "s2026-09-5", title: "Tier Five", threshold: 35000, rarity: "mythic" },
+      ],
+    },
+  },
+  "2026-10": {
+    key: "2026-10",
+    name: "Season 4 — TBC",
+    ladder: {
+      id: "s2026-10",
+      label: "Season 4 — TBC",
+      metric: "month_score",
+      tiers: [
+        { id: "s2026-10-1", title: "Tier One", threshold: 5000, rarity: "common" },
+        { id: "s2026-10-2", title: "Tier Two", threshold: 12500, rarity: "rare" },
+        { id: "s2026-10-3", title: "Tier Three", threshold: 20000, rarity: "epic" },
+        { id: "s2026-10-4", title: "Tier Four", threshold: 27500, rarity: "legendary" },
+        { id: "s2026-10-5", title: "Tier Five", threshold: 35000, rarity: "mythic" },
+      ],
+    },
+  },
 }
 
 export const seasonFor = (iso: string): Season | null => SEASONS[iso.slice(0, 7)] ?? null
@@ -128,6 +182,39 @@ export function unlockedThemes(achievementScore: number): ThemeId[] {
 
 export interface EarnedTitle extends TitleTier {
   source: string // which ladder it came from, for grouping the picker
+}
+
+// A seasonal title read back from player_titles. Self-describing on purpose:
+// the row snapshots its own name / rarity / season, so a title stays wearable
+// and correctly coloured long after its season leaves the catalogue above.
+export interface RecordedTitle {
+  titleId: string
+  seasonKey: string
+  seasonName: string
+  title: string
+  rarity: Rarity
+  earnedAt: string
+}
+
+// Recorded titles merged into the live-computed pool, newest season first and
+// deduped by id — a title still in the current catalogue must not appear twice.
+export function mergeRecordedTitles(live: EarnedTitle[], recorded: RecordedTitle[]): EarnedTitle[] {
+  const out = [...live]
+  const seen = new Set(live.map((t) => t.id))
+  for (const r of recorded) {
+    if (seen.has(r.titleId)) continue
+    seen.add(r.titleId)
+    out.push({
+      id: r.titleId,
+      title: r.title,
+      // Threshold is meaningless once recorded — the tier was already cleared,
+      // and the season's ladder may no longer exist to compare against.
+      threshold: 0,
+      rarity: r.rarity,
+      source: r.seasonName,
+    })
+  }
+  return out
 }
 
 // Everything this player is currently entitled to wear. Recomputed on render,

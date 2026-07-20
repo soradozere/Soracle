@@ -20,6 +20,7 @@ import {
   SCORE_LADDER,
   THEMES,
   earnedTitles,
+  mergeRecordedTitles,
   seasonFor,
   themeById,
   unlockedThemes,
@@ -732,7 +733,11 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
 
   // Entitlements, recomputed on render — the stored title/theme are only choices,
   // and one the player no longer qualifies for simply doesn't display.
-  const earned = data ? earnedTitles(achievementScore, monthScore, season) : []
+  // Live entitlement plus anything banked from past seasons — those ladders are
+  // gone from the catalogue, so a July Odysseus can only come from the table.
+  const earned = data
+    ? mergeRecordedTitles(earnedTitles(achievementScore, monthScore, season), data.recordedTitles)
+    : []
   const equippedTitle = fields.title ? earned.find((t) => t.id === fields.title) ?? null : null
   const availableThemes = data ? unlockedThemes(achievementScore) : []
   const theme = themeById(fields.profile_theme)
