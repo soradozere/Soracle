@@ -37,6 +37,7 @@ function showcaseView(def: AchievementDef, entries: LedgerEntry[]): AchievementV
   return {
     id: def.id,
     title: (top ? cur.title : undefined) ?? def.title,
+    titled: !!(top && cur.title),
     category: def.category,
     rarity: cur.rarity,
     icon: def.icon,

@@ -32,6 +32,7 @@ export default async function AchievementsPage() {
       achId: e.achId,
       title: e.title,
       tiered: e.totalRanks > 1,
+      titled: e.titled,
       rank: e.rank,
       rarity: e.rarity,
       icon: def?.icon ?? "galactic-republic",
