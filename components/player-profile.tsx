@@ -630,11 +630,7 @@ function EditProfileDialog({
                     <SelectItem key={t.id} value={t.id} className={locked ? "opacity-70" : undefined}>
                       <span className="inline-block w-2.5 h-2.5 rounded-full mr-2" style={{ background: t.accent }} />
                       {t.label}
-                      {locked ? (
-                        <span className="text-[#8892a0] text-xs ml-2">🔒 locked</span>
-                      ) : (
-                        isPreviewTheme(t.id) && <span className="text-[#8892a0] text-xs ml-2">preview</span>
-                      )}
+                      {locked && <span className="text-[#8892a0] text-xs ml-2">🔒 locked</span>}
                     </SelectItem>
                   )
                 })}

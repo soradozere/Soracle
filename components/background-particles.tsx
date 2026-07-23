@@ -935,11 +935,26 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       const h = canvas.height
       const img = bgImageRef.current
       if (bgImageReadyRef.current && img && img.naturalWidth) {
-        // Cover-fit: scale to fill the viewport, centre, crop the overflow.
-        const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight)
-        const dw = img.naturalWidth * scale
-        const dh = img.naturalHeight * scale
-        ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
+        const iw = img.naturalWidth
+        const ih = img.naturalHeight
+        const baseScale = Math.max(w / iw, h / ih) // cover-fit: fill, crop overflow
+        if (reduce) {
+          // Frozen, centred cover-fit for reduced-motion.
+          const dw = iw * baseScale
+          const dh = ih * baseScale
+          ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
+        } else {
+          // Ken Burns: a slow zoom "breathe" plus a lazy pan drift across both axes,
+          // each on its own long sine so the motion never repeats obviously. The
+          // extra zoom (>1) guarantees overflow to pan within, so no edges show.
+          const zoom = 1.09 + Math.sin(time * 0.06) * 0.05 // ~1.04–1.14, ~105s period
+          const scale = baseScale * zoom
+          const dw = iw * scale
+          const dh = ih * scale
+          const panX = Math.sin(time * 0.05) * 0.5 + 0.5 // 0..1
+          const panY = Math.sin(time * 0.038 + 1.0) * 0.5 + 0.5 // 0..1, offset phase
+          ctx.drawImage(img, -(dw - w) * panX, -(dh - h) * panY, dw, dh)
+        }
         // Gentle darken so the solid content panels sit comfortably over the art.
         ctx.fillStyle = "rgba(6, 9, 14, 0.28)"
         ctx.fillRect(0, 0, w, h)
