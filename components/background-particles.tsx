@@ -754,16 +754,16 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
     }
 
     // Slicer / Hacker: Matrix-style falling glyphs (bright head, fading trail) in
-    // the theme colour, over faint CRT scanlines with RGB-split glitch tears.
-    // `aggressive` (Hacker) tears more often and harder for a Sombra-ier feel.
+    // the theme colour, over faint CRT scanlines. Deliberately no glitch/strobe
+    // tears — the flashing was distracting to read a profile through.
     const drawCodeRain = (time: number, aggressive: boolean) => {
       const w = canvas.width
       const h = canvas.height
       const col = currentColorRef.current
       const gt = reduce ? 1 : time
-      // Hacker (aggressive) falls more slowly than Slicer — its heavier glitch made
-      // it feel frantic, so the rain itself is calmer to compensate.
-      const speedScale = aggressive ? 0.55 : 1
+      // Hacker (aggressive) falls slower still than Slicer, keeping the two
+      // distinguishable now that the glitch no longer separates them.
+      const speedScale = aggressive ? 0.4 : 0.7
       ctx.font = `${RAIN_CELL}px ui-monospace, "SF Mono", Menlo, monospace`
       ctx.textBaseline = "top"
       rainRef.current.forEach((cl, ci) => {
@@ -809,22 +809,6 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       if (scanlinePattern) {
         ctx.fillStyle = scanlinePattern
         ctx.fillRect(0, 0, w, h)
-      }
-
-      // Glitch tears: offset RGB-split tinted bands.
-      if (!reduce) {
-        const chance = aggressive ? 0.1 : 0.05
-        const tears = aggressive ? 1 : 1
-        for (let t = 0; t < tears; t++) {
-          if (Math.random() > chance) continue
-          const gy = Math.random() * h
-          const gh = 6 + Math.random() * (aggressive ? 70 : 40)
-          const shift = (Math.random() - 0.5) * (aggressive ? 90 : 40)
-          ctx.fillStyle = "rgba(255, 0, 120, 0.1)"
-          ctx.fillRect(shift, gy, w, gh)
-          ctx.fillStyle = "rgba(0, 255, 200, 0.1)"
-          ctx.fillRect(-shift, gy + 3, w, gh)
-        }
       }
     }
 
