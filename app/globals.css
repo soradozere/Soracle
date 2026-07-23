@@ -219,6 +219,50 @@
   }
 }
 
+/* Full-palette profile themes (Player Profile page only). The profile hardcodes
+   the dark Jedi palette throughout, so — exactly like the Cloud City block above —
+   remap those specific hexes to the active theme's vars. Scoped to
+   html[data-profile-theme], which the profile's apply effect sets ONLY while a
+   full-palette theme is equipped (and clears on unmount), so nothing else on the
+   site is touched. Substring matchers catch opacity variants (…/40, …/60).
+   Semantic stat colours (win green, error red, gold) are deliberately left alone. */
+@layer utilities {
+  html[data-profile-theme] [class*="bg-[#0b0c10]"] {
+    background-color: var(--color-background) !important;
+  }
+  html[data-profile-theme] [class*="text-[#0b0c10]"] {
+    /* dark foreground on a bright accent chip — the theme's on-accent colour */
+    color: var(--color-on-accent, var(--color-background)) !important;
+  }
+  /* White headings/labels → the theme's bright text: unchanged (white) on dark
+     themes, flipped dark on light themes so they don't vanish on a light ground. */
+  html[data-profile-theme] [class*="text-white"] {
+    color: var(--color-text-bright) !important;
+  }
+  html[data-profile-theme] [class*="bg-[#1f2833]"] {
+    background-color: var(--color-surface) !important;
+  }
+  html[data-profile-theme] [class*="bg-[#2a3441]"],
+  html[data-profile-theme] [class*="bg-[#3d4855]"] {
+    background-color: var(--color-surface-elevated) !important;
+  }
+  html[data-profile-theme] [class*="bg-[#8892a0]"] {
+    background-color: var(--color-text-dim) !important;
+  }
+  html[data-profile-theme] [class*="border-[#3d4855]"] {
+    border-color: var(--color-border) !important;
+  }
+  html[data-profile-theme] [class*="text-[#8892a0]"] {
+    color: var(--color-text-dim) !important;
+  }
+  html[data-profile-theme] [class*="text-[#c5c6c7]"] {
+    color: var(--color-text) !important;
+  }
+  html[data-profile-theme] [class*="text-[#66fcf1]"] {
+    color: var(--color-primary) !important;
+  }
+}
+
 @layer utilities {
   .glow-text {
     text-shadow: 0 0 10px rgba(102, 252, 241, 0.5);
