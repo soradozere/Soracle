@@ -161,6 +161,7 @@ export type ThemeId =
   | "geometry"
   | "slicer"
   | "hacker"
+  | "nostalgia"
 
 // The animated backdrop a profile theme paints behind the page. "starfield" is
 // the default the app has always used; the rest are per-theme renderers in
@@ -176,6 +177,9 @@ export type ProfileBackground =
   | "shapes"
   | "coderain"
   | "hackerrain"
+  // A static image (the theme's `image` url) drawn cover-fit behind the page, with
+  // a soft vignette and slow dust motes for a little life. See background-particles.
+  | "image"
 
 // The full colour set a rich theme repaints the profile with — the same roles as
 // the site themes' CSS vars (--color-background, --color-surface, …). The accent
@@ -195,10 +199,11 @@ export interface ThemePalette {
   onAccent?: string
 }
 
-// How a profile theme is unlocked: either an Achievement-Score tier (the original
-// four accent themes) or a specific crest earned to at least a given rank. `tier`
-// is 1-based to match AchievementView.rank (1 = first rank, 2 = second, …).
+// How a profile theme is unlocked: free to everyone, an Achievement-Score tier (the
+// original four accent themes), or a specific crest earned to at least a given rank.
+// `tier` is 1-based to match AchievementView.rank (1 = first rank, 2 = second, …).
 export type UnlockCondition =
+  | { kind: "free" } // always unlocked, no requirement
   | { kind: "score"; tier: string } // a SCORE_LADDER tier id
   | { kind: "crest"; crest: string; tier: number } // achievement id + minimum rank
 
@@ -215,6 +220,9 @@ export interface ProfileTheme {
   mode?: "light" | "dark"
   // Present only for full-palette themes; accent-only themes omit it.
   palette?: ThemePalette
+  // For `background: "image"` themes: the url of the wallpaper to draw behind the
+  // page (served from /public). Ignored for the particle backgrounds.
+  image?: string
 }
 
 export const THEMES: ProfileTheme[] = [
@@ -269,12 +277,24 @@ export const THEMES: ProfileTheme[] = [
     id: "hacker", label: "Hacker", accent: "#cf4bff", unlockedBy: { kind: "crest", crest: "nah-youre-hacking", tier: 2 }, background: "hackerrain",
     palette: { background: "#0a0410", surface: "#150a22", surfaceElevated: "#1f1236", border: "#3d2168", text: "#e6c2ff", textBright: "#f7ecff", textDim: "#8a6bb0", onAccent: "#0a0410" },
   },
+  // Image-background theme built around the classic JK2 wallpaper. Palette pulled
+  // from the art: near-black steel walls, cool grey text, warm JK2-logo orange
+  // accent. Free to everyone (no unlock) — a welcome/nostalgia theme every player
+  // can wear. The wallpaper lives at public/themes/nostalgia.jpg; if it's ever
+  // missing the renderer falls back to a matching steel-blue gradient.
+  {
+    id: "nostalgia", label: "Nostalgia", accent: "#e6822e", unlockedBy: { kind: "free" }, background: "image", image: "/themes/nostalgia.jpg",
+    palette: { background: "#0a0d12", surface: "#12171f", surfaceElevated: "#1a2029", border: "#2c3542", text: "#d5dae2", textBright: "#ffffff", textDim: "#7f8b9c", onAccent: "#140a02" },
+  },
 ]
 
 // The full-palette themes. Admins can equip any of these to preview one on a
 // profile regardless of whether that player has earned it (the editor offers them
 // all, and an equipped one always renders). Normal players unlock them the real
 // way — by earning the crest named in each theme's unlockedBy.
+// Full-palette themes that are still LOCKED for normal players (admins can preview
+// them). Nostalgia is intentionally absent: it's free (unlockedBy:free), so every
+// player already gets it through unlockedThemes and it needs no preview treatment.
 export const PREVIEW_THEME_IDS: ThemeId[] = [
   "sith", "void", "nebula", "mandalore", "hoth", "coruscant", "bespin", "geometry", "slicer", "hacker",
 ]
@@ -295,6 +315,7 @@ export function unlockedThemes(achievementScore: number, earnedCrestRanks: Map<s
   return THEMES.filter((t) => {
     const c = t.unlockedBy
     if (!c) return false
+    if (c.kind === "free") return true
     if (c.kind === "score") {
       const tier = SCORE_LADDER.tiers.find((x) => x.id === c.tier)
       return tier ? achievementScore >= tier.threshold : false
@@ -310,6 +331,7 @@ export function unlockedThemes(achievementScore: number, earnedCrestRanks: Map<s
 export function unlockRequirementLabel(theme: ProfileTheme): string | null {
   const c = theme.unlockedBy
   if (!c) return null
+  if (c.kind === "free") return null
   if (c.kind === "score") {
     return SCORE_LADDER.tiers.find((x) => x.id === c.tier)?.title ?? null
   }

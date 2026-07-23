@@ -152,6 +152,17 @@ interface CityScene {
   lanes: Lane[]
 }
 
+// Slow floating motes for the image-background theme (dust caught in the light).
+interface ImgDust {
+  x: number
+  y: number
+  r: number
+  o: number
+  vx: number
+  vy: number
+  ph: number
+}
+
 export interface BackgroundParticlesRef {
   triggerHyperspace: () => void
 }
@@ -173,6 +184,12 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
   const shapesRef = useRef<GeoShape[]>([])
   const rainRef = useRef<RainColumn[]>([])
   const cityRef = useRef<CityScene | null>(null)
+  // Image-background theme: the loaded wallpaper, the url it was loaded from (so we
+  // only reload when it changes), a ready flag, and slow dust motes drifting over it.
+  const bgImageRef = useRef<HTMLImageElement | null>(null)
+  const bgImageUrlRef = useRef<string>("")
+  const bgImageReadyRef = useRef(false)
+  const imgDustRef = useRef<ImgDust[]>([])
   const hyperspaceRef = useRef(false)
   const hyperspaceTimeoutRef = useRef<NodeJS.Timeout | undefined>(undefined)
   const animationFrameIdRef = useRef<number | undefined>(undefined)
@@ -217,8 +234,27 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
 
     // Which background renderer to run, read off <html data-profile-bg>. Absent
     // (every non-profile page, and accent-only profile themes) = the starfield.
+    // For image themes, also (re)load the wallpaper named in data-profile-bg-image;
+    // it's loaded once per url and cached until the url changes.
     const updateBgKind = () => {
       bgKindRef.current = document.documentElement.dataset.profileBg || "starfield"
+      const url = document.documentElement.dataset.profileBgImage || ""
+      if (url !== bgImageUrlRef.current) {
+        bgImageUrlRef.current = url
+        bgImageReadyRef.current = false
+        bgImageRef.current = null
+        if (url) {
+          const img = new Image()
+          img.onload = () => {
+            // Ignore a late load if the theme has since changed to another url.
+            if (bgImageUrlRef.current === url) {
+              bgImageRef.current = img
+              bgImageReadyRef.current = true
+            }
+          }
+          img.src = url
+        }
+      }
     }
 
     const resizeCanvas = () => {
@@ -235,6 +271,7 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       initShapes()
       initCodeRain()
       initCity()
+      initImageDust()
     }
 
     const initStars = () => {
@@ -339,6 +376,24 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       const arr: Ember[] = []
       for (let i = 0; i < n; i++) arr.push(makeEmber(true))
       embersRef.current = arr
+    }
+
+    const initImageDust = () => {
+      // Sparse, slow motes — just enough to keep the still wallpaper from feeling dead.
+      const n = Math.round((canvas.width * canvas.height) / 42000)
+      const arr: ImgDust[] = []
+      for (let i = 0; i < n; i++) {
+        arr.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          r: 0.6 + Math.random() * 1.6,
+          o: 0.05 + Math.random() * 0.18,
+          vx: (Math.random() - 0.5) * 0.12,
+          vy: -0.05 - Math.random() * 0.15,
+          ph: Math.random() * Math.PI * 2,
+        })
+      }
+      imgDustRef.current = arr
     }
 
     const initSnow = () => {
@@ -519,7 +574,7 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
     })
     observer.observe(document.documentElement, {
       attributes: true,
-      attributeFilter: ["style", "data-profile-bg"],
+      attributeFilter: ["style", "data-profile-bg", "data-profile-bg-image"],
     })
 
     let lastMeteorTime = Date.now()
@@ -875,8 +930,71 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       })
     }
 
+    const drawImageBg = (time: number) => {
+      const w = canvas.width
+      const h = canvas.height
+      const img = bgImageRef.current
+      if (bgImageReadyRef.current && img && img.naturalWidth) {
+        const iw = img.naturalWidth
+        const ih = img.naturalHeight
+        const baseScale = Math.max(w / iw, h / ih) // cover-fit: fill, crop overflow
+        if (reduce) {
+          // Frozen, centred cover-fit for reduced-motion.
+          const dw = iw * baseScale
+          const dh = ih * baseScale
+          ctx.drawImage(img, (w - dw) / 2, (h - dh) / 2, dw, dh)
+        } else {
+          // Ken Burns: a slow zoom "breathe" plus a lazy pan drift across both axes,
+          // each on its own long sine so the motion never repeats obviously. The
+          // extra zoom (>1) guarantees overflow to pan within, so no edges show.
+          const zoom = 1.09 + Math.sin(time * 0.06) * 0.05 // ~1.04–1.14, ~105s period
+          const scale = baseScale * zoom
+          const dw = iw * scale
+          const dh = ih * scale
+          const panX = Math.sin(time * 0.05) * 0.5 + 0.5 // 0..1
+          const panY = Math.sin(time * 0.038 + 1.0) * 0.5 + 0.5 // 0..1, offset phase
+          ctx.drawImage(img, -(dw - w) * panX, -(dh - h) * panY, dw, dh)
+        }
+        // Gentle darken so the solid content panels sit comfortably over the art.
+        ctx.fillStyle = "rgba(6, 9, 14, 0.28)"
+        ctx.fillRect(0, 0, w, h)
+      } else {
+        // Fallback while — or if — the wallpaper is missing: a steel-blue gradient
+        // in the theme's mood, so the theme is never a blank void.
+        const g = ctx.createLinearGradient(0, 0, w, h)
+        g.addColorStop(0, "#10151d")
+        g.addColorStop(0.5, "#0a0d12")
+        g.addColorStop(1, "#05070a")
+        ctx.fillStyle = g
+        ctx.fillRect(0, 0, w, h)
+      }
+      // Vignette to frame the centred content.
+      const vg = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.35, w / 2, h / 2, Math.max(w, h) * 0.75)
+      vg.addColorStop(0, "rgba(0,0,0,0)")
+      vg.addColorStop(1, "rgba(0,0,0,0.55)")
+      ctx.fillStyle = vg
+      ctx.fillRect(0, 0, w, h)
+      // Warm dust motes (tinted by the accent) drifting up through the light.
+      const col = currentColorRef.current
+      imgDustRef.current.forEach((d) => {
+        if (!reduce) {
+          d.x += d.vx
+          d.y += d.vy
+          if (d.y < -4) { d.y = h + 4; d.x = Math.random() * w }
+          if (d.x < -4) d.x = w + 4
+          else if (d.x > w + 4) d.x = -4
+        }
+        const tw = reduce ? 1 : Math.sin(time * 1.5 + d.ph) * 0.4 + 0.7
+        ctx.beginPath()
+        ctx.arc(d.x, d.y, d.r, 0, Math.PI * 2)
+        ctx.fillStyle = `rgba(${col}, ${d.o * tw})`
+        ctx.fill()
+      })
+    }
+
     const drawProfileBg = (kind: string, time: number) => {
-      if (kind === "nebula") drawBigNebula(time)
+      if (kind === "image") drawImageBg(time)
+      else if (kind === "nebula") drawBigNebula(time)
       else if (kind === "voidhole") drawVoidHole(time)
       else if (kind === "embers") drawEmbers(time)
       else if (kind === "snow") drawSnow(time)
