@@ -1,675 +1,258 @@
-"use client"
-
-import { useState, useEffect, useMemo, useRef, useCallback } from "react"
+import type { Metadata } from "next"
 import Link from "next/link"
-import { PlayerCard } from "@/components/player-card"
-import { TeamDisplay } from "@/components/team-display"
-import { FilterPanel } from "@/components/filter-panel"
-import { BalanceOptions } from "@/components/balance-options"
-import { BalanceHistory } from "@/components/balance-history"
-import { HelpFab } from "@/components/help-fab"
-import { TierListView } from "@/components/tier-list-view"
-import { getMonthlyPlayerStats } from "@/app/admin/actions"
-import { balanceTeamsWithOptions, balanceTeamsCompetitive, balanceTeamsByElo } from "@/lib/balance-algorithm"
-import { computeMonthlyEloMap } from "@/lib/elo"
-import { loadPlayerBadges, type BadgeId } from "@/lib/player-profile"
-import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
-import { checkIsAdmin } from "@/lib/is-admin"
-import type { Player, BalanceOption, BalanceHistoryEntry } from "@/lib/types"
-import { Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, TrendingUp, HelpCircle } from "lucide-react"
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { useCurrentTheme } from "@/hooks/use-current-theme"
-import { useSessionState } from "@/hooks/use-session-state"
+import { Zap, BarChart3, Server } from "lucide-react"
+import { computeAchievementLedger, computePlayersDirectory } from "@/lib/achievements-server"
+import { resolveEquippedTitles } from "@/lib/titles-server"
+import { getMatches, getMatchStatsByMonth, getMonthlyPlayerStats } from "@/app/admin/actions"
+import { HomeActivityFeed, type ActivityItem } from "@/components/home-activity-feed"
+import { HomeCrestGrid } from "@/components/home-crest-grid"
+import { HomeActivePlayers, type ActivePlayerRow } from "@/components/home-active-players"
+import { HomeStarTile } from "@/components/home-star-tile"
+import { HomeToolsPanel } from "@/components/home-tools-panel"
+import { HomeProfileButton } from "@/components/home-profile-button"
+import { HomeGreetingName } from "@/components/home-greeting-name"
 
-export default function TeamBalancer() {
-  const [players, setPlayers] = useState<Player[]>([])
-  // Picks-in-progress and balance results survive navigating to /stats etc.
-  // (sessionStorage-backed), matching the old keep-it-in-memory tab behaviour.
-  const [selectedPlayers, setSelectedPlayers] = useSessionState<string[]>("balancer.selected", [])
-  const [balanceOptions, setBalanceOptions] = useSessionState<BalanceOption[]>("balancer.options", [])
-  const [selectedOptionIndex, setSelectedOptionIndex] = useSessionState<number>("balancer.optionIndex", 0)
-  const [balanceHistory, setBalanceHistory] = useSessionState<BalanceHistoryEntry[]>("balancer.history", [], {
-    // timestamp is a Date; JSON turns it into a string, so revive it.
-    revive: (raw) =>
-      (raw as (Omit<BalanceHistoryEntry, "timestamp"> & { timestamp: string })[]).map((e) => ({
-        ...e,
-        timestamp: new Date(e.timestamp),
-      })),
-  })
-  const [searchQuery, setSearchQuery] = useState("")
-  const [roleFilter, setRoleFilter] = useState<string | null>(null)
-  const [micFilter, setMicFilter] = useState(false)
-  const [eliteFilter, setEliteFilter] = useState(false)
-  const [showSearchDropdown, setShowSearchDropdown] = useState(false)
-  const [competitiveMode, setCompetitiveMode] = useSessionState<boolean>("balancer.competitive", false)
-  const [cutPlayers, setCutPlayers] = useSessionState<string[]>("balancer.cut", [])
-  const [playerView, setPlayerView] = useState<"select" | "tierList">("select")
-  const [playerDisabledRoles, setPlayerDisabledRoles] = useSessionState<Map<string, string[]>>(
-    "balancer.disabledRoles",
-    new Map(),
-    {
-      prepare: (map) => Array.from(map.entries()),
-      revive: (raw) => new Map(raw as [string, string[]][]),
-    },
+const SERVERS_URL = "https://jk2t.ddns.net/servers/?game=jk2"
+
+export const metadata: Metadata = {
+  title: "JK2 Capture the Flag — Soracle",
+  description: "Recent activity, latest crests and the active roster for JK2 Capture the Flag.",
+}
+
+// Matches only arrive when an admin approves one, so a short revalidate is
+// plenty fresh without recomputing the whole ledger on every visitor.
+export const revalidate = 60
+
+interface RawMatch {
+  id: string
+  red_team: string[] | null
+  blue_team: string[] | null
+  red_score: number
+  blue_score: number
+  created_at: string
+}
+
+// Everything here is bucketed in UTC, matching the rest of the site's monthly
+// splits (lib/player-profile.ts, the bot's monthly-report route).
+const monthKeyOf = (iso: string) => {
+  const d = new Date(iso)
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`
+}
+
+const FEED_SIZE = 15
+const CREST_GRID_SIZE = 6
+const ACTIVE_PLAYERS_SIZE = 12
+
+export default async function HomePage() {
+  const now = new Date()
+  const year = now.getUTCFullYear()
+  const month = now.getUTCMonth() + 1
+  const currentKey = monthKeyOf(now.toISOString())
+  const monthName = now.toLocaleString("en-GB", { month: "long" })
+
+  const [ledger, directory, matchesRes, statsMonthRes, monthlyPlayerStatsRes] = await Promise.all([
+    computeAchievementLedger(),
+    computePlayersDirectory(),
+    getMatches(),
+    getMatchStatsByMonth(year, month),
+    getMonthlyPlayerStats(),
+  ])
+
+  const allMatches = (matchesRes.success ? (matchesRes.data as RawMatch[]) : []).filter(
+    (m) => m.red_team?.length && m.blue_team?.length,
   )
-  const [globalOffRole, setGlobalOffRole] = useSessionState<boolean>("balancer.offRole", false)
-  const [playerStats, setPlayerStats] = useState<Record<string, { wins: number; losses: number; draws: number }>>({})
-  // Profile badges per player (priority order), shown on Player Cards where the
-  // mic icon was.
-  const [playerBadges, setPlayerBadges] = useState<Record<string, BadgeId[]>>({})
-  const [loading, setLoading] = useState(true)
-  const [isAdmin, setIsAdmin] = useState(false)
-  const [eloBalancing, setEloBalancing] = useState(false)
+  const totalMatches = allMatches.length
 
-  const balanceOptionsRef = useRef<HTMLDivElement>(null)
-  // Theme is owned by the SiteHeader; the balancer only reads it (Bespin tweaks
-  // + PlayerCard/TierList props).
-  const currentTheme = useCurrentTheme()
+  const matchesThisMonth = allMatches.filter((m) => monthKeyOf(m.created_at) === currentKey)
+  const crestsThisMonth = ledger.recent.filter((e) => monthKeyOf(e.date) === currentKey)
+  const killsThisMonth = statsMonthRes.success
+    ? (statsMonthRes.data as { kills: number }[]).reduce((sum, row) => sum + (row.kills ?? 0), 0)
+    : 0
 
-  useEffect(() => {
-    fetchPlayersFromDB().then((data) => {
-      setPlayers(data)
-      setLoading(false)
-      // Non-blocking: cards render immediately, badges pop in when computed.
-      loadPlayerBadges(data).then(setPlayerBadges).catch(console.error)
+  const matchItems: ActivityItem[] = allMatches.slice(0, FEED_SIZE).map((m, i) => ({
+    type: "match",
+    date: m.created_at,
+    ordinal: totalMatches - i,
+    redScore: m.red_score,
+    blueScore: m.blue_score,
+    playerCount: (m.red_team?.length ?? 0) + (m.blue_team?.length ?? 0),
+  }))
+  const crestItems: ActivityItem[] = ledger.recent
+    .slice(0, FEED_SIZE)
+    .map((entry) => ({ type: "crest", date: entry.date, entry }))
+  const activityFeed = [...matchItems, ...crestItems]
+    .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+    .slice(0, FEED_SIZE)
+
+  const monthlyStats = monthlyPlayerStatsRes.success
+    ? (monthlyPlayerStatsRes.data as Record<string, { wins: number; losses: number; draws: number }>)
+    : {}
+  const activePlayersRanked = directory
+    .map((row) => {
+      const s = monthlyStats[row.name]
+      return { ...row, monthMatches: s ? s.wins + s.losses + s.draws : 0 }
     })
-    getMonthlyPlayerStats().then((result) => {
-      if (result.success) {
-        setPlayerStats(result.data as Record<string, { wins: number; losses: number; draws: number }>)
-      }
-    })
-  }, [])
+    .filter((row) => row.monthMatches > 0)
+    .sort((a, b) => b.monthMatches - a.monthMatches || b.score - a.score)
+    .slice(0, ACTIVE_PLAYERS_SIZE)
 
-  // Admin gate for the hidden "Balance by ELO" mode — checks the server-side allowlist
-  // (RLS-enforced), matching the Reports tab's check.
-  useEffect(() => {
-    checkIsAdmin().then(setIsAdmin)
-  }, [])
-
-  const filteredPlayers = useMemo(() => {
-    return players
-      .filter((player) => {
-        if (searchQuery && !player.name.toLowerCase().includes(searchQuery.toLowerCase())) {
-          return false
-        }
-
-        if (roleFilter && player.roles[roleFilter as keyof typeof player.roles] < 4) {
-          return false
-        }
-
-        if (micFilter && !player.mic) {
-          return false
-        }
-
-        if (eliteFilter) {
-          const hasEliteRole = Object.values(player.roles).some((rating) => rating >= 8)
-          if (!hasEliteRole) {
-            return false
-          }
-        }
-
-        return true
-      })
-      .sort((a, b) => {
-        const aStats = playerStats[a.name]
-        const bStats = playerStats[b.name]
-        const aPlayed = aStats ? aStats.wins + aStats.losses + aStats.draws : 0
-        const bPlayed = bStats ? bStats.wins + bStats.losses + bStats.draws : 0
-        if (bPlayed !== aPlayed) return bPlayed - aPlayed
-        return a.name.localeCompare(b.name)
-      })
-  }, [players, searchQuery, roleFilter, micFilter, eliteFilter, playerStats])
-
-  const handlePlayerToggle = useCallback(
-    (playerName: string) => {
-      if (selectedPlayers.includes(playerName)) {
-        setSelectedPlayers((prev) => prev.filter((p) => p !== playerName))
-        setPlayerDisabledRoles((prev) => {
-          const newMap = new Map(prev)
-          newMap.delete(playerName)
-          return newMap
-        })
-      } else {
-        const maxPlayers = competitiveMode ? 18 : 12
-        if (selectedPlayers.length < maxPlayers) {
-          setSelectedPlayers((prev) => [...prev, playerName])
-        }
-      }
-    },
-    [selectedPlayers, competitiveMode],
-  )
-
-  const handleClearAll = () => {
-    setSelectedPlayers([])
-    setBalanceOptions([])
-    setCutPlayers([])
-    setPlayerDisabledRoles(new Map())
-    setGlobalOffRole(false)
-  }
-
-  const handleRandomSelection = (count: number) => {
-    // Fisher-Yates shuffle for true uniform random selection
-    // Only select from active players (exclude inactive and manually_inactive)
-    const activePlayers = players.filter(p => p.is_active !== false && !p.manually_inactive)
-    const pool = [...activePlayers]
-    for (let i = pool.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [pool[i], pool[j]] = [pool[j], pool[i]]
-    }
-    setSelectedPlayers(pool.slice(0, Math.min(count, pool.length)).map((p) => p.name))
-    setBalanceOptions([])
-    setPlayerDisabledRoles(new Map())
-    setGlobalOffRole(false)
-  }
-
-  const handleDisabledRolesChange = useCallback((playerName: string, disabledRoles: string[]) => {
-    setPlayerDisabledRoles((prev) => {
-      const newMap = new Map(prev)
-      if (disabledRoles.length > 0) {
-        newMap.set(playerName, disabledRoles)
-      } else {
-        newMap.delete(playerName)
-      }
-      return newMap
-    })
-  }, [])
-
-  const handleBalance = () => {
-    const targetCount = competitiveMode ? 12 : selectedPlayers.length
-    if (targetCount === 0) return
-
-    const allRoles = ["Capper", "Chase", "Camp", "Cleaner", "Support"]
-    const playersWithDisabledRoles = players.map((p) => ({
-      ...p,
-      disabledRoles: globalOffRole ? allRoles : playerDisabledRoles.get(p.name) || [],
-    }))
-
-    if (competitiveMode) {
-      if (selectedPlayers.length < 12 || selectedPlayers.length > 18) {
-        alert("Competitive mode requires 12-18 players")
-        return
-      }
-      try {
-        const result = balanceTeamsCompetitive(selectedPlayers, playersWithDisabledRoles)
-        setBalanceOptions(result.options)
-        setSelectedPlayers(result.selectedPlayers)
-        setCutPlayers(result.cutPlayers)
-        setSelectedOptionIndex(0)
-
-        setPlayerDisabledRoles(new Map())
-        setGlobalOffRole(false)
-
-        const newEntry: BalanceHistoryEntry = {
-          id: Date.now().toString(),
-          result: result.options[0].result,
-          timestamp: new Date(),
-          selectedPlayers: result.selectedPlayers,
-        }
-        setBalanceHistory((prev) => [newEntry, ...prev.slice(0, 9)])
-
-        setTimeout(() => {
-          balanceOptionsRef.current?.scrollIntoView({
-            behavior: "smooth",
-            block: "start",
-          })
-        }, 100)
-      } catch (error) {
-        console.error(error)
-      }
-    } else {
-      if (selectedPlayers.length !== 12) {
-        alert("Please select exactly 12 players")
-        return
-      }
-      try {
-        const options = balanceTeamsWithOptions(selectedPlayers, playersWithDisabledRoles)
-        setBalanceOptions(options)
-        setSelectedOptionIndex(0)
-        setCutPlayers([])
-        setPlayerDisabledRoles(new Map())
-        setGlobalOffRole(false)
-
-        const newEntry: BalanceHistoryEntry = {
-          id: Date.now().toString(),
-          result: options[0].result,
-          timestamp: new Date(),
-          selectedPlayers,
-        }
-        setBalanceHistory((prev) => [newEntry, ...prev.slice(0, 9)])
-
-        setTimeout(() => {
-          balanceOptionsRef.current?.scrollIntoView({
-            behavior: "smooth",
-            block: "start",
-          })
-        }, 100)
-      } catch (error) {
-        console.error(error)
-      }
-    }
-  }
-
-  // Admin-only test mode: balance the 12 selected players purely on this month's ELO.
-  const handleBalanceByElo = async () => {
-    if (selectedPlayers.length !== 12) {
-      alert("Balance by ELO requires exactly 12 selected players")
-      return
-    }
-    setEloBalancing(true)
-    try {
-      const allRoles = ["Capper", "Chase", "Camp", "Cleaner", "Support"]
-      const playersWithDisabledRoles = players.map((p) => ({
-        ...p,
-        disabledRoles: globalOffRole ? allRoles : playerDisabledRoles.get(p.name) || [],
-      }))
-
-      const now = new Date()
-      const eloMap = await computeMonthlyEloMap(now.getUTCFullYear(), now.getUTCMonth() + 1)
-      const options = balanceTeamsByElo(selectedPlayers, playersWithDisabledRoles, eloMap)
-      setBalanceOptions(options)
-      setSelectedOptionIndex(0)
-      setCutPlayers([])
-      setPlayerDisabledRoles(new Map())
-      setGlobalOffRole(false)
-
-      const newEntry: BalanceHistoryEntry = {
-        id: Date.now().toString(),
-        result: options[0].result,
-        timestamp: new Date(),
-        selectedPlayers,
-      }
-      setBalanceHistory((prev) => [newEntry, ...prev.slice(0, 9)])
-
-      setTimeout(() => {
-        balanceOptionsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
-      }, 100)
-    } catch (error) {
-      console.error(error)
-      alert("Failed to compute ELO balance")
-    } finally {
-      setEloBalancing(false)
-    }
-  }
-
-  const handleCopyTeams = () => {
-    if (balanceOptions.length > 0) {
-      const result = balanceOptions[selectedOptionIndex].result
-      const text = `🔥 Red Team: ${result.teamRed.join(", ")}\n💧 Blue Team: ${result.teamBlue.join(", ")}`
-      navigator.clipboard.writeText(text)
-    }
-  }
-
-  const handleCopyAllOptions = () => {
-    if (balanceOptions.length === 0) return
-    const k = 0.004
-    const floor = 30
-    const sections = balanceOptions.map((option) => {
-      const confidence = Math.round(floor + (100 - floor) * Math.exp(-k * option.score))
-      return `${option.label} — ${option.description} (Balance: ${confidence}%)\n🔥 Red Team: ${option.result.teamRed.join(", ")}\n💧 Blue Team: ${option.result.teamBlue.join(", ")}`
-    })
-    navigator.clipboard.writeText(sections.join("\n\n"))
-  }
-
-  const handleSwapSides = () => {
-    if (balanceOptions.length > 0) {
-      setBalanceOptions((prevOptions) =>
-        prevOptions.map((option, index) => {
-          if (index === selectedOptionIndex) {
-            return {
-              ...option,
-              result: {
-                ...option.result,
-                teamRed: option.result.teamBlue,
-                teamBlue: option.result.teamRed,
-                redTierTotal: option.result.blueTierTotal,
-                blueTierTotal: option.result.redTierTotal,
-                redMic: option.result.blueMic,
-                blueMic: option.result.redMic,
-              },
-            }
-          }
-          return option
-        }),
-      )
-    }
-  }
-
-  const handleRestoreFromHistory = (entry: BalanceHistoryEntry) => {
-    setSelectedPlayers(entry.selectedPlayers)
-    const options = balanceTeamsWithOptions(entry.selectedPlayers, players)
-    setBalanceOptions(options)
-    setSelectedOptionIndex(0)
-  }
-
-  const handleClearHistory = () => {
-    setBalanceHistory([])
-  }
-
-  const selectedPlayerObjects = useMemo(() => {
-    return selectedPlayers
-      .map((name) => {
-        const player = players.find((p) => p.name === name)
-        if (!player) return null
-        return {
-          ...player,
-          disabledRoles: playerDisabledRoles.get(name) || [],
-        }
-      })
-      .filter(Boolean) as Player[]
-  }, [selectedPlayers, players, playerDisabledRoles])
-
-  const togglePlayer = useCallback(
-    (playerName: string) => {
-      handlePlayerToggle(playerName)
-    },
-    [handlePlayerToggle],
-  )
-
-  if (loading) {
-    return (
-      <div className="container mx-auto px-4 py-32 relative z-10">
-        <div className="text-center">
-          <div className="w-16 h-16 border-4 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
-          <p className="text-text-dim">Loading player data...</p>
-        </div>
-      </div>
-    )
-  }
+  // The directory's own `title` is the rarest crest a player holds (a career
+  // stat) — not their equipped Title (a separate progression axis: seasonal or
+  // Achievement Score ladders, see lib/titles.ts). Only resolved for the
+  // players actually shown here, not the whole directory.
+  const equippedTitles = await resolveEquippedTitles(activePlayersRanked.map((row) => row.id))
+  const activePlayers: ActivePlayerRow[] = activePlayersRanked.map((row) => ({
+    ...row,
+    equippedTitle: equippedTitles.get(row.id) ?? null,
+  }))
 
   return (
     <div className="container mx-auto px-4 py-8 relative z-10">
-          <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4 mb-6 sticky top-[100px] md:top-[120px] z-40">
-            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
-              <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-                <Users className="w-5 h-5" style={{ color: "var(--color-primary)" }} />
-                <span className="text-white font-mono text-lg font-bold">
-                  {selectedPlayers.length}/{competitiveMode ? "18" : "12"}
-                </span>
-                <div className="flex-1 h-2 bg-[#0b0c10] rounded-full overflow-hidden border border-[#3d4855]">
-                  <div
-                    className="h-full transition-all duration-300"
-                    style={{
-                      width: `${(selectedPlayers.length / (competitiveMode ? 18 : 12)) * 100}%`,
-                      backgroundColor: "var(--color-primary)",
-                      boxShadow: "0 0 8px var(--color-primary-glow)",
-                    }}
-                  />
-                </div>
-              </div>
+      {/* ---------------------------------------------------------------- hero */}
+      <section className="text-center py-10 mb-8">
+        <div className="inline-flex items-center gap-3 mb-4">
+          <span className="h-px w-6 bg-[#45a29e]" />
+          <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#66fcf1]">Jedi Outcast CTF</span>
+          <span className="h-px w-6 bg-[#45a29e]" />
+        </div>
+        <h1
+          className="text-4xl md:text-6xl font-extrabold glow-text mb-4 text-balance"
+          style={{ fontFamily: "var(--font-orbitron)" }}
+        >
+          Welcome back
+          <HomeGreetingName />
+        </h1>
+        <p className="max-w-2xl mx-auto text-[#8892a0] text-sm md:text-base leading-relaxed">
+          See what&apos;s happening on this 2002 Star Wars game of CTF on CTF_Yavin_No_outside, no wallhacks, no
+          mineswitching, no stacks and perfect SD
+        </p>
+        <div className="flex flex-wrap items-center justify-center gap-3 mt-8">
+          <Link
+            href="/balancer"
+            style={{ backgroundColor: "var(--color-primary)", color: "var(--color-background)" }}
+            className="px-6 py-2.5 font-bold rounded-md transition-all text-sm hover-glow inline-flex items-center gap-2"
+          >
+            <Zap className="w-4 h-4" />
+            Open the Team Balancer
+          </Link>
+          <Link
+            href="/stats"
+            className="px-6 py-2.5 font-bold rounded-md text-sm bg-[#2a3441]/60 backdrop-blur-sm text-[#c5c6c7] hover:bg-[#3d4855] border border-[#3d4855] transition-all inline-flex items-center gap-2"
+          >
+            <BarChart3 className="w-4 h-4" />
+            {monthName}&apos;s Stats
+          </Link>
+        </div>
+        <div className="flex flex-wrap items-center justify-center gap-3 mt-3">
+          <a
+            href={SERVERS_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="px-4 py-1.5 rounded-md text-xs font-medium text-[#8892a0] hover:text-[#66fcf1] border border-[#3d4855] hover:border-[#66fcf1]/50 transition-all inline-flex items-center gap-1.5"
+          >
+            <Server className="w-3.5 h-3.5" />
+            Browse Servers
+          </a>
+          <HomeProfileButton />
+        </div>
+      </section>
 
-              <div className="flex items-center gap-2">
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => {
-                          setCompetitiveMode(!competitiveMode)
-                          setBalanceOptions([])
-                          setCutPlayers([])
-                          if (!competitiveMode && selectedPlayers.length > 18) {
-                            setSelectedPlayers((prev) => prev.slice(0, 18))
-                          } else if (competitiveMode && selectedPlayers.length > 12) {
-                            setSelectedPlayers((prev) => prev.slice(0, 12))
-                          }
-                        }}
-                        className={`px-3 py-1.5 rounded-md text-sm transition-all font-medium flex items-center gap-1.5 ${
-                          competitiveMode
-                            ? "bg-[#f39c12] text-[#0b0c10] font-bold shadow-[0_0_10px_rgba(243,156,18,0.4)]"
-                            : "bg-[#2a3441]/60 backdrop-blur-sm text-[#c5c6c7] hover:bg-[#3d4855] border border-[#3d4855]"
-                        }`}
-                      >
-                        <Trophy className="w-4 h-4" />
-                        Competitive
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="bottom"
-                      className="bg-[#1f2833]/95 backdrop-blur-md border border-[#66fcf1]/30 text-[#c5c6c7] px-3 py-2 rounded-lg shadow-lg max-w-[250px] text-center"
-                    >
-                      <p>Expand queue size to 18 and balance the top 12 players</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <button
-                        onClick={() => setGlobalOffRole(!globalOffRole)}
-                        className={`px-3 py-1.5 rounded-md text-sm transition-all font-medium flex items-center gap-1.5 ${
-                          globalOffRole
-                            ? "bg-[#e74c3c] text-white font-bold shadow-[0_0_10px_rgba(231,76,60,0.4)]"
-                            : "bg-[#2a3441]/60 backdrop-blur-sm text-[#c5c6c7] hover:bg-[#3d4855] border border-[#3d4855]"
-                        }`}
-                      >
-                        <UserX className="w-4 h-4" />
-                        <span className="hidden md:inline">Off-Role</span>
-                      </button>
-                    </TooltipTrigger>
-                    <TooltipContent
-                      side="bottom"
-                      className="bg-[#1f2833]/95 backdrop-blur-md border border-[#66fcf1]/30 text-[#c5c6c7] px-3 py-2 rounded-lg shadow-lg max-w-[250px] text-center"
-                    >
-                      <p>Balances teams using only overall ranks, not role ranks</p>
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
-
-              </div>
-
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => handleRandomSelection(competitiveMode ? 18 : 12)}
-                  disabled={players.length < (competitiveMode ? 18 : 12)}
-                  className="px-3 py-1.5 bg-[#2a3441]/60 backdrop-blur-sm text-[#c5c6c7] rounded-md hover:bg-[#3d4855] disabled:opacity-40 disabled:cursor-not-allowed transition-all text-sm border border-[#3d4855]"
-                >
-                  <Shuffle className="w-4 h-4 inline mr-1" />
-                  <span className="hidden md:inline">Random {competitiveMode ? "18" : "12"}</span>
-                </button>
-                <button
-                  onClick={handleClearAll}
-                  disabled={selectedPlayers.length === 0}
-                  className={`px-3 py-1.5 rounded-md transition-all text-sm font-medium border border-[#3d4855] ${
-                    selectedPlayers.length === 0
-                      ? "bg-[#2a3441]/60 backdrop-blur-sm text-[#c5c6c7] opacity-40 cursor-not-allowed"
-                      : "bg-[#8b3a3a] text-white hover:bg-[#ff4757]"
-                  }`}
-                >
-                  <X className="w-4 h-4 inline mr-1" />
-                  <span className="hidden md:inline">Clear All</span>
-                </button>
-                <button
-                  onClick={handleBalance}
-                  disabled={
-                    competitiveMode
-                      ? selectedPlayers.length < 12 || selectedPlayers.length > 18
-                      : selectedPlayers.length !== 12
-                  }
-                  style={{
-                    backgroundColor: "var(--color-primary)",
-                    color: "var(--color-background)",
-                  }}
-                  className="px-4 md:px-6 py-1.5 font-bold rounded-md disabled:opacity-40 disabled:cursor-not-allowed transition-all text-sm hover-glow"
-                >
-                  <Zap className="w-4 h-4 inline mr-1" />
-                  <span className="hidden md:inline">BALANCE TEAMS</span>
-                  <span className="md:hidden">BALANCE</span>
-                </button>
-                {isAdmin && (
-                  <button
-                    onClick={handleBalanceByElo}
-                    disabled={selectedPlayers.length !== 12 || eloBalancing}
-                    style={{ backgroundColor: "#9b59b6", color: "#ffffff" }}
-                    className="px-4 md:px-6 py-1.5 font-bold rounded-md disabled:opacity-40 disabled:cursor-not-allowed transition-all text-sm hover-glow"
-                    title="Admin: balance the 12 selected players by this month's ELO"
-                  >
-                    <TrendingUp className="w-4 h-4 inline mr-1" />
-                    <span className="hidden md:inline">{eloBalancing ? "BALANCING…" : "BALANCE BY ELO"}</span>
-                    <span className="md:hidden">ELO</span>
-                  </button>
-                )}
-              </div>
-            </div>
-
-            <FilterPanel
-              searchQuery={searchQuery}
-              setSearchQuery={setSearchQuery}
-              roleFilter={roleFilter}
-              setRoleFilter={setRoleFilter}
-              micFilter={micFilter}
-              setMicFilter={setMicFilter}
-              eliteFilter={eliteFilter}
-              setEliteFilter={setEliteFilter}
-              players={players}
-              onSelectPlayer={handlePlayerToggle}
-              showDropdown={showSearchDropdown}
-              setShowDropdown={setShowSearchDropdown}
-            />
+      {/* ---------------------------------------------------------------- stat strip */}
+      <section className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-10">
+        <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
+          <div className="text-2xl font-extrabold text-white font-mono" style={{ fontFamily: "var(--font-orbitron)" }}>
+            {matchesThisMonth.length}
           </div>
+          <div className="mt-1 text-[10.5px] uppercase tracking-[0.08em] font-bold text-[#8892a0]">
+            Matches This Month
+          </div>
+        </div>
+        <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
+          <div
+            className="text-2xl font-extrabold font-mono"
+            style={{ fontFamily: "var(--font-orbitron)", color: "var(--color-primary)" }}
+          >
+            {crestsThisMonth.length}
+          </div>
+          <div className="mt-1 text-[10.5px] uppercase tracking-[0.08em] font-bold text-[#8892a0]">
+            Crests Unlocked
+          </div>
+        </div>
+        <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
+          <HomeStarTile />
+          <div className="mt-1 text-[10.5px] uppercase tracking-[0.08em] font-bold text-[#8892a0]">
+            Player of the Month
+          </div>
+        </div>
+        <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
+          <div className="text-2xl font-extrabold text-white font-mono" style={{ fontFamily: "var(--font-orbitron)" }}>
+            {killsThisMonth.toLocaleString()}
+          </div>
+          <div className="mt-1 text-[10.5px] uppercase tracking-[0.08em] font-bold text-[#8892a0]">
+            Kills This Month
+          </div>
+        </div>
+      </section>
 
-          {competitiveMode && selectedPlayers.length > 0 && (
-            <div className="bg-[#f39c12]/20 backdrop-blur-md border border-[#f39c12]/50 rounded-lg p-4 mb-6">
-              <div className="flex items-center gap-3">
-                <Trophy className="w-5 h-5" style={{ color: currentTheme === "bespin" ? "#5a3a1a" : "#f39c12" }} />
-                <div>
-                  <p className="font-bold" style={{ color: currentTheme === "bespin" ? "#5a3a1a" : "#f39c12" }}>
-                    Competitive Mode Active
-                  </p>
-                  <p className="text-sm" style={{ color: currentTheme === "bespin" ? "#5a3a1a" : "#c5c6c7" }}>
-                    Select 12-18 players. The best 12 will be chosen and balanced into teams.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* View toggle on the left, How It Works on the right. It sits on this
-              row rather than in the global nav or the sticky panel: it explains
-              this page specifically, but isn't a control for it. */}
-          <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-            <div
-              className="inline-flex rounded-lg border p-1"
-              style={{
-                backgroundColor: "var(--color-surface)",
-                borderColor: "var(--color-border)",
-              }}
+      {/* ---------------------------------------------------------------- activity + crests */}
+      <section className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-5 mb-10">
+        <div>
+          <h2
+            className="text-[13px] font-extrabold uppercase tracking-[0.16em] text-[#8892a0] mb-3"
+            style={{ fontFamily: "var(--font-orbitron)" }}
+          >
+            Recent Activity
+          </h2>
+          <div className="bg-[#151b24] border border-[#2a3542] rounded-lg overflow-hidden">
+            <HomeActivityFeed items={activityFeed} />
+          </div>
+        </div>
+        <div>
+          <div className="flex items-baseline justify-between mb-3">
+            <h2
+              className="text-[13px] font-extrabold uppercase tracking-[0.16em] text-[#8892a0]"
+              style={{ fontFamily: "var(--font-orbitron)" }}
             >
-              <button
-                onClick={() => setPlayerView("select")}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
-                  playerView === "select" ? "font-bold" : ""
-                }`}
-                style={
-                  playerView === "select"
-                    ? {
-                        backgroundColor: "var(--color-primary)",
-                        color: "var(--color-background)",
-                        boxShadow: "0 0 10px var(--color-primary-glow)",
-                      }
-                    : {
-                        backgroundColor: "transparent",
-                        color: "var(--color-text)",
-                      }
-                }
-              >
-                <Grid3x3 className="w-4 h-4" />
-                Player Cards
-              </button>
-              <button
-                onClick={() => setPlayerView("tierList")}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
-                  playerView === "tierList" ? "font-bold" : ""
-                }`}
-                style={
-                  playerView === "tierList"
-                    ? {
-                        backgroundColor: "var(--color-primary)",
-                        color: "var(--color-background)",
-                        boxShadow: "0 0 10px var(--color-primary-glow)",
-                      }
-                    : {
-                        backgroundColor: "transparent",
-                        color: "var(--color-text)",
-                      }
-                }
-              >
-                <Trophy className="w-4 h-4" />
-                Tier List
-              </button>
-            </div>
-
-            <Link
-              href="/how-it-works"
-              className="px-3 py-1.5 rounded-md text-sm transition-all font-medium flex items-center gap-1.5 bg-[#2a3441]/60 backdrop-blur-sm text-[#c5c6c7] hover:bg-[#3d4855] border border-[#3d4855]"
-            >
-              <HelpCircle className="w-4 h-4" />
-              How It Works
+              Latest Achievements
+            </h2>
+            <Link href="/achievements" className="text-xs font-bold" style={{ color: "var(--color-primary)" }}>
+              All achievements &rarr;
             </Link>
           </div>
+          <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
+            <HomeCrestGrid entries={ledger.recent.slice(0, CREST_GRID_SIZE)} />
+          </div>
+        </div>
+      </section>
 
-          {playerView === "select" ? (
-            <>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-8">
-                {filteredPlayers.map((player) => (
-                  <PlayerCard
-                    key={player.name}
-                    player={{
-                      ...player,
-                      disabledRoles: playerDisabledRoles.get(player.name) || [],
-                    }}
-                    isSelected={selectedPlayers.includes(player.name)}
-                    selectionNumber={selectedPlayers.indexOf(player.name) + 1 || undefined}
-                    onToggle={() => handlePlayerToggle(player.name)}
-                    currentTheme={currentTheme}
-                    onDisabledRolesChange={(disabledRoles) => handleDisabledRolesChange(player.name, disabledRoles)}
-                    winStats={playerStats[player.name]}
-                    badges={playerBadges[player.name]}
-                  />
-                ))}
-              </div>
-            </>
-          ) : (
-            <TierListView
-              players={players}
-              selectedPlayers={selectedPlayers}
-              onTogglePlayer={togglePlayer}
-              currentTheme={currentTheme}
-              searchQuery={searchQuery}
-                roleFilter={roleFilter}
-                micFilter={micFilter}
-                eliteFilter={eliteFilter}
-              />
-          )}
+      {/* ---------------------------------------------------------------- active players */}
+      <section className="mb-10">
+        <div className="flex items-baseline justify-between mb-3">
+          <h2
+            className="text-[13px] font-extrabold uppercase tracking-[0.16em] text-[#8892a0]"
+            style={{ fontFamily: "var(--font-orbitron)" }}
+          >
+            Active Players
+          </h2>
+          <Link href="/players" className="text-xs font-bold" style={{ color: "var(--color-primary)" }}>
+            Full player directory &rarr;
+          </Link>
+        </div>
+        <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
+          <HomeActivePlayers players={activePlayers} />
+        </div>
+      </section>
 
-          {balanceOptions.length > 0 && (
-            <>
-              <div ref={balanceOptionsRef} className="scroll-mt-52">
-                <BalanceOptions
-                  options={balanceOptions}
-                  selectedIndex={selectedOptionIndex}
-                  onSelect={setSelectedOptionIndex}
-                  players={players}
-                />
-              </div>
-
-              <TeamDisplay
-                result={balanceOptions[selectedOptionIndex].result}
-                players={players}
-                onCopy={handleCopyTeams}
-                onCopyAll={handleCopyAllOptions}
-                onSwapSides={handleSwapSides}
-              />
-            </>
-          )}
-
-          <BalanceHistory
-            history={balanceHistory}
-            players={players}
-            onRestore={handleRestoreFromHistory}
-            onClear={handleClearHistory}
-          />
-
-          <HelpFab />
+      {/* ---------------------------------------------------------------- tools */}
+      <section>
+        <h2
+          className="text-[13px] font-extrabold uppercase tracking-[0.16em] text-[#8892a0] mb-3"
+          style={{ fontFamily: "var(--font-orbitron)" }}
+        >
+          Tools
+        </h2>
+        <HomeToolsPanel />
+      </section>
     </div>
   )
 }
