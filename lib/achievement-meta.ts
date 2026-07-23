@@ -290,8 +290,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Base cleans in a single match",
     metric: { type: "matchMax", get: (s) => s.base_cleaner },
     ranks: [
-      { threshold: 50, rarity: "rare", title: "Janitor" },
-      { threshold: 80, rarity: "epic", title: "Base Protector" },
+      { threshold: 50, rarity: "common", title: "Janitor" },
+      { threshold: 80, rarity: "rare", title: "Base Protector" },
       { threshold: 100, rarity: "legendary", title: "Batcher" },
       { threshold: 140, rarity: "mythic", title: "Lord Batcher" },
     ],
@@ -355,7 +355,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "3+ blue-stance returns in a single match",
     metric: { type: "matchMax", get: (s) => s.blue_returns },
     threshold: 3,
-    rarity: "rare",
+    rarity: "epic",
   },
   {
     id: "kimbo-slice",
@@ -375,7 +375,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "10+ DBS returns in a single match",
     metric: { type: "matchMax", get: (s) => s.dbs_returns },
     threshold: 10,
-    rarity: "epic",
+    rarity: "legendary",
   },
   {
     // The scoreboard has no DOOM-RETURNS column, only DOOM-KILLS — so this counts
@@ -602,9 +602,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Career doom throws",
     metric: { type: "careerSum", get: (s) => s.doom_kills },
     ranks: [
-      { threshold: 10, rarity: "rare" },
-      { threshold: 25, rarity: "epic" },
-      { threshold: 100, rarity: "legendary", title: "MF DOOM" },
+      { threshold: 10, rarity: "epic" },
+      { threshold: 25, rarity: "legendary" },
+      { threshold: 100, rarity: "mythic", title: "MF DOOM" },
     ],
   },
   {
@@ -615,7 +615,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Career enemy mines grabbed",
     metric: { type: "careerSum", get: (s) => s.mine_grabs_red + s.mine_grabs_blue },
     ranks: [
-      { threshold: 100, rarity: "rare" },
+      { threshold: 100, rarity: "common" },
       { threshold: 1000, rarity: "epic", title: "Minewhore" },
       { threshold: 2500, rarity: "legendary", title: "Mine Dominatrix" },
     ],
