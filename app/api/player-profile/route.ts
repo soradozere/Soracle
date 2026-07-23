@@ -2,7 +2,8 @@ import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
-import { computePlayersDirectory } from "@/lib/achievements-server"
+import { computeAllPlayerAchievements } from "@/lib/achievements-server"
+import { scoreFromViews } from "@/lib/achievement-score"
 import { earnedTitles, mergeRecordedTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
 import { fetchRecordedTitles } from "@/lib/titles-server"
 
@@ -46,8 +47,13 @@ export async function POST(request: Request) {
     .filter((r: any) => monthMatchIds.has(r.match_id))
     .reduce((sum: number, r: any) => sum + (r.score ?? 0), 0)
 
-  const directory = await computePlayersDirectory()
-  const achievementScore = directory.find((p) => p.id === playerId)?.score ?? 0
+  // The player's earned crests drive both the title ladder (via Achievement Score)
+  // and the crest-gated profile themes — computed server-side so a crafted POST
+  // can't claim a theme/title the player hasn't actually earned.
+  const allAchievements = await computeAllPlayerAchievements()
+  const views = allAchievements.get(playerId)?.views ?? []
+  const achievementScore = scoreFromViews(views)
+  const earnedCrestRanks = new Map(views.filter((v) => v.earned).map((v) => [v.id, v.rank] as const))
 
   if (titleId) {
     const season = seasonFor(now.toISOString())
@@ -61,7 +67,7 @@ export async function POST(request: Request) {
   }
 
   if (themeId) {
-    const available = unlockedThemes(achievementScore)
+    const available = unlockedThemes(achievementScore, earnedCrestRanks)
     if (!available.includes(themeId as ThemeId)) {
       return NextResponse.json({ error: "Theme not unlocked" }, { status: 403 })
     }
