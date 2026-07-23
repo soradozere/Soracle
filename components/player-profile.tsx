@@ -630,11 +630,7 @@ function EditProfileDialog({
                     <SelectItem key={t.id} value={t.id} className={locked ? "opacity-70" : undefined}>
                       <span className="inline-block w-2.5 h-2.5 rounded-full mr-2" style={{ background: t.accent }} />
                       {t.label}
-                      {locked ? (
-                        <span className="text-[#8892a0] text-xs ml-2">🔒 locked</span>
-                      ) : (
-                        isPreviewTheme(t.id) && <span className="text-[#8892a0] text-xs ml-2">preview</span>
-                      )}
+                      {locked && <span className="text-[#8892a0] text-xs ml-2">🔒 locked</span>}
                     </SelectItem>
                   )
                 })}
@@ -828,6 +824,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
       root.dataset.profileTheme = activeTheme.id
       root.dataset.profileBg = activeTheme.background ?? "starfield"
       root.dataset.profileMode = activeTheme.mode ?? "dark"
+      // Image backgrounds pass their wallpaper url to the canvas renderer.
+      if (activeTheme.image) root.dataset.profileBgImage = activeTheme.image
+      else delete root.dataset.profileBgImage
     }
 
     return () => {
@@ -843,6 +842,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
         delete root.dataset.profileTheme
         delete root.dataset.profileBg
         delete root.dataset.profileMode
+        delete root.dataset.profileBgImage
       }
     }
   }, [activeTheme])
