@@ -19,7 +19,7 @@ import { History, BarChart3, Users } from "lucide-react"
 // specifically about the balancer, so it makes more sense docked to that panel
 // than sitting in the global nav.
 const NAV = [
-  { href: "/", label: "Team Balancer", icon: null },
+  { href: "/balancer", label: "Team Balancer", icon: null },
   { href: "/matches", label: "Match History", icon: History },
   { href: "/players", label: "Players", icon: Users },
   { href: "/stats", label: "Stats", icon: BarChart3 },
@@ -69,7 +69,10 @@ export function SiteHeader() {
               breakpoint would have to be re-guessed every time a nav item is
               added. */}
           <div className="flex flex-wrap items-center justify-between gap-4">
-            <div className="flex items-center gap-3 md:gap-4 min-w-0 flex-1 basis-[420px]">
+            <Link
+              href="/"
+              className="flex items-center gap-3 md:gap-4 min-w-0 flex-1 basis-[420px] hover:opacity-90 transition-opacity"
+            >
               <Image
                 src="/logo.png"
                 alt="JK2 Logo"
@@ -91,7 +94,7 @@ export function SiteHeader() {
                   Jedi Knight 2: Jedi Outcast • 6v6 Competitive • Also known as Soracle • With thanks to TomArrow
                 </p>
               </div>
-            </div>
+            </Link>
             {/* wrap + shrink-0: the masthead beside this is wide, so at mid
                 widths the nav has to fall to a second row rather than push the
                 page into a horizontal scroll. */}
