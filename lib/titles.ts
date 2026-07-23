@@ -1,4 +1,4 @@
-import type { Rarity } from "@/lib/achievement-meta"
+import { findAchievementDef, type Rarity } from "@/lib/achievement-meta"
 
 // The title catalogue. Titles are a progression axis of their own, sitting on top
 // of the crests rather than mirroring them: their conditions read off the
@@ -146,34 +146,176 @@ export interface LadderProgress {
 // they've climbed to. Deliberately reuses the rarity palette — the same green /
 // blue / purple / gold the crests and titles already use, so a gold profile
 // reads as "legendary" without needing a legend.
-export type ThemeId = "green" | "blue" | "purple" | "gold"
+export type ThemeId =
+  | "green"
+  | "blue"
+  | "purple"
+  | "gold"
+  | "sith"
+  | "void"
+  | "nebula"
+  | "mandalore"
+  | "hoth"
+  | "coruscant"
+  | "bespin"
+  | "geometry"
+  | "slicer"
+  | "hacker"
+
+// The animated backdrop a profile theme paints behind the page. "starfield" is
+// the default the app has always used; the rest are per-theme renderers in
+// components/background-particles.tsx, selected via data-profile-bg on the root.
+export type ProfileBackground =
+  | "starfield"
+  | "nebula"
+  | "voidhole"
+  | "embers"
+  | "snow"
+  | "city"
+  | "clouds"
+  | "shapes"
+  | "coderain"
+  | "hackerrain"
+
+// The full colour set a rich theme repaints the profile with — the same roles as
+// the site themes' CSS vars (--color-background, --color-surface, …). The accent
+// is carried separately on `accent`. Absent on the original accent-only themes,
+// which leave the profile's default dark slate untouched.
+export interface ThemePalette {
+  background: string
+  surface: string
+  surfaceElevated: string
+  border: string
+  text: string
+  textBright: string
+  textDim: string
+  // The text colour that sits ON the primary accent (e.g. the tier chip). Defaults
+  // to `background` (dark text on a bright accent) — light themes override it so
+  // the chip stays legible when their accent is dark.
+  onAccent?: string
+}
+
+// How a profile theme is unlocked: either an Achievement-Score tier (the original
+// four accent themes) or a specific crest earned to at least a given rank. `tier`
+// is 1-based to match AchievementView.rank (1 = first rank, 2 = second, …).
+export type UnlockCondition =
+  | { kind: "score"; tier: string } // a SCORE_LADDER tier id
+  | { kind: "crest"; crest: string; tier: number } // achievement id + minimum rank
 
 export interface ProfileTheme {
   id: ThemeId
   label: string
   accent: string
-  // The score tier that unlocks it — same thresholds as the title ladder.
-  unlockedBy: string
+  // What unlocks it. null = no unlock assigned yet (admin-preview only).
+  unlockedBy: UnlockCondition | null
+  // The animated background; defaults to "starfield" when omitted.
+  background?: ProfileBackground
+  // "light" flips the profile onto a light ground (extra remaps in globals.css).
+  // Defaults to "dark".
+  mode?: "light" | "dark"
+  // Present only for full-palette themes; accent-only themes omit it.
+  palette?: ThemePalette
 }
 
 export const THEMES: ProfileTheme[] = [
-  { id: "green", label: "Green", accent: "#3ddc84", unlockedBy: "decorated" },
-  { id: "blue", label: "Blue", accent: "#2f81f7", unlockedBy: "distinguished" },
-  { id: "purple", label: "Purple", accent: "#a855f7", unlockedBy: "illustrious" },
-  { id: "gold", label: "Gold", accent: "#f5c542", unlockedBy: "jk2-god" },
+  { id: "green", label: "Green", accent: "#3ddc84", unlockedBy: { kind: "score", tier: "decorated" } },
+  { id: "blue", label: "Blue", accent: "#2f81f7", unlockedBy: { kind: "score", tier: "distinguished" } },
+  { id: "purple", label: "Purple", accent: "#a855f7", unlockedBy: { kind: "score", tier: "illustrious" } },
+  { id: "gold", label: "Gold", accent: "#f5c542", unlockedBy: { kind: "score", tier: "jk2-god" } },
+
+  // Full-palette themes ported from the approved mockups. Each is unlocked by
+  // earning a thematically-fitting crest to a given rank (checked in unlockedThemes).
+  {
+    id: "sith", label: "Sith", accent: "#ff2d4b", unlockedBy: { kind: "crest", crest: "rambo", tier: 1 }, background: "starfield",
+    palette: { background: "#0f0002", surface: "#1c0407", surfaceElevated: "#2a060a", border: "#5c121c", text: "#ecd6d6", textBright: "#ffffff", textDim: "#a37d7d" },
+  },
+  {
+    id: "void", label: "Void", accent: "#f2f2f4", unlockedBy: { kind: "crest", crest: "shutout-specialist", tier: 1 }, background: "voidhole",
+    palette: { background: "#050506", surface: "#101012", surfaceElevated: "#191a1c", border: "#31333a", text: "#cdced4", textBright: "#ffffff", textDim: "#7d7f88" },
+  },
+  {
+    id: "nebula", label: "Nebula", accent: "#c06bff", unlockedBy: { kind: "crest", crest: "1500-club", tier: 1 }, background: "nebula",
+    palette: { background: "#08040f", surface: "#150b24", surfaceElevated: "#211436", border: "#3c2764", text: "#e7d6f2", textBright: "#ffffff", textDim: "#a493b6" },
+  },
+  {
+    id: "mandalore", label: "Mandalore", accent: "#ff7a2a", unlockedBy: { kind: "crest", crest: "bounty-hunter", tier: 1 }, background: "embers",
+    palette: { background: "#0c0e11", surface: "#151920", surfaceElevated: "#1f242d", border: "#353d49", text: "#d3dae2", textBright: "#ffffff", textDim: "#808a97" },
+  },
+  {
+    id: "hoth", label: "Hoth", accent: "#86e0ff", unlockedBy: { kind: "crest", crest: "marathon-runner", tier: 1 }, background: "snow",
+    palette: { background: "#0a1016", surface: "#121c25", surfaceElevated: "#1b2833", border: "#2d404f", text: "#d6e8f2", textBright: "#ffffff", textDim: "#8397a6" },
+  },
+  {
+    id: "coruscant", label: "Coruscant", accent: "#ffd24a", unlockedBy: { kind: "crest", crest: "veteran", tier: 1 }, background: "city",
+    palette: { background: "#060814", surface: "#0f1428", surfaceElevated: "#171d3a", border: "#2b3459", text: "#d8e0f2", textBright: "#ffffff", textDim: "#8792ad" },
+  },
+
+  // Light themes — they flip the profile onto a light ground, so they carry
+  // mode:"light" (extra remaps in globals.css) and an onAccent so the tier chip
+  // stays legible when the accent is dark.
+  {
+    id: "bespin", label: "Bespin", accent: "#bf5e2e", unlockedBy: { kind: "crest", crest: "giga-teammate", tier: 1 }, background: "clouds", mode: "light",
+    palette: { background: "#e9dfce", surface: "#f5efe3", surfaceElevated: "#fbf6ec", border: "#cdbfa4", text: "#2f2a22", textBright: "#17120c", textDim: "#6d6353", onAccent: "#fff6ea" },
+  },
+  {
+    id: "geometry", label: "Geometry", accent: "#111111", unlockedBy: { kind: "crest", crest: "doom", tier: 1 }, background: "shapes", mode: "light",
+    palette: { background: "#ececec", surface: "#ffffff", surfaceElevated: "#ffffff", border: "#111111", text: "#141414", textBright: "#000000", textDim: "#6c6c6c", onAccent: "#ffffff" },
+  },
+  {
+    id: "slicer", label: "Slicer", accent: "#00ff41", unlockedBy: { kind: "crest", crest: "nah-youre-hacking", tier: 1 }, background: "coderain",
+    palette: { background: "#030803", surface: "#071007", surfaceElevated: "#0b170b", border: "#124a20", text: "#7dffa4", textBright: "#d6ffe2", textDim: "#3f7d54", onAccent: "#021206" },
+  },
+  {
+    id: "hacker", label: "Hacker", accent: "#cf4bff", unlockedBy: { kind: "crest", crest: "nah-youre-hacking", tier: 2 }, background: "hackerrain",
+    palette: { background: "#0a0410", surface: "#150a22", surfaceElevated: "#1f1236", border: "#3d2168", text: "#e6c2ff", textBright: "#f7ecff", textDim: "#8a6bb0", onAccent: "#0a0410" },
+  },
 ]
+
+// The full-palette themes. Admins can equip any of these to preview one on a
+// profile regardless of whether that player has earned it (the editor offers them
+// all, and an equipped one always renders). Normal players unlock them the real
+// way — by earning the crest named in each theme's unlockedBy.
+export const PREVIEW_THEME_IDS: ThemeId[] = [
+  "sith", "void", "nebula", "mandalore", "hoth", "coruscant", "bespin", "geometry", "slicer", "hacker",
+]
+
+export const isPreviewTheme = (id: string | null | undefined): boolean =>
+  !!id && PREVIEW_THEME_IDS.includes(id as ThemeId)
 
 export const DEFAULT_ACCENT = "#66fcf1"
 
 export const themeById = (id: string | null | undefined): ProfileTheme | null =>
   THEMES.find((t) => t.id === id) ?? null
 
-// A theme is available once its tier's score threshold has been cleared.
-export function unlockedThemes(achievementScore: number): ThemeId[] {
+// The themes a player is entitled to, from their Achievement Score plus the ranks
+// they've earned per crest (id → highest earned rank, 1-based). A score theme needs
+// its ladder threshold cleared; a crest theme needs that crest earned to at least
+// its required rank.
+export function unlockedThemes(achievementScore: number, earnedCrestRanks: Map<string, number>): ThemeId[] {
   return THEMES.filter((t) => {
-    const tier = SCORE_LADDER.tiers.find((x) => x.id === t.unlockedBy)
-    return tier ? achievementScore >= tier.threshold : false
+    const c = t.unlockedBy
+    if (!c) return false
+    if (c.kind === "score") {
+      const tier = SCORE_LADDER.tiers.find((x) => x.id === c.tier)
+      return tier ? achievementScore >= tier.threshold : false
+    }
+    return (earnedCrestRanks.get(c.crest) ?? 0) >= c.tier
   }).map((t) => t.id)
+}
+
+// The name of the thing that unlocks a theme, for the "you need to earn X" notice
+// on a locked theme. Uses the specific rank's title where the crest is tiered
+// ("Community Stalwart", "Nah, You're DEFINITELY Hacking"), else the crest's own
+// title, or the score-ladder tier's title for the accent themes.
+export function unlockRequirementLabel(theme: ProfileTheme): string | null {
+  const c = theme.unlockedBy
+  if (!c) return null
+  if (c.kind === "score") {
+    return SCORE_LADDER.tiers.find((x) => x.id === c.tier)?.title ?? null
+  }
+  const def = findAchievementDef(c.crest)
+  if (!def) return null
+  return def.ranks?.[c.tier - 1]?.title ?? def.title
 }
 
 // ---------------------------------------------------------------------------

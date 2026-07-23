@@ -19,11 +19,14 @@ import { TitleProgression } from "@/components/title-progression"
 import {
   SCORE_LADDER,
   THEMES,
+  PREVIEW_THEME_IDS,
   earnedTitles,
+  isPreviewTheme,
   mergeRecordedTitles,
   seasonFor,
   themeById,
   unlockedThemes,
+  unlockRequirementLabel,
   type EarnedTitle,
   type ThemeId,
 } from "@/lib/titles"
@@ -31,6 +34,7 @@ import { scoreFromViews } from "@/lib/achievement-score"
 import { RARITY_META } from "@/lib/achievement-meta"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { createClient } from "@/lib/supabase/client"
+import { useToast } from "@/hooks/use-toast"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
@@ -404,6 +408,7 @@ function EditProfileDialog({
   const [fields, setFields] = useState<EditableFields>(initial)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const { toast } = useToast()
 
   // Password change is a separate sub-form with its own state and its own
   // submit — it doesn't ride along with Save, so a failed password change
@@ -591,20 +596,45 @@ function EditProfileDialog({
             <Label className="text-xs text-[#8892a0]">Profile theme</Label>
             <Select
               value={fields.profile_theme || "none"}
-              onValueChange={(v) => setFields((f) => ({ ...f, profile_theme: v === "none" ? "" : v }))}
+              onValueChange={(v) => {
+                if (v === "none") {
+                  setFields((f) => ({ ...f, profile_theme: "" }))
+                  return
+                }
+                // Locked themes stay clickable so selecting one explains how to
+                // unlock it; it doesn't equip, so the trigger keeps the current
+                // choice.
+                if (!themeOptions.includes(v as ThemeId)) {
+                  const theme = themeById(v)
+                  const req = theme ? unlockRequirementLabel(theme) : null
+                  toast({
+                    title: "Theme locked",
+                    description: req
+                      ? `You need to earn "${req}" to unlock this theme.`
+                      : "You haven't unlocked this theme yet.",
+                    duration: 4000,
+                  })
+                  return
+                }
+                setFields((f) => ({ ...f, profile_theme: v }))
+              }}
             >
               <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
-                <SelectValue placeholder="Default (cyan)" />
+                <SelectValue placeholder="No theme" />
               </SelectTrigger>
               <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
-                <SelectItem value="none">Default (cyan)</SelectItem>
+                <SelectItem value="none">No theme</SelectItem>
                 {THEMES.map((t) => {
                   const locked = !themeOptions.includes(t.id)
                   return (
-                    <SelectItem key={t.id} value={t.id} disabled={locked}>
+                    <SelectItem key={t.id} value={t.id} className={locked ? "opacity-70" : undefined}>
                       <span className="inline-block w-2.5 h-2.5 rounded-full mr-2" style={{ background: t.accent }} />
                       {t.label}
-                      {locked && <span className="text-[#8892a0] text-xs ml-2">locked</span>}
+                      {locked ? (
+                        <span className="text-[#8892a0] text-xs ml-2">🔒 locked</span>
+                      ) : (
+                        isPreviewTheme(t.id) && <span className="text-[#8892a0] text-xs ml-2">preview</span>
+                      )}
                     </SelectItem>
                   )
                 })}
@@ -739,14 +769,27 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
     ? mergeRecordedTitles(earnedTitles(achievementScore, monthScore, season), data.recordedTitles)
     : []
   const equippedTitle = fields.title ? earned.find((t) => t.id === fields.title) ?? null : null
-  const availableThemes = data ? unlockedThemes(achievementScore) : []
+  // Highest earned rank per crest (id → rank, 1-based), for the crest-gated themes.
+  const earnedCrestRanks = new Map(
+    (data?.achievements ?? []).filter((v) => v.earned).map((v) => [v.id, v.rank] as const),
+  )
+  const availableThemes = data ? unlockedThemes(achievementScore, earnedCrestRanks) : []
+  // Admins can preview the not-yet-unlocked full-palette themes; regular owners
+  // only ever see what they've actually unlocked. The admin save path writes
+  // straight to the players table, so this list is the whole availability story.
+  const editorThemeOptions: ThemeId[] = isAdmin ? [...availableThemes, ...PREVIEW_THEME_IDS] : availableThemes
   const theme = themeById(fields.profile_theme)
-  const activeTheme = theme && availableThemes.includes(theme.id) ? theme : null
+  // Preview themes render whenever equipped (only an admin could have set one);
+  // the unlockable ones still re-validate against this player's entitlement.
+  const activeTheme = theme && (availableThemes.includes(theme.id) || isPreviewTheme(theme.id)) ? theme : null
 
   // Recolour the whole page — chrome AND starfield — by writing the accent vars
   // to the document root. It has to be the root, not a wrapper: tooltips and the
   // edit dialog render through portals outside this subtree, and
   // BackgroundParticles watches --color-primary there (via MutationObserver).
+  // Full-palette themes additionally repaint the base colour vars and flip on the
+  // data-profile-theme override layer (globals.css) plus the data-profile-bg
+  // background renderer; accent-only themes leave those untouched.
   useEffect(() => {
     if (!activeTheme) return
     const root = document.documentElement
@@ -760,10 +803,47 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
       ["--pa80", "cc"],
     ]
     for (const [k, a] of alphas) root.style.setProperty(k, activeTheme.accent + a)
+
+    // Full palette: repaint the base colour vars, saving prior values so the page
+    // cleanly reverts when the theme is cleared or the viewer navigates away.
+    const paletteVars: [string, string][] = []
+    const prevPalette = new Map<string, string>()
+    if (activeTheme.palette) {
+      const p = activeTheme.palette
+      paletteVars.push(
+        ["--color-background", p.background],
+        ["--color-surface", p.surface],
+        ["--color-surface-elevated", p.surfaceElevated],
+        ["--color-border", p.border],
+        ["--color-text", p.text],
+        ["--color-text-bright", p.textBright],
+        ["--color-text-dim", p.textDim],
+        // Text that sits on the accent (tier chip). Dark themes: the dark base.
+        ["--color-on-accent", p.onAccent ?? p.background],
+      )
+      for (const [k, v] of paletteVars) {
+        prevPalette.set(k, root.style.getPropertyValue(k))
+        root.style.setProperty(k, v)
+      }
+      root.dataset.profileTheme = activeTheme.id
+      root.dataset.profileBg = activeTheme.background ?? "starfield"
+      root.dataset.profileMode = activeTheme.mode ?? "dark"
+    }
+
     return () => {
       if (prevPrimary) root.style.setProperty("--color-primary", prevPrimary)
       else root.style.removeProperty("--color-primary")
       for (const [k] of alphas) root.style.removeProperty(k)
+      for (const [k] of paletteVars) {
+        const prev = prevPalette.get(k)
+        if (prev) root.style.setProperty(k, prev)
+        else root.style.removeProperty(k)
+      }
+      if (activeTheme.palette) {
+        delete root.dataset.profileTheme
+        delete root.dataset.profileBg
+        delete root.dataset.profileMode
+      }
     }
   }, [activeTheme])
 
@@ -1176,7 +1256,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
           playerName={player.name}
           initial={fields}
           titleOptions={earned}
-          themeOptions={availableThemes}
+          themeOptions={editorThemeOptions}
           canEditTooltip={isAdmin}
           canChangePassword={isOwner}
           onSaved={setFields}
