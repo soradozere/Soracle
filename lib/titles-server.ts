@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Rarity } from "@/lib/achievement-meta"
 import { SEASONS, progressFor, catalogueTitleById, type RecordedTitle } from "@/lib/titles"
+import { createAnonClient } from "@/lib/supabase/anon"
 
 // Recording earned seasonal titles.
 //
@@ -141,6 +142,27 @@ export async function resolveEquippedTitle(
   const rec = recorded.find((t) => t.titleId === titleId)
   if (rec) return { title: rec.title, rarity: rec.rarity, source: rec.seasonName }
   return catalogueTitleById(titleId)
+}
+
+/**
+ * Batched resolveEquippedTitle for a set of players — one query for their
+ * equipped title ids off the players table, then the same per-player recorded-
+ * title lookup resolveEquippedTitle does. Public data (select-all RLS), so this
+ * builds its own anon client rather than asking the caller for one.
+ */
+export async function resolveEquippedTitles(
+  playerIds: string[],
+): Promise<Map<string, { title: string; rarity: Rarity; source: string } | null>> {
+  const results = new Map<string, { title: string; rarity: Rarity; source: string } | null>()
+  if (!playerIds.length) return results
+  const supabase = createAnonClient()
+  const { data } = await supabase.from("players").select("id, title").in("id", playerIds)
+  await Promise.all(
+    ((data ?? []) as { id: string; title: string | null }[]).map(async (p) => {
+      results.set(p.id, await resolveEquippedTitle(supabase, p.id, p.title))
+    }),
+  )
+  return results
 }
 
 /** A player's recorded titles, newest first. Public data (select-all RLS). */
