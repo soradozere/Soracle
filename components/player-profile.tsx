@@ -828,6 +828,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
       root.dataset.profileTheme = activeTheme.id
       root.dataset.profileBg = activeTheme.background ?? "starfield"
       root.dataset.profileMode = activeTheme.mode ?? "dark"
+      // Image backgrounds pass their wallpaper url to the canvas renderer.
+      if (activeTheme.image) root.dataset.profileBgImage = activeTheme.image
+      else delete root.dataset.profileBgImage
     }
 
     return () => {
@@ -843,6 +846,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
         delete root.dataset.profileTheme
         delete root.dataset.profileBg
         delete root.dataset.profileMode
+        delete root.dataset.profileBgImage
       }
     }
   }, [activeTheme])

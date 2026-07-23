@@ -261,6 +261,22 @@
   html[data-profile-theme] [class*="text-[#66fcf1]"] {
     color: var(--color-primary) !important;
   }
+  /* shadcn <Button>/<Dialog> compile bg-primary / bg-background to the literal
+     Jedi hexes (via @theme inline), so the theme's runtime vars never reach them —
+     and their companion text-*-foreground tokens were never registered, leaving the
+     label to merely inherit --color-text. Under a theme that strands e.g. the outline
+     buttons on the hardcoded dark base while their inherited text flips to the theme's
+     (now clashing) colour, so the label vanishes. Remap fill AND text so every button
+     stays legible on any palette: primary → accent + on-accent, outline/panel → base
+     + text. */
+  html[data-profile-theme] .bg-primary {
+    background-color: var(--color-primary) !important;
+    color: var(--color-on-accent, var(--color-background)) !important;
+  }
+  html[data-profile-theme] .bg-background {
+    background-color: var(--color-background) !important;
+    color: var(--color-text) !important;
+  }
 }
 
 @layer utilities {
