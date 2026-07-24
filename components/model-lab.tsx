@@ -6,6 +6,7 @@ import { Boxes, Monitor, Pause, Play, RotateCw, Smartphone } from "lucide-react"
 import { usePrefersReducedMotion } from "@/components/model-viewer"
 import { useModelUrl } from "@/hooks/use-model-url"
 import { PLAYER_MODELS } from "@/lib/player-models"
+import { SABER_COLOURS } from "@/lib/saber-colours"
 
 // The canvas is client-only: WebGL can't prerender, and r3f's reconciler throws
 // if it runs during SSR. This file is already a client component, so `ssr: false`
@@ -50,6 +51,7 @@ export function ModelLab() {
   const [autoRotate, setAutoRotate] = useState(true)
   const [paused, setPaused] = useState(false)
   const [viewport, setViewport] = useState<ViewportKey>("desktop")
+  const [saber, setSaber] = useState<string | null>("blue")
 
   const reducedMotion = usePrefersReducedMotion()
   const model = LAB_MODELS.find((m) => m.id === modelId) ?? LAB_MODELS[0]
@@ -92,6 +94,7 @@ export function ModelLab() {
               animation={clip}
               autoRotate={autoRotate}
               paused={effectivePaused}
+              saber={saber}
               onClipsLoaded={handleClips}
               onFps={handleFps}
               className="w-full h-full"
@@ -160,6 +163,20 @@ export function ModelLab() {
           {clips.map((name) => (
             <button key={name} onClick={() => setClip(name)} className={controlClass(clip === name)}>
               {name}
+            </button>
+          ))}
+
+          <button onClick={() => setSaber(null)} className={controlClass(saber === null)}>
+            No saber
+          </button>
+          {SABER_COLOURS.map((colour) => (
+            <button
+              key={colour.id}
+              onClick={() => setSaber(colour.id)}
+              className={controlClass(saber === colour.id)}
+            >
+              <span className="w-3 h-3 rounded-full" style={{ background: colour.glow }} />
+              {colour.label}
             </button>
           ))}
         </div>
