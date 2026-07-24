@@ -1,6 +1,9 @@
 "use client"
 
 import dynamic from "next/dynamic"
+import { useEffect, useState } from "react"
+import { RotateCw, Zap } from "lucide-react"
+import { usePrefersReducedMotion } from "@/components/model-viewer"
 import { useModelUrl } from "@/hooks/use-model-url"
 import { findPlayerModel } from "@/lib/player-models"
 
@@ -28,29 +31,87 @@ const ModelViewer = dynamic(() => import("@/components/model-viewer").then((m) =
  */
 export function ProfileModelFigure({
   modelId,
-  // Sized to match the 3x3 stat block beside it, so the figure reads as a full
-  // occupant of the panel rather than a thumbnail parked in the corner. Centred
-  // when it stacks underneath on narrow screens.
-  className = "w-full max-w-[300px] h-[340px] shrink-0 mx-auto lg:mx-0 lg:w-[300px]",
+  // Tall enough for a full-height figure, since the viewer's zoomed-out framing
+  // fills the canvas exactly. Centred when it stacks underneath on narrow
+  // screens. The narrow-screen cap has to be lifted at lg or it would win over
+  // the wider desktop width.
+  className = "w-full max-w-[300px] h-[420px] shrink-0 mx-auto lg:mx-0 lg:max-w-none lg:w-[380px]",
 }: {
   modelId: string | null | undefined
   className?: string
 }) {
   const model = findPlayerModel(modelId)
   const { url, error } = useModelUrl(model?.id)
+  const reducedMotion = usePrefersReducedMotion()
+  const [spin, setSpin] = useState(true)
+  const [actionTrigger, setActionTrigger] = useState(0)
+
+  // Stop the idle spin for anyone who has asked the OS for less movement. Left
+  // as a toggle rather than a hard block so they can still opt back in.
+  useEffect(() => {
+    if (reducedMotion) setSpin(false)
+  }, [reducedMotion])
 
   if (!model) return null
 
   return (
-    <div className={`${className} relative`} title={`${model.label} — drag to turn, scroll to zoom`}>
-      {url ? (
-        <ModelViewer src={url} autoRotate className="w-full h-full" />
-      ) : error ? (
-        <FigureShell muted />
-      ) : (
-        <FigureShell />
+    <div className={`${className} relative group/model`}>
+      <div className="w-full h-full" title={`${model.label} — drag to turn, scroll to zoom`}>
+        {url ? (
+          <ModelViewer src={url} autoRotate={spin} actionTrigger={actionTrigger} className="w-full h-full" />
+        ) : error ? (
+          <FigureShell muted />
+        ) : (
+          <FigureShell />
+        )}
+      </div>
+
+      {/* Kept deliberately tiny and low-contrast: the model is the subject, and
+          this sits inside a stats panel rather than a media player. */}
+      {url && (
+        <div className="absolute bottom-0 left-0 flex gap-1">
+          <ModelButton
+            label={spin ? "Stop rotating" : "Rotate automatically"}
+            active={spin}
+            onClick={() => setSpin((on) => !on)}
+          >
+            <RotateCw className="w-3 h-3" />
+          </ModelButton>
+          <ModelButton label="Play an action" onClick={() => setActionTrigger((n) => n + 1)}>
+            <Zap className="w-3 h-3" />
+          </ModelButton>
+        </div>
       )}
     </div>
+  )
+}
+
+function ModelButton({
+  label,
+  active,
+  onClick,
+  children,
+}: {
+  label: string
+  active?: boolean
+  onClick: () => void
+  children: React.ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      aria-pressed={active}
+      className={`w-6 h-6 rounded border flex items-center justify-center transition-colors ${
+        active
+          ? "border-[var(--pa60,#66fcf199)] text-[var(--pa,#66fcf1)] bg-[var(--pa10,#66fcf11a)]"
+          : "border-[#3d4855] text-[#8892a0] hover:text-[#c5c6c7] hover:border-[#5a6673]"
+      }`}
+    >
+      {children}
+    </button>
   )
 }
 
