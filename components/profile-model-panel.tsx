@@ -12,31 +12,36 @@ const ModelViewer = dynamic(() => import("@/components/model-viewer").then((m) =
 })
 
 /**
- * The player's JK2 model, standing in the profile header where the avatar tile
- * would otherwise be.
+ * The player's JK2 model, standing alongside their current-month stats.
  *
- * Deliberately unboxed — no card, no border, no background. It reads as a figure
- * standing on the page rather than a widget embedded in it, which is the whole
- * point; in a bordered panel a vertical character in a wide box just looks small
- * and stranded.
+ * Deliberately unboxed — no card, no border, no background. It shares the This
+ * Month panel with the stats rather than occupying one of its own, so the model
+ * fills otherwise-empty space instead of adding height to the page. A panel of
+ * its own left a lot of dead air, and putting it in the header pushed the whole
+ * profile down.
  *
- * Portrait aspect for the same reason: the canvas is tall and narrow so the
- * figure fills it, instead of being letterboxed by a wide container.
+ * Portrait aspect: the canvas is tall and narrow so a standing figure fills it,
+ * instead of being letterboxed by a wide container.
  *
  * Renders nothing when no model is set or the stored id isn't in the catalogue,
- * so retiring a model degrades quietly and the caller falls back to the avatar.
+ * so retiring a model degrades quietly and the layout just closes up.
  */
-export function ProfileModelFigure({ modelId }: { modelId: string | null | undefined }) {
+export function ProfileModelFigure({
+  modelId,
+  // Centred when it stacks under the stats on narrow screens, flush right when
+  // it sits beside them.
+  className = "w-52 h-64 shrink-0 mx-auto lg:mx-0",
+}: {
+  modelId: string | null | undefined
+  className?: string
+}) {
   const model = findPlayerModel(modelId)
   const { url, error } = useModelUrl(model?.id)
 
   if (!model) return null
 
   return (
-    <div
-      className="w-full sm:w-44 h-64 sm:h-72 shrink-0 relative"
-      title={`${model.label} — drag to turn, scroll to zoom`}
-    >
+    <div className={`${className} relative`} title={`${model.label} — drag to turn, scroll to zoom`}>
       {url ? (
         <ModelViewer src={url} autoRotate className="w-full h-full" />
       ) : error ? (
