@@ -17,11 +17,14 @@ const TARGET_HEIGHT = 2
 // centre. Interpolating it means far = whole figure centred, close = head and
 // shoulders, which is what you actually want from a portrait.
 const FAR_TARGET_Y = TARGET_HEIGHT * 0.5 // mid-body: whole figure sits centred
-const NEAR_TARGET_Y = TARGET_HEIGHT * 0.82 // shoulder line
-const MIN_DISTANCE = TARGET_HEIGHT * 0.38 // head-and-shoulders
-const MAX_DISTANCE = TARGET_HEIGHT * 1.9 // whole figure with a little air
-const CAMERA_Y = TARGET_HEIGHT * 0.6
-const CAMERA_Z = TARGET_HEIGHT * 1.65 // default: whole figure, feet clear of the edge
+const NEAR_TARGET_Y = TARGET_HEIGHT * 0.92 // the face
+const MIN_DISTANCE = TARGET_HEIGHT * 0.22 // close enough to read an expression
+const MAX_DISTANCE = TARGET_HEIGHT * 1.6
+const CAMERA_Y = TARGET_HEIGHT * 0.56
+// Default sits close enough that the figure nearly fills the canvas height —
+// vertical FOV is 40°, so visible height is 2·d·tan(20°) ≈ 0.728·d, and the
+// model is normalised to TARGET_HEIGHT.
+const CAMERA_Z = TARGET_HEIGHT * 1.42
 
 // Vertical orbit is locked to the camera's starting elevation: players get to
 // spin the model and zoom, but can't tumble it upside down or stare at the
@@ -86,16 +89,23 @@ function FpsMeter({ onFps }: { onFps?: (fps: number) => void }) {
  */
 function ZoomAwareTarget() {
   const controls = useThree((s) => s.controls) as { getDistance?: () => number; target?: Vector3 } | null
+  const camera = useThree((s) => s.camera)
 
   useFrame(() => {
     if (!controls?.getDistance || !controls.target) return
     // 0 at closest, 1 at furthest.
-    const t = MathUtils.clamp(
-      (controls.getDistance() - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE),
-      0,
-      1,
-    )
-    controls.target.y = MathUtils.lerp(NEAR_TARGET_Y, FAR_TARGET_Y, t)
+    const t = MathUtils.clamp((controls.getDistance() - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0, 1)
+    const desiredY = MathUtils.lerp(NEAR_TARGET_Y, FAR_TARGET_Y, t)
+    const delta = desiredY - controls.target.y
+    if (Math.abs(delta) < 1e-4) return
+
+    // Move the CAMERA by the same delta, not just the target. Shifting the
+    // target alone changes the camera→target vector, and because the polar
+    // angle is pinned, OrbitControls then swings the camera to re-satisfy the
+    // angle — which feeds back into the distance and throws the model out of
+    // frame entirely. Panning both keeps the spherical coordinates untouched.
+    controls.target.y += delta
+    camera.position.y += delta
   })
 
   return null

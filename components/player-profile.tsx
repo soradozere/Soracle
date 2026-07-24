@@ -126,9 +126,9 @@ function StatTile({ label, value, hint }: { label: string; value: string | numbe
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="bg-[#0b0c10]/60 border border-[#3d4855] rounded-lg p-3 text-center cursor-default">
-          <div className="text-xl font-bold font-mono text-[#c5c6c7]">{value}</div>
-          <div className="text-[10px] uppercase tracking-wider text-[#8892a0] mt-1">{label}</div>
+        <div className="bg-[#0b0c10]/60 border border-[#3d4855] rounded-lg p-2 text-center cursor-default">
+          <div className="text-lg font-bold font-mono text-[#c5c6c7]">{value}</div>
+          <div className="text-[10px] uppercase tracking-wider text-[#8892a0] mt-0.5">{label}</div>
         </div>
       </TooltipTrigger>
       <TooltipContent className="bg-[#1f2833] border border-[var(--pa30,#66fcf14d)] text-[#c5c6c7] text-xs max-w-56">
@@ -1018,9 +1018,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                   </div>
                   {data.currentMonth.stats ? (
                     <>
-                      {/* 5 across rather than 9: two shorter rows leave room for
-                          the model beside them instead of one wide strip. */}
-                      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
+                      {/* 3 across: nine tiles form a compact 3x3 block, which
+                          leaves a tall gap beside it for the model to stand in. */}
+                      <div className="grid grid-cols-3 gap-2">
                         <StatTile label="Caps" value={data.currentMonth.stats.captures} hint="Flag captures this month" />
                         <StatTile label="Returns" value={data.currentMonth.stats.returns} hint="Flag returns this month" />
                         <StatTile label="Assists" value={data.currentMonth.stats.assists} hint="Capture assists this month" />
