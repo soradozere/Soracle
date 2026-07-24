@@ -1,12 +1,22 @@
 "use client"
 
-import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import {
+  Suspense,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react"
 import { Canvas, createPortal, useFrame, useThree } from "@react-three/fiber"
 import { ContactShadows, OrbitControls, useAnimations, useGLTF } from "@react-three/drei"
 import {
   Box3,
   LoopOnce,
   MathUtils,
+  Matrix4,
   MeshStandardMaterial,
   Vector3,
   type AnimationAction,
@@ -16,7 +26,7 @@ import {
   type SkinnedMesh,
 } from "three"
 import { Saber } from "@/components/saber"
-import { findSaberColour, type SaberColour } from "@/lib/saber-colours"
+import { findSaberColour } from "@/lib/saber-colours"
 
 /** Every model is rescaled to this height in world units, so one camera fits all. */
 const TARGET_HEIGHT = 2
@@ -74,19 +84,14 @@ const HEAD_BONES = ["face", "cranium", "head"]
 const NECK_BONES = ["cervical", "neck"]
 /** Joints that sit on a humanoid's centre line, whatever it's doing with its limbs. */
 const HIP_BONES = ["pelvis", "hips", "lower_lumbar"]
-/** Where a weapon hangs. JK2 rigs the right hand as `rhand`. */
-const HAND_BONES = ["rhand", "r_hand", "rhang_tag_bone"]
 
-// How the saber sits in the fist. JK2's bones have no axis convention worth
-// deriving from — the hand's local +Y points back down the arm, so the blade
-// starts out growing towards the floor — and these were found by eye against the
-// idle. Euler XYZ in radians; the offset is in normalised model units.
-//
-// The PI flips the blade to point out of the fist rather than into it. The extra
-// 0.3 tips it away from the body: dead vertical, the blade crosses his chest and
-// face, which both looks wrong and hides the model the panel is there to show.
-const SABER_ROTATION: [number, number, number] = [Math.PI + 0.3, 0, 0]
-const SABER_OFFSET: [number, number, number] = [0, 0, 0]
+/**
+ * Prefix on the attachment points baked into a converted model by
+ * scripts/glm-bolts.mjs — `bolt_r_hand`, `bolt_back`, `bolt_hip_bl` and so on.
+ */
+const BOLT_PREFIX = "bolt_"
+/** JK2 bolts the in-hand saber to `*r_hand`, not to the hand joint itself. */
+const SABER_BOLT = "r_hand"
 
 // Client-only animated glTF viewer. Everything here runs in the browser — the
 // page that renders it dynamic-imports with `ssr: false`, because WebGL has no
@@ -118,20 +123,17 @@ export type ModelViewerProps = {
   className?: string
 }
 
-/** Where the model ended up once normalised, so the camera and props can use it. */
-type ModelFit = {
-  nearTargetY: number
-  /** The bone a weapon hangs off, or null if this model has no recognisable hand. */
-  hand: Object3D | null
-  /**
-   * The hand bone's world scale. Anything parented to the bone inherits it, so a
-   * prop has to divide it back out to be sized in normalised units rather than
-   * whatever the model was exported in.
-   */
-  handScale: number
-}
-
-/** How far the mesh overhangs the skeleton, vertically, measured at bind pose. */
+/**
+ * How far the mesh overhangs the skeleton vertically — the scalp above the
+ * cranium, the soles below the ankles — as a FRACTION of the skeleton's own
+ * height.
+ *
+ * Dimensionless on purpose. A converted model can easily carry two scales that
+ * disagree (ours has bone translations in raw Quake units and mesh vertices at a
+ * tenth of that, reconciled by a 0.1 on the root), and any overhang stored in
+ * absolute units is then only correct in whichever of the two spaces it was
+ * measured in. A ratio is correct in both.
+ */
 type MeshOverhang = { top: number; bottom: number }
 
 /**
@@ -227,49 +229,65 @@ function resetForMeasurement(wrapper: Group) {
 }
 
 /**
- * Measures, at the bind pose, how far the mesh reaches beyond the outermost
- * joints — the scalp above the cranium, the soles below the ankles.
+ * Measures how far the mesh reaches beyond the outermost joints, reading only
+ * data that came out of the file and cannot change.
  *
- * The skeleton is rigid, so that overhang carries across poses, which lets the
- * fit below work off joint positions alone. That matters because joints are
- * ordinary Object3Ds we can read at any time, whereas the skinned mesh bounds
- * are only trustworthy here, before anything has been animated or drawn.
+ * Every scaling bug this viewer has had traces back to one thing: asking for the
+ * bounds of a SkinnedMesh. `Box3.setFromObject` runs
+ * `SkinnedMesh.computeBoundingBox()`, which poses each vertex through
+ * `skeleton.boneMatrices` — an array three only fills during a render. Measured
+ * outside a render it reports whatever the last draw left behind, and instrumenting
+ * it showed the same model returning heights of 0.672, 0.246 and 0.401 on three
+ * consecutive calls in a single page load while the skeleton underneath it never
+ * moved. Priming the array by hand doesn't fix it, and neither does forcing the
+ * bind pose first: `skeleton.pose()` rebuilds each root bone's local matrix from
+ * its inverse bind matrix, which folds any ancestor transform (here, a 0.1 on the
+ * root) into the bone itself and shrinks the whole rig tenfold.
+ *
+ * So neither input here is posed. Vertex bounds come from the geometry, which is
+ * the glTF POSITION accessor's own min/max. Joint positions come from inverting
+ * the inverse bind matrices. glTF guarantees those two share a coordinate space —
+ * an inverse bind matrix is defined as mapping *that* mesh space into joint space
+ * — so they are directly comparable, and both are fixed the moment the file loads.
  */
-function measureOverhang(wrapper: Group, scene: Group, bones: Object3D[]): MeshOverhang {
-  // Force the bind pose first. This function's whole premise is that it's
-  // measuring an unposed model, and that is NOT guaranteed: drei's useGLTF hands
-  // back one shared, mutated scene per URL, so a remount — a sibling suspending,
-  // Fast Refresh, revisiting a profile — arrives with the bones wherever the
-  // animation left them. Measured in that state the overhang is nonsense and the
-  // model renders at a fraction of its size. skeleton.pose() makes it
-  // deterministic; the mixer re-poses on the next frame regardless.
-  for (const bone of bones) bone.parent?.updateMatrixWorld(true)
-  scene.traverse((obj) => {
-    const skinned = obj as SkinnedMesh
-    if (skinned.isSkinnedMesh) skinned.skeleton.pose()
-  })
+function measureOverhang(scene: Group): MeshOverhang {
+  const mesh = new Box3()
+  const joints = new Box3()
+  const point = new Vector3()
+  const matrix = new Matrix4()
 
-  resetForMeasurement(wrapper)
-
-  // SkinnedMesh.computeBoundingBox() — which Box3.setFromObject calls for us —
-  // poses every vertex through skeleton.boneMatrices, and three only fills that
-  // array during a render, so prime it by hand and drop any cached box.
   scene.traverse((obj) => {
     const skinned = obj as SkinnedMesh
     if (!skinned.isSkinnedMesh) return
-    skinned.skeleton.update()
-    // three's types say these are non-null, but the class initialises them to
-    // null and treats null as "recompute on next use", which is what we want.
-    const cache = skinned as unknown as { boundingBox: unknown; boundingSphere: unknown }
-    cache.boundingBox = null
-    cache.boundingSphere = null
+
+    // GLTFLoader seeds this from the accessor's declared min/max. The fallback
+    // is for models that arrive without it, and computes the same thing from the
+    // raw position attribute — which is bind-pose data either way, never posed.
+    const { geometry } = skinned
+    if (!geometry.boundingBox) geometry.computeBoundingBox()
+    if (geometry.boundingBox) mesh.union(geometry.boundingBox)
+
+    for (const inverse of skinned.skeleton.boneInverses) {
+      joints.expandByPoint(point.setFromMatrixPosition(matrix.copy(inverse).invert()))
+    }
   })
 
-  const mesh = new Box3().setFromObject(wrapper)
-  const joints = skeletonBox(bones)
-  if (mesh.isEmpty() || joints.isEmpty()) return { top: 0, bottom: 0 }
+  const height = joints.max.y - joints.min.y
+  if (mesh.isEmpty() || joints.isEmpty() || height < 1e-6) return { top: 0, bottom: 0 }
 
-  return { top: mesh.max.y - joints.max.y, bottom: joints.min.y - mesh.min.y }
+  return {
+    top: (mesh.max.y - joints.max.y) / height,
+    bottom: (joints.min.y - mesh.min.y) / height,
+  }
+}
+
+/** Every attachment point baked into the model, keyed by its JK2 tag name. */
+function collectBolts(scene: Group): Map<string, Object3D> {
+  const bolts = new Map<string, Object3D>()
+  scene.traverse((obj) => {
+    if (obj.name.startsWith(BOLT_PREFIX)) bolts.set(obj.name.slice(BOLT_PREFIX.length), obj)
+  })
+  return bolts
 }
 
 /**
@@ -281,12 +299,16 @@ function measureOverhang(wrapper: Group, scene: Group, bones: Object3D[]): MeshO
  * floor and leaves a third of the canvas empty above his head. Applied
  * imperatively because it has to run against live world matrices.
  */
-function fitModel(wrapper: Group, scene: Group, bones: Object3D[], overhang: MeshOverhang): ModelFit {
+function fitModel(wrapper: Group, scene: Group, bones: Object3D[], overhang: MeshOverhang): number {
   resetForMeasurement(wrapper)
 
   const joints = skeletonBox(bones)
-  const top = joints.max.y + overhang.top
-  const bottom = joints.min.y - overhang.bottom
+  // Scale the overhang back up against the skeleton we can actually see. The
+  // ratio was taken at bind pose; applying it to the live joint box is what
+  // makes it independent of the space the model happens to be measured in.
+  const jointHeight = joints.max.y - joints.min.y
+  const top = joints.max.y + overhang.top * jointHeight
+  const bottom = joints.min.y - overhang.bottom * jointHeight
   const axis = bodyAxis(scene) ?? joints.getCenter(new Vector3())
 
   // Without this the camera framing would depend entirely on the exporter's
@@ -306,20 +328,14 @@ function fitModel(wrapper: Group, scene: Group, bones: Object3D[], overhang: Mes
   // a standing figure is the top of the normalised box. Aiming straight at the
   // head joint isn't enough — on Kyle it sits at 1.76 against a crown at 2.0, so
   // a 0.4-tall frame centred there shaves the top of his head off.
-  const hand = findBone(scene, HAND_BONES)
-  const props = {
-    hand,
-    handScale: hand ? hand.getWorldScale(new Vector3()).x || 1 : 1,
-  }
-
   const headY = boneY(scene, HEAD_BONES)
   const neckY = boneY(scene, NECK_BONES)
-  if (headY === null) return { nearTargetY: neckY ?? FALLBACK_NEAR_TARGET_Y, ...props }
+  if (headY === null) return neckY ?? FALLBACK_NEAR_TARGET_Y
 
   const framed = neckY === null ? headY : (neckY + TARGET_HEIGHT) / 2
   // Keep the face near the middle of the shot even when something above the head
   // — a ponytail, a helmet spike — drags the top of the box up with it.
-  return { nearTargetY: MathUtils.clamp(framed, headY, headY + NEAR_FRAME_HEIGHT * 0.35), ...props }
+  return MathUtils.clamp(framed, headY, headY + NEAR_FRAME_HEIGHT * 0.35)
 }
 
 /**
@@ -361,38 +377,46 @@ function ZoomAwareTarget({ nearTargetY }: { nearTargetY: number }) {
 }
 
 /**
- * Positions the saber inside the fist.
+ * Hangs a prop off one of the model's bolt points.
  *
- * The nesting matters: the outer group divides out the bone's world scale, so
- * everything inside it is in normalised model units. Offset is applied before
- * rotation, so it shifts the grip along the hand's own axes and the rotation
- * then aims the blade — which is the order that's tractable to tune by eye.
+ * This is how the game does it. Ghoul2 never attaches a saber to a joint — it
+ * attaches it to a *bolt*, a three-vertex tag surface in the .glm carrying both a
+ * position and an orientation, which is why weapons sit in the fist at the right
+ * angle on every model without anyone tuning anything. Those tags don't survive
+ * Blender's glTF export, so scripts/glm-bolts.mjs reads them back out of the
+ * original .glm and bakes them into the .glb as nodes parented to the bone that
+ * drives them. Portalling into one inherits its animated world transform for
+ * free: no per-frame matrix work, and the prop tracks the idle by itself.
+ *
+ * Nothing renders if the model has no such bolt — an unconverted model, or the
+ * Khronos sample in the lab — rather than falling back to a guessed joint.
  */
-function SaberRig({ colour }: { colour: SaberColour }) {
-  const rig = useRef<Group>(null)
+function Bolt({ point, children }: { point: Object3D | undefined; children: ReactNode }) {
+  if (!point) return null
+  return createPortal(<BoltMount>{children}</BoltMount>, point)
+}
+
+/**
+ * Cancels the bolt's inherited scale, so props are authored in the same
+ * normalised units as everything else — the figure is TARGET_HEIGHT tall and a
+ * prop sized against that will be right on any model.
+ *
+ * Read live rather than captured at fit time. A bolt inherits its bone's world
+ * scale, which is the export's scale multiplied by whatever the fit chose, so a
+ * value cached during one fit is wrong after the next one.
+ */
+function BoltMount({ children }: { children: ReactNode }) {
+  const mount = useRef<Group>(null)
   const boneScale = useMemo(() => new Vector3(), [])
 
-  // Re-derive the counter-scale from the bone's CURRENT world scale every frame,
-  // rather than from a value captured when the model was fitted.
-  //
-  // A prop hanging off a bone inherits that bone's scale, so a stale figure gets
-  // multiplied straight into the prop. Deriving it live means the saber stays
-  // right against the model even while the fit itself is misbehaving — which it
-  // still does; see the note on measureOverhang.
   useFrame(() => {
-    const group = rig.current
+    const group = mount.current
     if (!group?.parent) return
     group.parent.getWorldScale(boneScale)
     group.scale.setScalar(1 / (boneScale.x || 1))
   })
 
-  return (
-    <group ref={rig}>
-      <group position={SABER_OFFSET} rotation={SABER_ROTATION}>
-        <Saber colour={colour} />
-      </group>
-    </group>
-  )
+  return <group ref={mount}>{children}</group>
 }
 
 function Model({
@@ -400,10 +424,14 @@ function Model({
   animation,
   paused,
   actionTrigger,
+  saber,
   onClipsLoaded,
   onFit,
-}: Pick<ModelViewerProps, "src" | "animation" | "paused" | "actionTrigger" | "onClipsLoaded"> & {
-  onFit: (fit: ModelFit) => void
+}: Pick<
+  ModelViewerProps,
+  "src" | "animation" | "paused" | "actionTrigger" | "saber" | "onClipsLoaded"
+> & {
+  onFit: (nearTargetY: number) => void
 }) {
   const group = useRef<Group>(null)
   const fitGroup = useRef<Group>(null)
@@ -500,41 +528,46 @@ function Model({
     })
   }, [scene])
 
-  // Learn the mesh-vs-skeleton overhang while the model is still in its bind
-  // pose — the only moment the skinned bounds can be trusted. Re-measuring the
-  // skinned mesh later looks tempting and is wrong: mid-frame the bones carry
-  // local transforms the renderer hasn't reconciled, so CPU-side skinning smears
-  // the vertices even though that same frame draws correctly. Measured that way
-  // Kyle came out 202 units tall against a real 64.
+  // Both of these are properties of the file, not of the current frame, so they
+  // survive the shared mutable scene drei hands back for a URL — a remount, a
+  // sibling suspending, Fast Refresh — without needing to be re-measured.
   const bones = useMemo(() => collectBones(scene), [scene])
-  const overhang = useRef<MeshOverhang>({ top: 0, bottom: 0 })
+  const bolts = useMemo(() => collectBolts(scene), [scene])
+  const overhang = useMemo(() => measureOverhang(scene), [scene])
   const fitted = useRef(false)
 
   useLayoutEffect(() => {
     const wrapper = fitGroup.current
     if (!wrapper) return
     fitted.current = false
-    overhang.current = measureOverhang(wrapper, scene, bones)
-    // Fit against the bind pose straight away so nothing is ever drawn at raw
-    // export scale, even if this canvas never gets a frame (scrolled out of
-    // view, or mounted paused).
-    onFit(fitModel(wrapper, scene, bones, overhang.current))
-  }, [scene, bones, onFit])
+    // Fit straight away so nothing is ever drawn at raw export scale, even if
+    // this canvas never gets a frame (scrolled out of view, or mounted paused).
+    onFit(fitModel(wrapper, scene, bones, overhang))
+  }, [scene, bones, overhang, onFit])
 
   // Re-fit on the first rendered frame, by which point useAnimations' own
   // useFrame — which subscribes ahead of this one — has run the mixer and put
-  // the model in the pose people actually see.
+  // the model in the pose people actually see. Kyle's idle translates model_root
+  // by -24 units and stands shorter than his bind pose, so this is not optional.
   useFrame(() => {
     if (fitted.current || !fitGroup.current) return
     fitted.current = true
-    onFit(fitModel(fitGroup.current, scene, bones, overhang.current))
+    onFit(fitModel(fitGroup.current, scene, bones, overhang))
   })
+
+  const saberColour = findSaberColour(saber)
 
   return (
     <group ref={group}>
       <group ref={fitGroup}>
         <primitive object={scene} />
       </group>
+
+      {saberColour && (
+        <Bolt point={bolts.get(SABER_BOLT)}>
+          <Saber colour={saberColour} />
+        </Bolt>
+      )}
     </group>
   )
 }
@@ -553,14 +586,9 @@ export function ModelViewer({
 }: ModelViewerProps) {
   const wrapper = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(true)
-  const [fit, setFit] = useState<ModelFit>({
-    nearTargetY: FALLBACK_NEAR_TARGET_Y,
-    hand: null,
-    handScale: 1,
-  })
+  const [nearTargetY, setNearTargetY] = useState(FALLBACK_NEAR_TARGET_Y)
 
-  const handleFit = useCallback((next: ModelFit) => setFit(next), [])
-  const saberColour = findSaberColour(saber)
+  const handleFit = useCallback((next: number) => setNearTargetY(next), [])
 
   // Stop rendering entirely when the canvas scrolls out of view. On a profile
   // page the model sits well below the fold, so this keeps an idle tab from
@@ -598,17 +626,11 @@ export function ModelViewer({
             animation={animation}
             paused={paused}
             actionTrigger={actionTrigger}
+            saber={saber}
             onClipsLoaded={onClipsLoaded}
             onFit={handleFit}
           />
           <ContactShadows position={[0, -0.01, 0]} opacity={0.5} scale={TARGET_HEIGHT * 3} blur={2.4} far={4} />
-
-          {/* Parented straight to the hand bone, so it inherits the bone's
-              animated world transform every frame for free — no per-frame matrix
-              work here, and it tracks the idle on its own. */}
-          {saberColour &&
-            fit.hand &&
-            createPortal(<SaberRig colour={saberColour} />, fit.hand)}
         </Suspense>
 
         {/* Horizontal spin + zoom only — min/max polar are pinned together to
@@ -625,7 +647,7 @@ export function ModelViewer({
           minDistance={MIN_DISTANCE}
           maxDistance={MAX_DISTANCE}
         />
-        <ZoomAwareTarget nearTargetY={fit.nearTargetY} />
+        <ZoomAwareTarget nearTargetY={nearTargetY} />
 
         <FpsMeter onFps={onFps} />
       </Canvas>
