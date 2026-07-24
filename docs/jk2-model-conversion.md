@@ -153,7 +153,7 @@ Here's what's actually in a converted Kyle, measured:
 | Group | Meshes | Triangles | Keep? |
 |---|---|---|---|
 | LOD 0 — visible surfaces | 19 | 2,762 | **yes** |
-| LOD 0 — tag surfaces (`*` prefix) | 46 | 46 | no |
+| LOD 0 — tag surfaces (`*` prefix) | 46 | 46 | no — but see §7 |
 | LOD 0 — cap surfaces (`_off` suffix) | 17 | 140 | no |
 | LOD 1 / 2 / 3 (all three) | 246 | 3,349 | no |
 | **Total imported** | **328** | **6,297** | |
@@ -388,7 +388,46 @@ a good first set.
 
 ---
 
-## 7. Troubleshooting
+## 7. Bake the bolt points back in
+
+**Run this after every export.** One command, no Blender.
+
+```bash
+node scripts/glm-bolts.mjs <model.glm> <_humanoid.gla> <exported.glb> --out public/models/kyle.glb
+```
+
+Props — sabers, trip mines, flags — don't hang off bones. Ghoul2 hangs them off **bolts**: the
+three-vertex `*` surfaces you deleted back in §3.5. Each one's triangle encodes a position *and* an
+orientation, which is why a saber sits in the fist at the right angle on every model in the game
+without anyone hand-tuning an offset per character.
+
+Deleting them for the export was still right — as *drawn* surfaces they're 46 wasted draw calls. This
+step recovers them as empty nodes, which cost nothing to render, parented to the bone that drives
+them. The script reads the tags from the original `.glm`, resolves each one's bone through the
+`.gla`, and converts the triangle into a local transform using the `.glb`'s own inverse bind matrix,
+so the result is correct no matter what scale the Blender import used. It checks that: if the `.glm`
+and `.glb` disagree about scale on any axis it stops rather than writing something subtly wrong.
+
+Expect 46 bolts on a stock player model. The ones worth knowing:
+
+| Bolt | Bone | Used for |
+|---|---|---|
+| `*r_hand` | `rhang_tag_bone` | The saber. **Not** the `rhand` joint — attaching there puts the hilt in roughly the right place at entirely the wrong angle. |
+| `*l_hand` | `lhand` | Off-hand props |
+| `*back` | `thoracic` | The flag |
+| `*hip_bl` `*hip_br` `*hip_l` `*hip_r` | `pelvis` | Holstered weapons, trip mines |
+| `*head_top` | `cranium` | Anything worn on the head |
+
+The viewer looks these up by name (`bolt_r_hand` and so on) and renders nothing if a model doesn't
+have them, so a `.glb` that skipped this step still loads — it just won't carry a saber. That's the
+tell if a prop silently fails to appear.
+
+Because this rewrites the `.glb`, always run it against a **fresh export**, not against a file that's
+already been through it — it refuses rather than corrupting node indices.
+
+---
+
+## 8. Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
@@ -400,6 +439,8 @@ a good first set.
 | No animation in the `.glb` at all | The **Animation** section was off, or the playback range didn't cover the imported frames. |
 | Ghoul2 properties not saving, Blender 5.0+ | Addon older than v2.0.0. Update. |
 | Rig looks wrong / import errors on the JK2 `.gla` | Re-import with **Skeleton Changes: none** (see the JK2-vs-JA note above). |
+| Saber / flag doesn't appear at all | The `.glb` has no bolt nodes — §7 wasn't run, or the model in the bucket predates it. |
+| `glm-bolts.mjs` says the files disagree about axes | The `.glm` and `.glb` aren't the same model, or the export used a non-uniform scale. |
 
 ---
 
