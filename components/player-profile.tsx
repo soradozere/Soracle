@@ -160,6 +160,17 @@ function StatTile({
   )
 }
 
+// Divides one panel into labelled runs of stats — used to sit "this month"
+// underneath the career totals without giving it a card of its own.
+function SubHeading({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-3 mt-5 mb-3">
+      <h3 className="text-xs font-bold font-mono tracking-wider text-[var(--pa,#66fcf1)] shrink-0">{children}</h3>
+      <div className="h-px flex-1 bg-[#3d4855]" />
+    </div>
+  )
+}
+
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="bg-[#1f2833]/40 border border-[#3d4855] rounded-lg backdrop-blur-lg">
@@ -1008,145 +1019,135 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
         </div>
       ) : (
         <>
-          {/* ---- This month ---- */}
-          <SectionCard title={`THIS MONTH — ${data.currentMonth.label.toUpperCase()}`}>
-              {data.currentMonth.games === 0 ? (
-                <p className="text-sm text-[#8892a0]">No matches played this month yet.</p>
-              ) : (
-                // Stats left, model right. The model sits in space the stat grid
-                // wasn't using rather than claiming a panel of its own, which is
-                // what made it feel bolted on.
-                <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6">
+          {/* ---- Career + this month, sharing a panel with the model ----
+               Career all-time on top, this month below it, the model standing
+               alongside both. Two 3x3-ish blocks stacked come out about as tall
+               as the model canvas, which is what closes the dead space a single
+               month block left beside it on desktop. */}
+          <SectionCard title="CAREER STATS">
+              <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-baseline gap-4 mb-4">
-                    <div className="text-3xl font-bold font-mono">
-                      <span className="text-[#27ae60]">{data.currentMonth.wins}W</span>
-                      <span className="text-[#8892a0] mx-1">–</span>
-                      <span className="text-[#ff4757]">{data.currentMonth.losses}L</span>
-                      {data.currentMonth.draws > 0 && (
-                        <>
-                          <span className="text-[#8892a0] mx-1">–</span>
-                          <span className="text-[#8892a0]">{data.currentMonth.draws}D</span>
-                        </>
-                      )}
-                    </div>
-                    <div className="text-sm text-[#8892a0]">{data.currentMonth.winRate}% win rate</div>
-                    {data.currentMonth.bestStreak >= 2 && (
-                      <div className="flex items-center gap-1 text-sm text-[#f39c12]">
-                        <Flame className="w-4 h-4" />
-                        {data.currentMonth.bestStreak} streak
-                      </div>
-                    )}
+                  <div className="grid grid-cols-3 gap-2 max-w-[28rem]">
+                    <StatTile
+                      compact
+                      label="Matches"
+                      value={data.totals.games}
+                      hint={
+                        data.totals.firstMatch
+                          ? `All matches on record. First played ${new Date(data.totals.firstMatch).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}.`
+                          : "All matches on record"
+                      }
+                    />
+                    <StatTile
+                      compact
+                      label="Record"
+                      value={`${data.totals.wins}–${data.totals.losses}${data.totals.draws ? `–${data.totals.draws}` : ""}`}
+                      hint={`All-time wins–losses${data.totals.draws ? "–draws" : ""}`}
+                    />
+                    <StatTile
+                      compact
+                      label="Win Rate"
+                      value={data.totals.winRate !== null ? `${data.totals.winRate}%` : "—"}
+                      hint="All-time win percentage"
+                    />
+                    <StatTile
+                      compact
+                      label="Peak Rating"
+                      value={data.totals.peakElo}
+                      hint="Highest ELO rating ever reached (tier-seeded, replayed over every match)"
+                    />
+                    <StatTile
+                      compact
+                      label="Best Score"
+                      value={data.careerHigh ? data.careerHigh.score : "—"}
+                      hint={
+                        data.careerHigh && data.careerHigh.date
+                          ? `Best single-match scoreboard score, set ${new Date(data.careerHigh.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}. Only matches with an uploaded stats CSV count.`
+                          : "Best single-match scoreboard score. Only matches with an uploaded stats CSV count."
+                      }
+                    />
+                    <StatTile
+                      compact
+                      label="K/D"
+                      value={kdRatio(data.totals.kills, data.totals.deaths)}
+                      hint={`All-time kills per death, across the ${data.totals.statMatches} matches with an uploaded stats CSV`}
+                    />
                   </div>
-                  {data.currentMonth.stats ? (
-                    <>
-                      {/* 3 across and width-capped: nine small tiles form a
-                          block rather than stretching the full column, which is
-                          what made them look oversized next to the model. */}
-                      <div className="grid grid-cols-3 gap-2 max-w-[28rem]">
-                        <StatTile compact label="Caps" value={data.currentMonth.stats.captures} hint="Flag captures this month" />
-                        <StatTile compact label="Returns" value={data.currentMonth.stats.returns} hint="Flag returns this month" />
-                        <StatTile compact label="Assists" value={data.currentMonth.stats.assists} hint="Capture assists this month" />
-                        <StatTile compact label="BC" value={data.currentMonth.stats.baseCleaner} hint="Base cleaner kills — clearing defenders out of the enemy base" />
-                        <StatTile compact label="Grabs" value={data.currentMonth.stats.flagGrabs} hint="Flag grabs this month" />
-                        <StatTile compact label="Kills" value={data.currentMonth.stats.kills} hint="Total kills this month" />
-                        <StatTile compact label="Deaths" value={data.currentMonth.stats.deaths} hint="Total deaths this month" />
-                        <StatTile
-                          compact
-                          label="K/D"
-                          value={kdRatio(data.currentMonth.stats.kills, data.currentMonth.stats.deaths)}
-                          hint="Kills per death this month"
-                        />
-                        <StatTile
-                          compact
-                          label="Flag Hold"
-                          value={formatFlagHold(data.currentMonth.stats.flagHoldMs)}
-                          hint="Total time carrying the flag this month (min:sec)"
-                        />
-                      </div>
-                      <p className="text-[10px] text-[#8892a0] mt-3">
-                        Scoreboard stats recorded for {data.currentMonth.stats.statMatches} of {data.currentMonth.games}{" "}
-                        matches this month.
-                      </p>
-                    </>
+
+                  <SubHeading>THIS MONTH — {data.currentMonth.label.toUpperCase()}</SubHeading>
+
+                  {data.currentMonth.games === 0 ? (
+                    <p className="text-sm text-[#8892a0]">No matches played this month yet.</p>
                   ) : (
-                    <p className="text-xs text-[#8892a0]">No scoreboard stats uploaded for this month yet.</p>
+                    <>
+                      <div className="flex items-baseline gap-4 mb-3">
+                        <div className="text-3xl font-bold font-mono">
+                          <span className="text-[#27ae60]">{data.currentMonth.wins}W</span>
+                          <span className="text-[#8892a0] mx-1">–</span>
+                          <span className="text-[#ff4757]">{data.currentMonth.losses}L</span>
+                          {data.currentMonth.draws > 0 && (
+                            <>
+                              <span className="text-[#8892a0] mx-1">–</span>
+                              <span className="text-[#8892a0]">{data.currentMonth.draws}D</span>
+                            </>
+                          )}
+                        </div>
+                        <div className="text-sm text-[#8892a0]">{data.currentMonth.winRate}% win rate</div>
+                        {data.currentMonth.bestStreak >= 2 && (
+                          <div className="flex items-center gap-1 text-sm text-[#f39c12]">
+                            <Flame className="w-4 h-4" />
+                            {data.currentMonth.bestStreak} streak
+                          </div>
+                        )}
+                      </div>
+                      {data.currentMonth.stats ? (
+                        <>
+                          {/* 3 across and width-capped, matching the career grid
+                              above: nine small tiles form a block rather than
+                              stretching the full column, which is what made them
+                              look oversized next to the model. */}
+                          <div className="grid grid-cols-3 gap-2 max-w-[28rem]">
+                            <StatTile compact label="Caps" value={data.currentMonth.stats.captures} hint="Flag captures this month" />
+                            <StatTile compact label="Returns" value={data.currentMonth.stats.returns} hint="Flag returns this month" />
+                            <StatTile compact label="Assists" value={data.currentMonth.stats.assists} hint="Capture assists this month" />
+                            <StatTile compact label="BC" value={data.currentMonth.stats.baseCleaner} hint="Base cleaner kills — clearing defenders out of the enemy base" />
+                            <StatTile compact label="Grabs" value={data.currentMonth.stats.flagGrabs} hint="Flag grabs this month" />
+                            <StatTile compact label="Kills" value={data.currentMonth.stats.kills} hint="Total kills this month" />
+                            <StatTile compact label="Deaths" value={data.currentMonth.stats.deaths} hint="Total deaths this month" />
+                            <StatTile
+                              compact
+                              label="K/D"
+                              value={kdRatio(data.currentMonth.stats.kills, data.currentMonth.stats.deaths)}
+                              hint="Kills per death this month"
+                            />
+                            <StatTile
+                              compact
+                              label="Flag Hold"
+                              value={formatFlagHold(data.currentMonth.stats.flagHoldMs)}
+                              hint="Total time carrying the flag this month (min:sec)"
+                            />
+                          </div>
+                          <p className="text-[10px] text-[#8892a0] mt-3">
+                            Scoreboard stats recorded for {data.currentMonth.stats.statMatches} of {data.currentMonth.games}{" "}
+                            matches this month.
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-xs text-[#8892a0]">No scoreboard stats uploaded for this month yet.</p>
+                      )}
+                    </>
                   )}
                 </div>
 
                 {fields.model && <ProfileModelFigure modelId={fields.model} />}
-                </div>
-              )}
-            </SectionCard>
-
-          {/* ---- Career ---- */}
-            <SectionCard title="CAREER">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-                <StatTile label="Matches" value={data.totals.games} hint="All matches on record" />
-                <StatTile
-                  label="Record"
-                  value={`${data.totals.wins}–${data.totals.losses}${data.totals.draws ? `–${data.totals.draws}` : ""}`}
-                  hint={`All-time wins–losses${data.totals.draws ? "–draws" : ""}`}
-                />
-                <StatTile
-                  label="Win Rate"
-                  value={data.totals.winRate !== null ? `${data.totals.winRate}%` : "—"}
-                  hint="All-time win percentage"
-                />
-                <StatTile
-                  label="Peak Rating"
-                  value={data.totals.peakElo}
-                  hint="Highest ELO rating ever reached (tier-seeded, replayed over every match)"
-                />
-              </div>
-              <AchievementsStrip achievements={data.achievements} />
-              <div className="mt-4">
-              <Tooltip>
-                <TooltipTrigger asChild>
-              <div className="bg-[#0b0c10]/60 border border-[#f1c40f]/40 rounded-lg p-4 flex items-center justify-between cursor-default">
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-[#8892a0]">
-                    Highest match score
-                  </div>
-                  {data.careerHigh ? (
-                    <div className="text-xs text-[#8892a0] mt-1">
-                      {data.careerHigh.date
-                        ? new Date(data.careerHigh.date).toLocaleDateString("en-GB", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })
-                        : ""}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-[#8892a0] mt-1">No scoreboard stats recorded yet</div>
-                  )}
-                </div>
-                <div className="text-4xl font-bold font-mono text-[#f1c40f]">
-                  {data.careerHigh ? data.careerHigh.score : "—"}
-                </div>
-              </div>
-                </TooltipTrigger>
-                <TooltipContent className="bg-[#1f2833] border border-[var(--pa30,#66fcf14d)] text-[#c5c6c7] text-xs max-w-64">
-                  Best single-match scoreboard score. Only matches with an uploaded stats CSV count.
-                </TooltipContent>
-              </Tooltip>
-              {data.totals.firstMatch && (
-                <p className="text-[10px] text-[#8892a0] mt-3">
-                  First recorded match:{" "}
-                  {new Date(data.totals.firstMatch).toLocaleDateString("en-GB", {
-                    day: "numeric",
-                    month: "long",
-                    year: "numeric",
-                  })}
-                </p>
-              )}
               </div>
             </SectionCard>
 
-          {/* ---- Title progression: this month's season + all-time score ---- */}
-          {data && (
-            <SectionCard title="TITLES">
+          {/* ---- Achievements + titles: two views of the same thing, so one
+               panel. Career numbers moved up into CAREER STATS. ---- */}
+          <SectionCard title="ACHIEVEMENTS & TITLES">
+            <AchievementsStrip achievements={data.achievements} />
+            <div className="mt-5 pt-5 border-t border-[#3d4855]">
               <TitleProgression
                 seasonName={season?.name ?? null}
                 seasonLadder={season?.ladder ?? null}
@@ -1154,8 +1155,8 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                 scoreLadder={SCORE_LADDER}
                 achievementScore={achievementScore}
               />
-            </SectionCard>
-          )}
+            </div>
+          </SectionCard>
 
           {/* ---- Spotlight (player's chosen highlight clip) ---- */}
           {fields.spotlight_url ? (
