@@ -23,6 +23,9 @@ export interface Player {
   // recomputed on render, so these are only the player's CHOICE.
   title?: string | null
   profile_theme?: string | null
+  // Chosen JK2 3D model (migration 023). A catalogue id from lib/player-models.ts,
+  // never a path — the asset itself is resolved through /api/model-url.
+  model?: string | null
 }
 
 export interface BalanceResult {

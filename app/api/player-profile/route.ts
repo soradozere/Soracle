@@ -6,6 +6,7 @@ import { computeAllPlayerAchievements } from "@/lib/achievements-server"
 import { scoreFromViews } from "@/lib/achievement-score"
 import { earnedTitles, mergeRecordedTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
 import { fetchRecordedTitles } from "@/lib/titles-server"
+import { isKnownModel } from "@/lib/player-models"
 
 // Self-service profile save for a logged-in player (not an admin). Deliberately
 // narrower than the admin path: no tooltip (that stays an admin-only "signature"),
@@ -17,7 +18,7 @@ export async function POST(request: Request) {
   const playerId = verifySessionValue(cookieStore.get(PLAYER_SESSION_COOKIE)?.value)
   if (!playerId) return NextResponse.json({ error: "Not logged in" }, { status: 401 })
 
-  let body: { avatar_url?: string; spotlight_url?: string; title?: string; profile_theme?: string }
+  let body: { avatar_url?: string; spotlight_url?: string; title?: string; profile_theme?: string; model?: string }
   try {
     body = await request.json()
   } catch {
@@ -28,6 +29,7 @@ export async function POST(request: Request) {
   const spotlight_url = (body.spotlight_url ?? "").trim() || null
   const titleId = (body.title ?? "").trim() || null
   const themeId = (body.profile_theme ?? "").trim() || null
+  const modelId = (body.model ?? "").trim() || null
 
   const supabase = createServiceClient()
 
@@ -73,9 +75,16 @@ export async function POST(request: Request) {
     }
   }
 
+  // Models aren't gated on entitlement (any player may pick any model we ship),
+  // but the id still has to be one we recognise — otherwise a crafted POST could
+  // park arbitrary text in the column for /api/model-url to be handed later.
+  if (modelId && !isKnownModel(modelId)) {
+    return NextResponse.json({ error: "Unknown model" }, { status: 400 })
+  }
+
   const { error } = await supabase
     .from("players")
-    .update({ avatar_url, spotlight_url, title: titleId, profile_theme: themeId })
+    .update({ avatar_url, spotlight_url, title: titleId, profile_theme: themeId, model: modelId })
     .eq("id", playerId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
