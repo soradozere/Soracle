@@ -28,9 +28,10 @@ const ModelViewer = dynamic(() => import("@/components/model-viewer").then((m) =
  */
 export function ProfileModelFigure({
   modelId,
-  // Centred when it stacks under the stats on narrow screens, flush right when
-  // it sits beside them.
-  className = "w-52 h-64 shrink-0 mx-auto lg:mx-0",
+  // Sized to match the 3x3 stat block beside it, so the figure reads as a full
+  // occupant of the panel rather than a thumbnail parked in the corner. Centred
+  // when it stacks underneath on narrow screens.
+  className = "w-full max-w-[300px] h-[340px] shrink-0 mx-auto lg:mx-0 lg:w-[300px]",
 }: {
   modelId: string | null | undefined
   className?: string
