@@ -189,7 +189,8 @@ So the rule is not "delete everything named `_off`". It's:
    Hierarchy**, not plain Delete — plain Delete leaves the children behind). That's 246 of the 328
    meshes gone. Leave `skeleton_root` alone.
 2. **Delete tag and cap surfaces only where they are leaves** — no child objects. Caps and tags are
-   always leaves, so this catches all of them and can never break the chain.
+   always leaves, so this catches all of them and can never break the chain. Deleting all 46 tags is
+   safe even though we intend to attach sabers and flags later — see below.
 3. **Keep `stupidtriangle_off_0` as a node, but empty its geometry.** It has to stay to hold the
    hierarchy together; it doesn't have to draw anything.
 
@@ -229,6 +230,30 @@ print(f"{len(kept)} meshes with geometry left")
 
 Expect `19 meshes with geometry left`. Scrub the timeline afterwards — the model should still be
 intact and animating, not scattered.
+
+### Attachments: use bones, not tag surfaces
+
+Ghoul2 attaches weapons and effects to **tag surfaces** — the 46 `*`-prefixed objects the cleanup
+deletes (`*r_hand`, `*back`, `*hip_bl`, `*chestg`, …). It's tempting to keep them for a lightsaber or
+a flag. **Don't — you don't need them.**
+
+The exported skeleton carries the attachment points already, as named bones. From Kyle's 72 joints:
+
+| Want to attach | Bone to use |
+|---|---|
+| Lightsaber / blaster in hand | `rhand` (or `lhand`) |
+| Holstered saber | `rhang_tag_bone` — JK2's own weapon-hang bone |
+| Flag on the back | `thoracic` with an offset |
+| Trip mines on the hip | `pelvis` or `lower_lumbar` with an offset |
+| Companion model (e.g. a sentry) | none — it's a separate object in the scene |
+
+In Three.js, anything added as a child of a `Bone` inherits its animated world transform for free, so
+a saber parented to `rhand` follows the idle without any extra code. Tag surfaces would be more
+faithful to how the engine does it, but a Ghoul2 tag encodes its orientation in the *vertex positions*
+of its triangle, so using one means reading geometry back and reconstructing a matrix — real work for
+no visible gain.
+
+Keep the export clean. Attach to bones.
 
 ## 4. Export as `.glb`
 
