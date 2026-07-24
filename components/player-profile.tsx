@@ -11,7 +11,9 @@ import {
   type ProfileMatchEntry,
 } from "@/lib/player-profile"
 import type { Player } from "@/lib/types"
-import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucide-react"
+import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2, Boxes } from "lucide-react"
+import { ProfileModelPanel } from "@/components/profile-model-panel"
+import { PLAYER_MODELS } from "@/lib/player-models"
 import { BADGE_META } from "@/lib/badge-meta"
 import { BadgeIcon } from "@/components/badge-icon"
 import { AchievementsStrip } from "@/components/achievements-strip"
@@ -75,6 +77,7 @@ interface EditableFields {
   spotlight_url: string
   title: string
   profile_theme: string
+  model: string
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -472,6 +475,7 @@ function EditProfileDialog({
     const spotlight_url = fields.spotlight_url.trim() || null
     const title = fields.title || null
     const profile_theme = fields.profile_theme || null
+    const model = fields.model || null
 
     if (canEditTooltip) {
       // Admin path: writes straight to the players table via the browser
@@ -480,14 +484,14 @@ function EditProfileDialog({
       const supabase = createClient()
       const { error } = await supabase
         .from("players")
-        .update({ tooltip, avatar_url, spotlight_url, title, profile_theme })
+        .update({ tooltip, avatar_url, spotlight_url, title, profile_theme, model })
         .eq("id", playerId)
       setSaving(false)
       if (error) {
         setSaveError(error.message)
         return
       }
-      onSaved({ tooltip: tooltip ?? "", avatar_url: avatar_url ?? "", spotlight_url: spotlight_url ?? "", title: title ?? "", profile_theme: profile_theme ?? "" })
+      onSaved({ tooltip: tooltip ?? "", avatar_url: avatar_url ?? "", spotlight_url: spotlight_url ?? "", title: title ?? "", profile_theme: profile_theme ?? "", model: model ?? "" })
       onOpenChange(false)
       return
     }
@@ -497,7 +501,7 @@ function EditProfileDialog({
     const res = await fetch("/api/player-profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ avatar_url, spotlight_url, title, profile_theme }),
+      body: JSON.stringify({ avatar_url, spotlight_url, title, profile_theme, model }),
     })
     const data = await res.json()
     setSaving(false)
@@ -511,6 +515,7 @@ function EditProfileDialog({
       spotlight_url: spotlight_url ?? "",
       title: title ?? "",
       profile_theme: profile_theme ?? "",
+      model: model ?? "",
     })
     onOpenChange(false)
   }
@@ -640,6 +645,29 @@ function EditProfileDialog({
               Unlocked by all-time Achievement Score — recolours the whole profile, stars included.
             </p>
           </div>
+          <div className="space-y-1.5">
+            <Label className="text-xs text-[#8892a0]">3D model</Label>
+            <Select
+              value={fields.model || "none"}
+              onValueChange={(v) => setFields((f) => ({ ...f, model: v === "none" ? "" : v }))}
+            >
+              <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                <SelectValue placeholder="No model" />
+              </SelectTrigger>
+              <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                <SelectItem value="none">No model</SelectItem>
+                {PLAYER_MODELS.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.label}
+                    {m.blurb && <span className="text-[#8892a0] text-xs ml-2">{m.blurb}</span>}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-[#8892a0]">
+              An animated JK2 player model on your profile. Not tied to crests — anyone can pick any model.
+            </p>
+          </div>
           {canChangePassword && (
             <div className="pt-3 border-t border-[#3d4855]">
               {!showPassword ? (
@@ -722,6 +750,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
     spotlight_url: player.spotlight_url ?? "",
     title: player.title ?? "",
     profile_theme: player.profile_theme ?? "",
+    model: player.model ?? "",
   })
   useEffect(() => {
     setFields({
@@ -730,6 +759,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
       spotlight_url: player.spotlight_url ?? "",
       title: player.title ?? "",
       profile_theme: player.profile_theme ?? "",
+      model: player.model ?? "",
     })
   }, [player.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1089,6 +1119,23 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                 achievementScore={achievementScore}
               />
             </SectionCard>
+          )}
+
+          {/* ---- 3D model (own slot; Spotlight below stays video-only) ---- */}
+          {fields.model ? (
+            <ProfileModelPanel modelId={fields.model} accent={activeTheme?.accent} />
+          ) : (
+            canEdit && (
+              <SectionCard title="MODEL">
+                <button
+                  onClick={() => setEditOpen(true)}
+                  className="w-full flex items-center justify-center gap-2 py-6 rounded-lg border border-dashed border-[#3d4855] text-sm text-[#8892a0] hover:text-[var(--pa,#66fcf1)] hover:border-[var(--pa50,#66fcf180)] transition-colors"
+                >
+                  <Boxes className="w-4 h-4" />
+                  Pick a JK2 model for your profile
+                </button>
+              </SectionCard>
+            )
           )}
 
           {/* ---- Spotlight (player's chosen highlight clip) ---- */}
