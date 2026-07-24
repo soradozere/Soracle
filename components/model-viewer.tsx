@@ -236,6 +236,19 @@ function resetForMeasurement(wrapper: Group) {
  * are only trustworthy here, before anything has been animated or drawn.
  */
 function measureOverhang(wrapper: Group, scene: Group, bones: Object3D[]): MeshOverhang {
+  // Force the bind pose first. This function's whole premise is that it's
+  // measuring an unposed model, and that is NOT guaranteed: drei's useGLTF hands
+  // back one shared, mutated scene per URL, so a remount — a sibling suspending,
+  // Fast Refresh, revisiting a profile — arrives with the bones wherever the
+  // animation left them. Measured in that state the overhang is nonsense and the
+  // model renders at a fraction of its size. skeleton.pose() makes it
+  // deterministic; the mixer re-poses on the next frame regardless.
+  for (const bone of bones) bone.parent?.updateMatrixWorld(true)
+  scene.traverse((obj) => {
+    const skinned = obj as SkinnedMesh
+    if (skinned.isSkinnedMesh) skinned.skeleton.pose()
+  })
+
   resetForMeasurement(wrapper)
 
   // SkinnedMesh.computeBoundingBox() — which Box3.setFromObject calls for us —
