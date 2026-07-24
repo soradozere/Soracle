@@ -4,6 +4,8 @@ import { useCallback, useState } from "react"
 import dynamic from "next/dynamic"
 import { Boxes, Monitor, Pause, Play, RotateCw, Smartphone } from "lucide-react"
 import { usePrefersReducedMotion } from "@/components/model-viewer"
+import { useModelUrl } from "@/hooks/use-model-url"
+import { PLAYER_MODELS } from "@/lib/player-models"
 
 // The canvas is client-only: WebGL can't prerender, and r3f's reconciler throws
 // if it runs during SSR. This file is already a client component, so `ssr: false`
@@ -17,21 +19,18 @@ const ModelViewer = dynamic(() => import("@/components/model-viewer").then((m) =
   ),
 })
 
-// Models available to the harness. JK2 conversions get listed alongside the
-// Khronos sample so a suspect conversion can be A/B'd against a known-good asset.
-const MODELS = [
-  {
-    id: "kyle",
-    label: "Kyle (JK2)",
-    src: "/models/kyle.glb",
-    note: "835 KB · 19 surfaces · 2,761 tris · 72 bones · BOTH_STAND1IDLE1 (150 frames).",
-  },
-  {
-    id: "fox",
-    label: "Fox (sample)",
-    src: "/models/fox.glb",
-    note: "Khronos reference model — 159 KB, 3 clips. Scaffolding for comparison against the JK2 conversion.",
-  },
+// Real JK2 models come from the shared catalogue and resolve through
+// /api/model-url (private bucket, signed URLs). The Khronos sample is committed
+// to the repo and loaded straight from /public, so there's always a known-good
+// asset to A/B a suspect conversion against even if storage is misconfigured.
+const LAB_MODELS = [
+  ...PLAYER_MODELS.map((m) => ({
+    id: m.id,
+    label: `${m.label} (JK2)`,
+    /** null = resolve via the signed-URL API */
+    staticSrc: null as string | null,
+  })),
+  { id: "fox", label: "Fox (sample)", staticSrc: "/models/fox.glb" },
 ]
 
 // Two framings: the roomy lab view, and the size the widget would actually be
@@ -44,7 +43,7 @@ const VIEWPORTS = {
 type ViewportKey = keyof typeof VIEWPORTS
 
 export function ModelLab() {
-  const [modelId, setModelId] = useState(MODELS[0].id)
+  const [modelId, setModelId] = useState(LAB_MODELS[0].id)
   const [clips, setClips] = useState<string[]>([])
   const [clip, setClip] = useState<string | undefined>(undefined)
   const [fps, setFps] = useState<number | null>(null)
@@ -53,7 +52,11 @@ export function ModelLab() {
   const [viewport, setViewport] = useState<ViewportKey>("desktop")
 
   const reducedMotion = usePrefersReducedMotion()
-  const model = MODELS.find((m) => m.id === modelId) ?? MODELS[0]
+  const model = LAB_MODELS.find((m) => m.id === modelId) ?? LAB_MODELS[0]
+
+  // Catalogue models resolve to a signed URL; the committed sample doesn't.
+  const resolved = useModelUrl(model.staticSrc ? null : model.id)
+  const src = model.staticSrc ?? resolved.url
 
   // Stable identities — Model re-runs its play effect whenever these change.
   const handleClips = useCallback((names: string[]) => {
@@ -79,17 +82,25 @@ export function ModelLab() {
 
       <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-5">
         {/* ---- Canvas ---- */}
-        <div className={`${viewportClass} rounded-lg border border-[#3d4855] bg-[#0b0c10]/60 overflow-hidden`}>
-          <ModelViewer
-            key={model.src}
-            src={model.src}
-            animation={clip}
-            autoRotate={autoRotate}
-            paused={effectivePaused}
-            onClipsLoaded={handleClips}
-            onFps={handleFps}
-            className="w-full h-full"
-          />
+        <div
+          className={`${viewportClass} rounded-lg border border-[#3d4855] bg-[#0b0c10]/60 overflow-hidden flex items-center justify-center`}
+        >
+          {src ? (
+            <ModelViewer
+              key={src}
+              src={src}
+              animation={clip}
+              autoRotate={autoRotate}
+              paused={effectivePaused}
+              onClipsLoaded={handleClips}
+              onFps={handleFps}
+              className="w-full h-full"
+            />
+          ) : resolved.error ? (
+            <p className="text-sm text-[#e74c3c] px-4 text-center">{resolved.error}</p>
+          ) : (
+            <div className="w-10 h-10 border-4 border-[#66fcf1] border-t-transparent rounded-full animate-spin" />
+          )}
         </div>
 
         {/* ---- Readouts ---- */}
@@ -106,11 +117,21 @@ export function ModelLab() {
           <span className="text-[#8892a0]">
             Model <span className="font-mono text-[#e6edf3]">{model.id}</span>
           </span>
+          {/* Which path the asset came down — "local" means the private bucket
+              isn't set up (or is failing) and we fell back to /public. */}
+          {!model.staticSrc && resolved.source && (
+            <span className="text-[#8892a0]">
+              Source{" "}
+              <span className={`font-mono font-bold ${resolved.source === "storage" ? "text-[#27ae60]" : "text-[#f39c12]"}`}>
+                {resolved.source === "storage" ? "signed URL" : "local /public"}
+              </span>
+            </span>
+          )}
         </div>
 
         {/* ---- Controls ---- */}
         <div className="mt-4 pt-4 border-t border-[#3d4855] flex flex-wrap gap-2">
-          {MODELS.map((m) => (
+          {LAB_MODELS.map((m) => (
             <button key={m.id} onClick={() => setModelId(m.id)} className={controlClass(m.id === modelId)}>
               {m.label}
             </button>
@@ -143,7 +164,13 @@ export function ModelLab() {
           ))}
         </div>
 
-        <p className="mt-4 text-xs text-[#8892a0]">{model.note}</p>
+        {resolved.source === "local" && (
+          <p className="mt-4 text-xs text-[#f39c12]">
+            Served from <code>/public</code> — the private <code>models</code> bucket isn&apos;t reachable
+            {resolved.reason ? ` (${resolved.reason})` : ""}. Fine locally; in production this 404s, because
+            converted JK2 models are gitignored.
+          </p>
+        )}
 
         {reducedMotion && (
           <p className="mt-2 text-xs text-[#f39c12]">
