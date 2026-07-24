@@ -8,57 +8,52 @@ import { findPlayerModel } from "@/lib/player-models"
 // Legal here because this file is already a client component.
 const ModelViewer = dynamic(() => import("@/components/model-viewer").then((m) => m.ModelViewer), {
   ssr: false,
-  loading: () => <PanelShell />,
+  loading: () => <FigureShell />,
 })
 
 /**
- * The player's chosen JK2 model, floating on their profile.
+ * The player's JK2 model, standing in the profile header where the avatar tile
+ * would otherwise be.
  *
- * Deliberately its own slot rather than sharing the Spotlight, which is already
- * the player's video clip. Renders nothing at all when no model is set or the
- * stored id isn't in the catalogue, so retiring a model degrades quietly instead
- * of leaving a broken panel on someone's profile.
+ * Deliberately unboxed — no card, no border, no background. It reads as a figure
+ * standing on the page rather than a widget embedded in it, which is the whole
+ * point; in a bordered panel a vertical character in a wide box just looks small
+ * and stranded.
+ *
+ * Portrait aspect for the same reason: the canvas is tall and narrow so the
+ * figure fills it, instead of being letterboxed by a wide container.
+ *
+ * Renders nothing when no model is set or the stored id isn't in the catalogue,
+ * so retiring a model degrades quietly and the caller falls back to the avatar.
  */
-export function ProfileModelPanel({ modelId, accent }: { modelId: string | null | undefined; accent?: string }) {
+export function ProfileModelFigure({ modelId }: { modelId: string | null | undefined }) {
   const model = findPlayerModel(modelId)
   const { url, error } = useModelUrl(model?.id)
 
   if (!model) return null
 
   return (
-    <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
-      <div className="flex items-baseline justify-between mb-3">
-        <h3 className="font-mono text-sm font-bold tracking-wide" style={{ color: accent ?? "#66fcf1" }}>
-          MODEL
-        </h3>
-        <span className="text-xs text-[#8892a0]">{model.label}</span>
-      </div>
-
-      <div className="h-[320px] rounded-lg bg-[#0b0c10]/50 overflow-hidden flex items-center justify-center">
-        {url ? (
-          <ModelViewer
-            src={url}
-            autoRotate
-            className="w-full h-full"
-            // The profile is a showcase, not a toy — spin and zoom only, and the
-            // viewer already pins vertical orbit off.
-          />
-        ) : error ? (
-          <p className="text-xs text-[#8892a0] px-4 text-center">Model unavailable</p>
-        ) : (
-          <PanelShell />
-        )}
-      </div>
-
-      <p className="mt-2 text-center text-xs text-[#8892a0]">Drag to turn · scroll to zoom</p>
+    <div
+      className="w-full sm:w-44 h-64 sm:h-72 shrink-0 relative"
+      title={`${model.label} — drag to turn, scroll to zoom`}
+    >
+      {url ? (
+        <ModelViewer src={url} autoRotate className="w-full h-full" />
+      ) : error ? (
+        <FigureShell muted />
+      ) : (
+        <FigureShell />
+      )}
     </div>
   )
 }
 
-function PanelShell() {
+function FigureShell({ muted }: { muted?: boolean }) {
   return (
     <div className="w-full h-full flex items-center justify-center">
-      <div className="w-8 h-8 border-4 border-[#66fcf1] border-t-transparent rounded-full animate-spin" />
+      {muted ? null : (
+        <div className="w-7 h-7 border-4 border-[var(--pa40,#66fcf166)] border-t-transparent rounded-full animate-spin" />
+      )}
     </div>
   )
 }

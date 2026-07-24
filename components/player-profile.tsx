@@ -11,8 +11,8 @@ import {
   type ProfileMatchEntry,
 } from "@/lib/player-profile"
 import type { Player } from "@/lib/types"
-import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2, Boxes } from "lucide-react"
-import { ProfileModelPanel } from "@/components/profile-model-panel"
+import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucide-react"
+import { ProfileModelFigure } from "@/components/profile-model-panel"
 import { PLAYER_MODELS } from "@/lib/player-models"
 import { BADGE_META } from "@/lib/badge-meta"
 import { BadgeIcon } from "@/components/badge-icon"
@@ -894,18 +894,24 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
       {/* ---- Header: avatar, name, slogan, tier + roles ---- */}
       <div className="bg-[#1f2833]/40 border border-[#3d4855] rounded-lg backdrop-blur-lg p-5">
         <div className="flex flex-col sm:flex-row gap-5">
-          {/* Custom avatar image if set, else initials (in-game 3D models are a later phase) */}
-          <div
-            className="w-24 h-24 shrink-0 rounded-xl border-2 border-[var(--pa40,#66fcf166)] bg-[#0b0c10] flex items-center justify-center overflow-hidden"
-            style={{ boxShadow: "0 0 20px rgba(102,252,241,0.15)" }}
-          >
-            {fields.avatar_url ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={fields.avatar_url} alt={player.name} className="w-full h-full object-cover" />
-            ) : (
-              <span className="text-4xl font-bold font-mono text-[var(--pa,#66fcf1)]">{initials}</span>
-            )}
-          </div>
+          {/* A chosen 3D model stands in for the avatar entirely — it IS the
+              player's likeness here, so showing both would be redundant. Falls
+              back to the avatar image, then initials. */}
+          {fields.model ? (
+            <ProfileModelFigure modelId={fields.model} />
+          ) : (
+            <div
+              className="w-24 h-24 shrink-0 rounded-xl border-2 border-[var(--pa40,#66fcf166)] bg-[#0b0c10] flex items-center justify-center overflow-hidden"
+              style={{ boxShadow: "0 0 20px rgba(102,252,241,0.15)" }}
+            >
+              {fields.avatar_url ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={fields.avatar_url} alt={player.name} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-4xl font-bold font-mono text-[var(--pa,#66fcf1)]">{initials}</span>
+              )}
+            </div>
+          )}
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
@@ -1119,23 +1125,6 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                 achievementScore={achievementScore}
               />
             </SectionCard>
-          )}
-
-          {/* ---- 3D model (own slot; Spotlight below stays video-only) ---- */}
-          {fields.model ? (
-            <ProfileModelPanel modelId={fields.model} accent={activeTheme?.accent} />
-          ) : (
-            canEdit && (
-              <SectionCard title="MODEL">
-                <button
-                  onClick={() => setEditOpen(true)}
-                  className="w-full flex items-center justify-center gap-2 py-6 rounded-lg border border-dashed border-[#3d4855] text-sm text-[#8892a0] hover:text-[var(--pa,#66fcf1)] hover:border-[var(--pa50,#66fcf180)] transition-colors"
-                >
-                  <Boxes className="w-4 h-4" />
-                  Pick a JK2 model for your profile
-                </button>
-              </SectionCard>
-            )
           )}
 
           {/* ---- Spotlight (player's chosen highlight clip) ---- */}

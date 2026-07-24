@@ -1,23 +1,32 @@
 "use client"
 
 import { Suspense, useEffect, useMemo, useRef, useState } from "react"
-import { Canvas, useFrame } from "@react-three/fiber"
+import { Canvas, useFrame, useThree } from "@react-three/fiber"
 import { ContactShadows, OrbitControls, useAnimations, useGLTF } from "@react-three/drei"
-import { Box3, MeshStandardMaterial, Vector3, type Group, type Mesh } from "three"
+import { Box3, MathUtils, MeshStandardMaterial, Vector3, type Group, type Mesh } from "three"
 
 /** Every model is rescaled to this height in world units, so one camera fits all. */
 const TARGET_HEIGHT = 2
 
 // Camera rig. Derived rather than hardcoded so the locked orbit angle below
 // always matches wherever the camera actually sits.
-const TARGET_Y = TARGET_HEIGHT * 0.5
+//
+// The orbit target RISES as you zoom in. With a fixed target you have to choose
+// between framing the feet when zoomed out and leaving dead space above the head
+// when zoomed in — you can't have both, because the target is always screen
+// centre. Interpolating it means far = whole figure centred, close = head and
+// shoulders, which is what you actually want from a portrait.
+const FAR_TARGET_Y = TARGET_HEIGHT * 0.5 // mid-body: whole figure sits centred
+const NEAR_TARGET_Y = TARGET_HEIGHT * 0.82 // shoulder line
+const MIN_DISTANCE = TARGET_HEIGHT * 0.38 // head-and-shoulders
+const MAX_DISTANCE = TARGET_HEIGHT * 1.9 // whole figure with a little air
 const CAMERA_Y = TARGET_HEIGHT * 0.6
-const CAMERA_Z = TARGET_HEIGHT * 2.2
+const CAMERA_Z = TARGET_HEIGHT * 1.65 // default: whole figure, feet clear of the edge
 
 // Vertical orbit is locked to the camera's starting elevation: players get to
 // spin the model and zoom, but can't tumble it upside down or stare at the
 // soles of its feet. Free vertical orbit read as chaotic in testing.
-const POLAR_ANGLE = Math.acos((CAMERA_Y - TARGET_Y) / Math.hypot(CAMERA_Y - TARGET_Y, CAMERA_Z))
+const POLAR_ANGLE = Math.acos((CAMERA_Y - FAR_TARGET_Y) / Math.hypot(CAMERA_Y - FAR_TARGET_Y, CAMERA_Z))
 
 // Client-only animated glTF viewer. Everything here runs in the browser — the
 // page that renders it dynamic-imports with `ssr: false`, because WebGL has no
@@ -64,6 +73,29 @@ function FpsMeter({ onFps }: { onFps?: (fps: number) => void }) {
       frames.current = 0
       since.current = now
     }
+  })
+
+  return null
+}
+
+/**
+ * Slides the orbit target up towards the shoulders as the camera closes in, so
+ * zooming in frames a portrait rather than pushing the head off the top of the
+ * canvas. Reads the live distance each frame, so it tracks a scroll-wheel zoom
+ * in progress rather than only settling at the end.
+ */
+function ZoomAwareTarget() {
+  const controls = useThree((s) => s.controls) as { getDistance?: () => number; target?: Vector3 } | null
+
+  useFrame(() => {
+    if (!controls?.getDistance || !controls.target) return
+    // 0 at closest, 1 at furthest.
+    const t = MathUtils.clamp(
+      (controls.getDistance() - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE),
+      0,
+      1,
+    )
+    controls.target.y = MathUtils.lerp(NEAR_TARGET_Y, FAR_TARGET_Y, t)
   })
 
   return null
@@ -203,16 +235,17 @@ export function ModelViewer({
             min/max polar are pinned together to disable vertical orbit. */}
         <OrbitControls
           makeDefault
-          target={[0, TARGET_Y, 0]}
+          target={[0, FAR_TARGET_Y, 0]}
           enabled={interactive}
           autoRotate={autoRotate}
           autoRotateSpeed={1.2}
           enablePan={false}
           minPolarAngle={POLAR_ANGLE}
           maxPolarAngle={POLAR_ANGLE}
-          minDistance={TARGET_HEIGHT}
-          maxDistance={TARGET_HEIGHT * 6}
+          minDistance={MIN_DISTANCE}
+          maxDistance={MAX_DISTANCE}
         />
+        <ZoomAwareTarget />
 
         <FpsMeter onFps={onFps} />
       </Canvas>
