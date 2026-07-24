@@ -122,13 +122,35 @@ function kdRatio(kills: number, deaths: number): string {
   return (kills / deaths).toFixed(2)
 }
 
-function StatTile({ label, value, hint }: { label: string; value: string | number; hint: string }) {
+// `compact` is for tiles that share a row with something else — currently the
+// This Month model — where full-size tiles read as oversized and airy.
+function StatTile({
+  label,
+  value,
+  hint,
+  compact,
+}: {
+  label: string
+  value: string | number
+  hint: string
+  compact?: boolean
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="bg-[#0b0c10]/60 border border-[#3d4855] rounded-lg p-2 text-center cursor-default">
-          <div className="text-lg font-bold font-mono text-[#c5c6c7]">{value}</div>
-          <div className="text-[10px] uppercase tracking-wider text-[#8892a0] mt-0.5">{label}</div>
+        <div
+          className={`bg-[#0b0c10]/60 border border-[#3d4855] rounded-lg text-center cursor-default ${
+            compact ? "px-2 py-1.5" : "p-2"
+          }`}
+        >
+          <div className={`font-bold font-mono text-[#c5c6c7] ${compact ? "text-base leading-tight" : "text-lg"}`}>
+            {value}
+          </div>
+          <div
+            className={`uppercase tracking-wider text-[#8892a0] ${compact ? "text-[9px]" : "text-[10px] mt-0.5"}`}
+          >
+            {label}
+          </div>
         </div>
       </TooltipTrigger>
       <TooltipContent className="bg-[#1f2833] border border-[var(--pa30,#66fcf14d)] text-[#c5c6c7] text-xs max-w-56">
@@ -1018,22 +1040,25 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                   </div>
                   {data.currentMonth.stats ? (
                     <>
-                      {/* 3 across: nine tiles form a compact 3x3 block, which
-                          leaves a tall gap beside it for the model to stand in. */}
-                      <div className="grid grid-cols-3 gap-2">
-                        <StatTile label="Caps" value={data.currentMonth.stats.captures} hint="Flag captures this month" />
-                        <StatTile label="Returns" value={data.currentMonth.stats.returns} hint="Flag returns this month" />
-                        <StatTile label="Assists" value={data.currentMonth.stats.assists} hint="Capture assists this month" />
-                        <StatTile label="BC" value={data.currentMonth.stats.baseCleaner} hint="Base cleaner kills — clearing defenders out of the enemy base" />
-                        <StatTile label="Grabs" value={data.currentMonth.stats.flagGrabs} hint="Flag grabs this month" />
-                        <StatTile label="Kills" value={data.currentMonth.stats.kills} hint="Total kills this month" />
-                        <StatTile label="Deaths" value={data.currentMonth.stats.deaths} hint="Total deaths this month" />
+                      {/* 3 across and width-capped: nine small tiles form a
+                          block rather than stretching the full column, which is
+                          what made them look oversized next to the model. */}
+                      <div className="grid grid-cols-3 gap-2 max-w-[28rem]">
+                        <StatTile compact label="Caps" value={data.currentMonth.stats.captures} hint="Flag captures this month" />
+                        <StatTile compact label="Returns" value={data.currentMonth.stats.returns} hint="Flag returns this month" />
+                        <StatTile compact label="Assists" value={data.currentMonth.stats.assists} hint="Capture assists this month" />
+                        <StatTile compact label="BC" value={data.currentMonth.stats.baseCleaner} hint="Base cleaner kills — clearing defenders out of the enemy base" />
+                        <StatTile compact label="Grabs" value={data.currentMonth.stats.flagGrabs} hint="Flag grabs this month" />
+                        <StatTile compact label="Kills" value={data.currentMonth.stats.kills} hint="Total kills this month" />
+                        <StatTile compact label="Deaths" value={data.currentMonth.stats.deaths} hint="Total deaths this month" />
                         <StatTile
+                          compact
                           label="K/D"
                           value={kdRatio(data.currentMonth.stats.kills, data.currentMonth.stats.deaths)}
                           hint="Kills per death this month"
                         />
                         <StatTile
+                          compact
                           label="Flag Hold"
                           value={formatFlagHold(data.currentMonth.stats.flagHoldMs)}
                           hint="Total time carrying the flag this month (min:sec)"
