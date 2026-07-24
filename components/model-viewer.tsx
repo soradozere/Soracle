@@ -1,7 +1,7 @@
 "use client"
 
 import { Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { Canvas, useFrame, useThree } from "@react-three/fiber"
+import { Canvas, createPortal, useFrame, useThree } from "@react-three/fiber"
 import { ContactShadows, OrbitControls, useAnimations, useGLTF } from "@react-three/drei"
 import {
   Box3,
@@ -15,6 +15,8 @@ import {
   type Object3D,
   type SkinnedMesh,
 } from "three"
+import { Saber } from "@/components/saber"
+import { findSaberColour, type SaberColour } from "@/lib/saber-colours"
 
 /** Every model is rescaled to this height in world units, so one camera fits all. */
 const TARGET_HEIGHT = 2
@@ -72,6 +74,19 @@ const HEAD_BONES = ["face", "cranium", "head"]
 const NECK_BONES = ["cervical", "neck"]
 /** Joints that sit on a humanoid's centre line, whatever it's doing with its limbs. */
 const HIP_BONES = ["pelvis", "hips", "lower_lumbar"]
+/** Where a weapon hangs. JK2 rigs the right hand as `rhand`. */
+const HAND_BONES = ["rhand", "r_hand", "rhang_tag_bone"]
+
+// How the saber sits in the fist. JK2's bones have no axis convention worth
+// deriving from — the hand's local +Y points back down the arm, so the blade
+// starts out growing towards the floor — and these were found by eye against the
+// idle. Euler XYZ in radians; the offset is in normalised model units.
+//
+// The PI flips the blade to point out of the fist rather than into it. The extra
+// 0.3 tips it away from the body: dead vertical, the blade crosses his chest and
+// face, which both looks wrong and hides the model the panel is there to show.
+const SABER_ROTATION: [number, number, number] = [Math.PI + 0.3, 0, 0]
+const SABER_OFFSET: [number, number, number] = [0, 0, 0]
 
 // Client-only animated glTF viewer. Everything here runs in the browser — the
 // page that renders it dynamic-imports with `ssr: false`, because WebGL has no
@@ -94,6 +109,8 @@ export type ModelViewerProps = {
   interactive?: boolean
   /** Bump this to play a random one-shot clip, then settle back into the idle. */
   actionTrigger?: number
+  /** Blade colour id from lib/saber-colours. Omit for an unarmed model. */
+  saber?: string | null
   /** Reports the model's available clip names once loaded. */
   onClipsLoaded?: (names: string[]) => void
   /** Reports measured frames-per-second, roughly once a second. */
@@ -101,8 +118,18 @@ export type ModelViewerProps = {
   className?: string
 }
 
-/** Where the model ended up once normalised, so the camera can aim at it. */
-type ModelFit = { nearTargetY: number }
+/** Where the model ended up once normalised, so the camera and props can use it. */
+type ModelFit = {
+  nearTargetY: number
+  /** The bone a weapon hangs off, or null if this model has no recognisable hand. */
+  hand: Object3D | null
+  /**
+   * The hand bone's world scale. Anything parented to the bone inherits it, so a
+   * prop has to divide it back out to be sized in normalised units rather than
+   * whatever the model was exported in.
+   */
+  handScale: number
+}
 
 /** How far the mesh overhangs the skeleton, vertically, measured at bind pose. */
 type MeshOverhang = { top: number; bottom: number }
@@ -266,14 +293,20 @@ function fitModel(wrapper: Group, scene: Group, bones: Object3D[], overhang: Mes
   // a standing figure is the top of the normalised box. Aiming straight at the
   // head joint isn't enough — on Kyle it sits at 1.76 against a crown at 2.0, so
   // a 0.4-tall frame centred there shaves the top of his head off.
+  const hand = findBone(scene, HAND_BONES)
+  const props = {
+    hand,
+    handScale: hand ? hand.getWorldScale(new Vector3()).x || 1 : 1,
+  }
+
   const headY = boneY(scene, HEAD_BONES)
   const neckY = boneY(scene, NECK_BONES)
-  if (headY === null) return { nearTargetY: neckY ?? FALLBACK_NEAR_TARGET_Y }
+  if (headY === null) return { nearTargetY: neckY ?? FALLBACK_NEAR_TARGET_Y, ...props }
 
   const framed = neckY === null ? headY : (neckY + TARGET_HEIGHT) / 2
   // Keep the face near the middle of the shot even when something above the head
   // — a ponytail, a helmet spike — drags the top of the box up with it.
-  return { nearTargetY: MathUtils.clamp(framed, headY, headY + NEAR_FRAME_HEIGHT * 0.35) }
+  return { nearTargetY: MathUtils.clamp(framed, headY, headY + NEAR_FRAME_HEIGHT * 0.35), ...props }
 }
 
 /**
@@ -312,6 +345,24 @@ function ZoomAwareTarget({ nearTargetY }: { nearTargetY: number }) {
   })
 
   return null
+}
+
+/**
+ * Positions the saber inside the fist.
+ *
+ * The nesting matters: the outer group divides out the bone's world scale, so
+ * everything inside it is in normalised model units. Offset is applied before
+ * rotation, so it shifts the grip along the hand's own axes and the rotation
+ * then aims the blade — which is the order that's tractable to tune by eye.
+ */
+function SaberRig({ colour, scale }: { colour: SaberColour; scale: number }) {
+  return (
+    <group scale={scale}>
+      <group position={SABER_OFFSET} rotation={SABER_ROTATION}>
+        <Saber colour={colour} />
+      </group>
+    </group>
+  )
 }
 
 function Model({
@@ -465,15 +516,21 @@ export function ModelViewer({
   paused = false,
   interactive = true,
   actionTrigger,
+  saber,
   onClipsLoaded,
   onFps,
   className,
 }: ModelViewerProps) {
   const wrapper = useRef<HTMLDivElement>(null)
   const [visible, setVisible] = useState(true)
-  const [nearTargetY, setNearTargetY] = useState(FALLBACK_NEAR_TARGET_Y)
+  const [fit, setFit] = useState<ModelFit>({
+    nearTargetY: FALLBACK_NEAR_TARGET_Y,
+    hand: null,
+    handScale: 1,
+  })
 
-  const handleFit = useCallback((fit: ModelFit) => setNearTargetY(fit.nearTargetY), [])
+  const handleFit = useCallback((next: ModelFit) => setFit(next), [])
+  const saberColour = findSaberColour(saber)
 
   // Stop rendering entirely when the canvas scrolls out of view. On a profile
   // page the model sits well below the fold, so this keeps an idle tab from
@@ -515,6 +572,13 @@ export function ModelViewer({
             onFit={handleFit}
           />
           <ContactShadows position={[0, -0.01, 0]} opacity={0.5} scale={TARGET_HEIGHT * 3} blur={2.4} far={4} />
+
+          {/* Parented straight to the hand bone, so it inherits the bone's
+              animated world transform every frame for free — no per-frame matrix
+              work here, and it tracks the idle on its own. */}
+          {saberColour &&
+            fit.hand &&
+            createPortal(<SaberRig colour={saberColour} scale={1 / fit.handScale} />, fit.hand)}
         </Suspense>
 
         {/* Horizontal spin + zoom only — min/max polar are pinned together to
@@ -531,7 +595,7 @@ export function ModelViewer({
           minDistance={MIN_DISTANCE}
           maxDistance={MAX_DISTANCE}
         />
-        <ZoomAwareTarget nearTargetY={nearTargetY} />
+        <ZoomAwareTarget nearTargetY={fit.nearTargetY} />
 
         <FpsMeter onFps={onFps} />
       </Canvas>
