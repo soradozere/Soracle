@@ -1,0 +1,324 @@
+# Converting a JK2 player model to glTF
+
+How to turn a Ghoul2 `.glm` + `.gla` pair into a `.glb` that the Soracle model viewer can load.
+Run this on the machine that has JK2 installed. Output goes in `public/models/`.
+
+Nothing on the web understands Ghoul2, so we convert offline in Blender rather than parsing
+`.glm`/`.gla` in the browser. Once a model is a `.glb`, Three.js loads it with stock `GLTFLoader`
+and no custom code.
+
+**Target for the first pass:** stock Kyle, one idle animation, under 2 MB.
+
+---
+
+## 0. What you need
+
+| Thing | Notes |
+|---|---|
+| JK2 installed | We need `assets0.pk3` from `GameData/base/` |
+| Blender **4.1+** | The addon's automated tests cover 4.1 and 5.2, with spot checks on 4.5, 5.0 and 5.1. **Blender 4.5 LTS** is the safe pick. |
+| [mrwonko's Blender Jedi Academy Tools](https://github.com/mrwonko/Blender-Jedi-Academy-Tools/releases) **v2.0.0** | Download `jediacademy.zip`. Don't use older releases — v2.0.0 fixes Ghoul2 properties silently failing to read/write on Blender 5.0+. |
+| Any zip tool | `.pk3` files are just renamed `.zip` archives |
+
+Install the addon: **Edit → Preferences → Add-ons → Install from disk…** → pick `jediacademy.zip` → tick it to enable.
+
+---
+
+## 1. Extract the assets
+
+Copy `assets0.pk3` somewhere scratch, rename it to `assets0.zip`, unzip it.
+
+The importer resolves texture and skeleton paths relative to a **Base Path**, so keep the folder
+structure intact. You want a layout like:
+
+```
+<scratch>/GameData/Base/
+  models/players/kyle/
+    model.glm
+    model_default.skin
+    *.jpg            (the textures)
+  models/players/_humanoid/
+    _humanoid.gla    (the skeleton + all animation data)
+    animation.cfg    (names → frame ranges)
+```
+
+Those are the only files needed — not the whole pk3. Both the model *and* the `_humanoid` folder
+are required: the `.glm` stores bone *indices*, and only the `.gla` knows what those indices mean.
+
+> **Copyright:** JK2 assets are Raven/Activision property and were never released — only the engine
+> source, GPLv2, in 2013. The converted `.glb` goes in the repo because a profile widget needs it;
+> the raw extracted assets do not. Don't commit the pk3 or its contents.
+
+---
+
+## 2. Pick your animation range from `animation.cfg`
+
+This is the step that decides what the model actually *does*, and it's the one worth slowing down for.
+
+`_humanoid.gla` is a single continuous timeline of **20,000+ frames** containing every animation in
+the game. `animation.cfg` is the index that carves it into named clips. Each line is:
+
+```
+ANIM_NAME    firstFrame    numFrames    loopFrames    fps
+```
+
+- **firstFrame** — where the clip starts in the big timeline (this is what the importer calls "Start Frame", and it's zero-based)
+- **numFrames** — how many frames long it is
+- **loopFrames** — the loop point
+- **fps** — playback rate. **A negative value means the animation plays backwards.**
+
+Open `animation.cfg` in a text editor and find your clip. Write down its `firstFrame`, `numFrames`
+and `fps`; you'll type the first two into the importer.
+
+**Do not import the whole file.** 20,000+ frames will crawl or fall over.
+
+### Pick an IDLE, not a STAND
+
+This one is a trap, and we walked straight into it on the first conversion.
+
+The bare `BOTH_STAND1`…`BOTH_STAND8` entries are **1–2 frame static poses** — the stance the engine
+snaps to, not something that moves. Exporting `BOTH_STAND1` gives you a perfectly correct `.glb`
+containing a 0.04-second animation, which on screen is a statue.
+
+The animation that actually breathes is the `IDLE` variant that follows it. Verified from JK2's own
+`animation.cfg`:
+
+| Animation | firstFrame | numFrames | fps | Length |
+|---|---|---|---|---|
+| `BOTH_STAND1` | 12257 | **2** | 20 | 0.1 s — a pose |
+| **`BOTH_STAND1IDLE1`** | **12259** | **150** | 20 | **7.5 s — use this** |
+| `BOTH_STAND2IDLE1` | 12448 | 151 | 20 | 7.6 s |
+| `BOTH_STAND2IDLE2` | 12599 | 75 | 20 | 3.8 s |
+| `BOTH_STAND5IDLE1` | 12686 | 150 | 20 | 7.5 s |
+| `BOTH_GESTURE1` | 7330 | 130 | 20 | 6.5 s |
+| `BOTH_TALKGESTURE1` | 14745 | 61 | 20 | 3.1 s |
+
+**Avoid clips with a negative `fps`** (e.g. `BOTH_STAND2TO1` at `-15`). Those are the same frames as
+another animation played backwards; the importer reads frames forwards, so you'd get the reverse of
+what you expect. Where a negative-fps clip is the one you want, import its forward twin and reverse
+it in Blender.
+
+To find your own candidates — anything longer than ~20 frames that plays forwards:
+
+```bash
+awk '$3 > 20 && $5 > 0 {printf "%-26s start=%-7s frames=%-5s fps=%s\n", $1,$2,$3,$5}' animation.cfg
+```
+
+---
+
+## 3. Import into Blender
+
+**File → Import → Ghoul 2 model (.glm)** and select `models/players/kyle/model.glm`.
+
+Set these in the import options panel:
+
+| Option | Value |
+|---|---|
+| **Base Path** | your `<scratch>/GameData/Base/` folder |
+| **Skin** | `default` (matches `model_default.skin`) |
+| **Skeleton Changes** | `Jedi Academy _humanoid` — gives a cleaner, animation-friendly hierarchy |
+| **Animations** | `Range` |
+| **Start Frame** | `firstFrame` from `animation.cfg` |
+| **Number of Frames** | `numFrames` from `animation.cfg` |
+| **Scale** | leave default |
+
+Scale genuinely doesn't matter here — the viewer normalises every model to a fixed height on load,
+so a Quake-units Kyle and a 2-metre Kyle render identically.
+
+If the model imports untextured or with corrupted texture paths, tick **Guess Textures** and
+re-import; that option exists specifically for `.glm` files with mangled paths.
+
+> **JK2 vs JA caveat:** this addon is built for Jedi *Academy*. JK2's skeleton has 72 bones and JA's
+> has more (JA's `ltail`/`rtail` have no JK2 equivalent). The `Jedi Academy _humanoid` skeleton-changes
+> option assumes JA's hierarchy. If the import errors or the rig looks wrong, re-import with
+> **Skeleton Changes: none** — the animation still works, the bone tree is just messier.
+
+### Check before exporting
+
+- Scrub the timeline — Kyle should idle, not T-pose or explode
+- Switch the viewport to **Material Preview** — textures should be present, not magenta or flat white
+- Check the armature has roughly **72 bones**
+
+---
+
+## 3.5 Delete the LODs, tags and caps
+
+**Do this before exporting.** The importer brings in *everything* the `.glm` contains, and most of it
+is not meant to be drawn. On the first Kyle conversion that meant 328 meshes and **589 draw calls per
+frame**, against 7 for a normal glTF model — an 84× overdraw for zero visual gain. Triangle count
+isn't the problem (6,297 is tiny); the number of separate meshes is.
+
+Here's what's actually in a converted Kyle, measured:
+
+| Group | Meshes | Triangles | Keep? |
+|---|---|---|---|
+| LOD 0 — visible surfaces | 19 | 2,762 | **yes** |
+| LOD 0 — tag surfaces (`*` prefix) | 46 | 46 | no |
+| LOD 0 — cap surfaces (`_off` suffix) | 17 | 140 | no |
+| LOD 1 / 2 / 3 (all three) | 246 | 3,349 | no |
+| **Total imported** | **328** | **6,297** | |
+
+### The trap: surfaces are a hierarchy, not a flat list
+
+Before deleting anything by name, understand how the importer lays a model out. The four LODs arrive
+as sibling roots — `model_root_0` … `model_root_3` — and **within each LOD the surfaces are parented
+to each other**, mirroring the Ghoul2 surface hierarchy in the `.glm`:
+
+```
+model_root_0
+└── stupidtriangle_off_0        ← the hierarchy ROOT. Everything hangs off this.
+    └── hips_0
+        ├── hips_cap_l_leg_off_0    ← leaf, safe to delete
+        ├── hips_cap_r_leg_off_0    ← leaf, safe to delete
+        ├── l_leg_0
+        │   └── l_leg_cap_hips_off_0
+        ├── r_leg_0
+        └── torso_0
+            ├── head_0
+            │   └── head_cap_torso_off_0
+            └── l_arm_0 …
+```
+
+`stupidtriangle_off_0` matches an "ends in `_off`" rule, but deleting it **orphans the entire model** —
+the children lose their parent, fall back to their local transforms, and the mesh explodes across the
+viewport. Same hazard for any surface with children.
+
+So the rule is not "delete everything named `_off`". It's:
+
+1. **Delete `model_root_1`, `model_root_2`, `model_root_3` entirely** (right-click → **Delete
+   Hierarchy**, not plain Delete — plain Delete leaves the children behind). That's 246 of the 328
+   meshes gone. Leave `skeleton_root` alone.
+2. **Delete tag and cap surfaces only where they are leaves** — no child objects. Caps and tags are
+   always leaves, so this catches all of them and can never break the chain.
+3. **Keep `stupidtriangle_off_0` as a node, but empty its geometry.** It has to stay to hold the
+   hierarchy together; it doesn't have to draw anything.
+
+That leaves **19 surfaces with geometry** — matching the 19 non-`_off` entries in
+`model_default.skin` exactly. Good way to check your work: count the skin-file lines that don't end
+in `_off`.
+
+### Just run this
+
+Blender's **Scripting** tab, paste, Run. It does all three steps in the safe order:
+
+```python
+import bpy
+
+# 1. LODs 1-3: delete children before parents so nothing is orphaned mid-way.
+for name in ("model_root_1", "model_root_2", "model_root_3"):
+    root = bpy.data.objects.get(name)
+    if root:
+        for ob in reversed([root, *root.children_recursive]):
+            bpy.data.objects.remove(ob, do_unlink=True)
+
+root = bpy.data.objects["model_root_0"]
+
+# 2. Tags and caps, LEAVES ONLY — never delete something other surfaces hang off.
+for ob in list(root.children_recursive):
+    if not ob.children and (ob.name.startswith("*") or "_off" in ob.name):
+        bpy.data.objects.remove(ob, do_unlink=True)
+
+# 3. Keep the hierarchy root as a node, but bin its geometry.
+for ob in root.children_recursive:
+    if "stupidtriangle" in ob.name and ob.type == "MESH":
+        ob.data.clear_geometry()
+
+kept = [o for o in root.children_recursive if o.type == "MESH" and len(o.data.polygons)]
+print(f"{len(kept)} meshes with geometry left")
+```
+
+Expect `19 meshes with geometry left`. Scrub the timeline afterwards — the model should still be
+intact and animating, not scattered.
+
+## 4. Export as `.glb`
+
+**File → Export → glTF 2.0 (.glb/.gltf)**
+
+| Setting | Value |
+|---|---|
+| **Format** | `glTF Binary (.glb)` — one self-contained file |
+| **Include → Selected Objects** | off (export everything) |
+| **Data → Mesh → Apply Modifiers** | on |
+| **Data → Material** | `Export` |
+| **Data → Shape Keys** | off (JK2 models don't use them) |
+| **Animation** | **on** — this is the one people forget |
+| **Animation → Skinning** | **on** — without it you get a frozen mesh with no rig |
+| **Animation → Limit to Playback Range** | on |
+| **Compression (Draco)** | **off** — see below |
+
+Leave Draco compression off. Three.js can read Draco, but only with a separate `DRACOLoader` plus a
+decoder file fetched at runtime — extra moving parts for a model that should already be small. If we
+blow the size budget we'll revisit it.
+
+---
+
+## 5. Acceptance gate
+
+Check all four **before** sending it over — this is cheaper than finding out after it's wired in:
+
+1. **Size under 2 MB.** Bigger means we look at texture resolution first, geometry second.
+2. **It opens in an external glTF viewer** — [gltf-viewer.donmccurdy.com](https://gltf-viewer.donmccurdy.com/) is the standard one. Drag the `.glb` in.
+3. **The skeleton survived** — the model is posed and deformed, not a rigid statue. Expect **72 joints**.
+4. **The animation loops**, doesn't snap or jitter at the loop point, and is **visibly moving** — if it looks frozen, you exported a `BOTH_STAND*` pose instead of an `IDLE` (see §2).
+5. **Roughly 19 meshes, not 300+.** If the viewer reports hundreds, the LODs/tags/caps are still in (see §3.5).
+
+If it looks right there, it will look right in Soracle — same loader, same format.
+
+### Send me
+
+- the `.glb`
+- the `animation.cfg` line(s) you used
+- which skin you picked
+
+I'll drop it into `public/models/`, add it to the switcher at `/lab/model`, and report the real
+numbers — file size, load time, frame rate on mobile.
+
+---
+
+## 6. Multiple animations (for the final build)
+
+One clip is fine to prove the pipeline, but the finished widget wants a few — an idle plus a taunt or
+a gesture, so profiles don't all look identical.
+
+The thing to understand: because the `.gla` is one long timeline, **each animation is just a different
+frame range of the same file**. Two ways to get several into the build:
+
+**Option A — one `.glb` per animation.** Import once per range, export each separately. Simple, but
+every file re-exports the same geometry and textures, so N animations cost roughly N× the bytes.
+Fine for two, wasteful beyond that.
+
+**Option B — one `.glb`, several clips (recommended).** Import the model once, then bring in each
+extra frame range as its own **Action** on the same armature. In the **NLA Editor**, push each Action
+down to its own strip and name the strip after the animation. On export, glTF turns each NLA track
+into a separate named animation clip, all sharing one mesh and one skeleton.
+
+Option B is what the viewer is already built for — it reads the clip list out of the file and exposes
+each by name, which is exactly what the clip-switcher buttons at `/lab/model` are driving. Add three
+animations that way and three buttons appear on their own.
+
+Worth grabbing while you're in there: a second `BOTH_STAND*` variant, and something with personality
+from the gesture/taunt families. Check `animation.cfg` for what JK2 actually ships — the JA animation
+list is longer, so don't assume a name exists just because you've seen it in an Academy tutorial.
+
+---
+
+## 7. Troubleshooting
+
+| Symptom | Cause / fix |
+|---|---|
+| Model explodes / scatters after deleting surfaces | You deleted a surface that had children — almost always `stupidtriangle_off`, the hierarchy root. Undo, and delete leaves only (see §3.5). |
+| Textures magenta, white or missing | **Base Path** isn't pointing at the folder that contains `models/`. Try **Guess Textures**. |
+| Model imports with no skeleton | The `.gla` wasn't found. Check `models/players/_humanoid/_humanoid.gla` exists under Base Path, or set **GLA Override** to the base-relative path. |
+| Import hangs or takes forever | You imported the whole animation file. Use **Animations: Range** with a real frame range. |
+| Mesh exports rigid / T-posed | **Skinning** was off in the glTF export's Animation section. |
+| No animation in the `.glb` at all | The **Animation** section was off, or the playback range didn't cover the imported frames. |
+| Ghoul2 properties not saving, Blender 5.0+ | Addon older than v2.0.0. Update. |
+| Rig looks wrong / import errors on the JK2 `.gla` | Re-import with **Skeleton Changes: none** (see the JK2-vs-JA note above). |
+
+---
+
+## Reference
+
+- [mrwonko/Blender-Jedi-Academy-Tools](https://github.com/mrwonko/Blender-Jedi-Academy-Tools) — the addon; the mature Ghoul2 implementation and the de-facto reference
+- [mrwonko/ghoul2-browser-tools](https://github.com/mrwonko/ghoul2-browser-tools) — TypeScript, format documentation only. Not a loader (no vertices, triangles, UVs, weights or animation frames). Its `reference/mdx_format.h` is the useful part if we ever build a runtime parser.
+- `animation.cfg` column meanings verified against `BG_ParseAnimationFile` in [OpenJK](https://github.com/JACoders/OpenJK) (`codemp/game/bg_panimate.c`)

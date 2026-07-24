@@ -18,3 +18,9 @@ node_modules
 
 # TypeScript build cache
 tsconfig.tsbuildinfo
+
+# Converted JK2 player models. Raven/Activision assets — this repo is public and
+# git history is permanent, so they're deliberately kept out of it pending a
+# decision on where they should be hosted. See docs/jk2-model-conversion.md and
+# public/models/README.md. The CC0/CC-BY Khronos sample model is committed.
+public/models/kyle.glb
