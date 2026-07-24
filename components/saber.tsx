@@ -47,19 +47,51 @@ const FALLBACK_FLASH_Y = 4.36 * MD3_SCALE
  * — reads as a neon rod instead, because a tube shades its silhouette and a
  * billboard doesn't.
  */
+const BLADE_VERTEX_SHADER = /* glsl */ `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`
+
+/**
+ * Alpha comes from the texture's own brightness.
+ *
+ * The blade textures are JPEGs, so every pixel has alpha 1 — including the black
+ * surround. Additive blending makes that black contribute nothing to COLOUR, but
+ * it still writes ALPHA, which turns the quad's whole rectangle opaque against a
+ * transparent canvas: a black slab around the blade. Taking alpha from luminance
+ * makes the black genuinely absent instead of merely invisible.
+ */
+const BLADE_FRAGMENT_SHADER = /* glsl */ `
+  uniform sampler2D map;
+  uniform float intensity;
+  varying vec2 vUv;
+  void main() {
+    vec3 texel = texture2D(map, vUv).rgb;
+    float lum = max(max(texel.r, texel.g), texel.b);
+    gl_FragColor = vec4(texel * intensity, lum);
+  }
+`
+
 function BladeFace({
   texture,
   width,
-  opacity,
+  intensity,
   renderOrder,
 }: {
   texture: Texture
   width: number
-  opacity: number
+  intensity: number
   renderOrder: number
 }) {
   const mesh = useRef<Mesh>(null)
   const cameraLocal = useMemo(() => new Vector3(), [])
+  const uniforms = useMemo(
+    () => ({ map: { value: texture }, intensity: { value: intensity } }),
+    [texture, intensity]
+  )
 
   useFrame((state) => {
     const quad = mesh.current
@@ -74,13 +106,13 @@ function BladeFace({
   return (
     <mesh ref={mesh} renderOrder={renderOrder}>
       <planeGeometry args={[width, BLADE_LENGTH]} />
-      <meshBasicMaterial
-        map={texture}
+      <shaderMaterial
+        uniforms={uniforms}
+        vertexShader={BLADE_VERTEX_SHADER}
+        fragmentShader={BLADE_FRAGMENT_SHADER}
         transparent
-        opacity={opacity}
         blending={AdditiveBlending}
         depthWrite={false}
-        toneMapped={false}
       />
     </mesh>
   )
@@ -115,8 +147,8 @@ function Blade({ colour, originY }: { colour: SaberColour; originY: number }) {
 
   return (
     <group ref={blade} position={[0, originY, 0]} scale={[1, 0, 1]}>
-      <BladeFace texture={glow} width={GLOW_WIDTH} opacity={0.55} renderOrder={1} />
-      <BladeFace texture={core} width={BLADE_WIDTH} opacity={1} renderOrder={2} />
+      <BladeFace texture={glow} width={GLOW_WIDTH} intensity={0.75} renderOrder={1} />
+      <BladeFace texture={core} width={BLADE_WIDTH} intensity={1} renderOrder={2} />
       <pointLight color={colour.glow} intensity={2.2} distance={1.5} decay={2} />
     </group>
   )

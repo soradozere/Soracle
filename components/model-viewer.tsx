@@ -368,9 +368,26 @@ function ZoomAwareTarget({ nearTargetY }: { nearTargetY: number }) {
  * rotation, so it shifts the grip along the hand's own axes and the rotation
  * then aims the blade — which is the order that's tractable to tune by eye.
  */
-function SaberRig({ colour, scale }: { colour: SaberColour; scale: number }) {
+function SaberRig({ colour }: { colour: SaberColour }) {
+  const rig = useRef<Group>(null)
+  const boneScale = useMemo(() => new Vector3(), [])
+
+  // Re-derive the counter-scale from the bone's CURRENT world scale every frame,
+  // rather than from a value captured when the model was fitted.
+  //
+  // A prop hanging off a bone inherits that bone's scale, so a stale figure gets
+  // multiplied straight into the prop. Deriving it live means the saber stays
+  // right against the model even while the fit itself is misbehaving — which it
+  // still does; see the note on measureOverhang.
+  useFrame(() => {
+    const group = rig.current
+    if (!group?.parent) return
+    group.parent.getWorldScale(boneScale)
+    group.scale.setScalar(1 / (boneScale.x || 1))
+  })
+
   return (
-    <group scale={scale}>
+    <group ref={rig}>
       <group position={SABER_OFFSET} rotation={SABER_ROTATION}>
         <Saber colour={colour} />
       </group>
@@ -591,7 +608,7 @@ export function ModelViewer({
               work here, and it tracks the idle on its own. */}
           {saberColour &&
             fit.hand &&
-            createPortal(<SaberRig colour={saberColour} scale={1 / fit.handScale} />, fit.hand)}
+            createPortal(<SaberRig colour={saberColour} />, fit.hand)}
         </Suspense>
 
         {/* Horizontal spin + zoom only — min/max polar are pinned together to
