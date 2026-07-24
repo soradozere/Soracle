@@ -31,6 +31,14 @@ const LAB_MODELS = [
     /** null = resolve via the signed-URL API */
     staticSrc: null as string | null,
   })),
+  // The same models straight off disk, bypassing storage. A conversion has to be
+  // checked before it's uploaded — bolts baked in, scale right, animation
+  // playing — and the bucket copy is the old one until someone replaces it.
+  ...PLAYER_MODELS.map((m) => ({
+    id: `${m.id}-local`,
+    label: `${m.label} (local file)`,
+    staticSrc: `/models/${m.file}`,
+  })),
   { id: "fox", label: "Fox (sample)", staticSrc: "/models/fox.glb" },
 ]
 
