@@ -300,30 +300,91 @@ numbers — file size, load time, frame rate on mobile.
 
 ---
 
-## 6. Multiple animations (for the final build)
+## 6. Multiple animations in one `.glb`
 
-One clip is fine to prove the pipeline, but the finished widget wants a few — an idle plus a taunt or
-a gesture, so profiles don't all look identical.
+One clip proves the pipeline; the finished widget wants a few, so profiles don't all look identical.
 
-The thing to understand: because the `.gla` is one long timeline, **each animation is just a different
-frame range of the same file**. Two ways to get several into the build:
+Because the `.gla` is one long timeline, **each animation is just a different frame range of the same
+file**. You want them all in a single `.glb` as separate named clips — one mesh, one skeleton, many
+animations. Exporting one `.glb` per animation also works but re-exports the geometry and textures
+every time, so it costs roughly N× the bytes for N animations.
 
-**Option A — one `.glb` per animation.** Import once per range, export each separately. Simple, but
-every file re-exports the same geometry and textures, so N animations cost roughly N× the bytes.
-Fine for two, wasteful beyond that.
+### The operator you want
 
-**Option B — one `.glb`, several clips (recommended).** Import the model once, then bring in each
-extra frame range as its own **Action** on the same armature. In the **NLA Editor**, push each Action
-down to its own strip and name the strip after the animation. On export, glTF turns each NLA track
-into a separate named animation clip, all sharing one mesh and one skeleton.
+**File → Import → JA Ghoul 2 Skeleton (.gla)**, with **Animations: Range**.
 
-Option B is what the viewer is already built for — it reads the clip list out of the file and exposes
-each by name, which is exactly what the clip-switcher buttons at `/lab/model` are driving. Add three
-animations that way and three buttons appear on their own.
+The name says "Skeleton", which is why it's easy to miss — it's the same operator that imports
+animation, and it's the one to use for every range *after* the first. It will **not** give you a
+second model or a second armature: the importer looks for an existing object called `skeleton_root`
+and reuses it if it finds one.
 
-Worth grabbing while you're in there: a second `BOTH_STAND*` variant, and something with personality
-from the gesture/taunt families. Check `animation.cfg` for what JK2 actually ships — the JA animation
-list is longer, so don't assume a name exists just because you've seen it in an Academy tutorial.
+### The trap: stash before every import
+
+Each import writes its keyframes at **frames 0 to N-1** — not at the animation's real offset in the
+`.gla` — and it writes them into whatever Action is currently active on the armature.
+
+So if you import a second range without doing anything first, it lands **on top of the first one at
+identical frame numbers** and you end up with one mangled Action instead of two clean ones. This is
+the step that makes the whole thing feel broken.
+
+Between every import:
+
+1. **Dope Sheet → Action Editor**, with the armature selected.
+2. Rename the current Action to the JK2 animation name (`BOTH_STAND1IDLE1`).
+3. Click **Stash**.
+
+Stash pushes the Action onto its own NLA track *and* gives it a fake user, so it survives a save and
+reload with nothing actively using it. Plain "Push Down" doesn't guarantee that.
+
+After stashing, the armature has no active Action and the viewport drops to the bind pose — that's
+expected, not a sign anything went wrong.
+
+### The loop
+
+```
+import .glm + first range          (as in §3)
+  ↓
+rename Action → Stash
+  ↓
+File → Import → JA Ghoul 2 Skeleton (.gla), Animations: Range, next start + count
+  ↓
+rename Action → Stash
+  ↓
+… repeat …
+  ↓
+export .glb
+```
+
+On export, leave **Animation Mode** on its default, **Actions** — the exporter describes it as
+"export actions (actives and on NLA tracks) as separate animations", which is exactly the stashed
+Actions from above. Keep **Skinning** on, as in §4.
+
+### Name the clips properly — the viewer reads them
+
+The names carry meaning downstream. The viewer picks the clip whose name contains **`idle`** as the
+looping animation, and treats **every other clip** as a one-shot that the action button plays at
+random before easing back into the idle. Keep the JK2 names and that just works; call everything
+`Action.001` and it won't.
+
+### Ranges worth taking
+
+Verified against this install's `animation.cfg` (`NAME  firstFrame  numFrames  loopFrames  fps`):
+
+| Animation | Range | What it is |
+|---|---|---|
+| `BOTH_STAND1IDLE1` | `12259 150` | The current idle — relaxed, breathing |
+| `BOTH_STAND2IDLE1` | `12448 151` | Alternate idle, different stance |
+| `BOTH_STAND2IDLE2` | `12599 75` | Shorter alternate idle |
+| `BOTH_STAND5IDLE1` | `12686 150` | Third idle variant |
+| `BOTH_GESTURE1` | `7330 130` | Big pointing gesture — the best "taunt" JK2 has |
+| `BOTH_TALKGESTURE1` | `14745 61` | Shorter, chattier gesture |
+
+Note there is **no** `TAUNT`, `VICTORY`, `BOW` or `MEDITATE` in JK2's `_humanoid` — those are Jedi
+Academy additions. Don't go hunting for them because an Academy tutorial mentioned them.
+
+Only take **one** clip with `idle` in its name, or the viewer picks the first and the rest become
+one-shots — harmless, but not what you meant. An idle plus `BOTH_GESTURE1` and `BOTH_TALKGESTURE1` is
+a good first set.
 
 ---
 
