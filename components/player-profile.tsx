@@ -894,24 +894,20 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
       {/* ---- Header: avatar, name, slogan, tier + roles ---- */}
       <div className="bg-[#1f2833]/40 border border-[#3d4855] rounded-lg backdrop-blur-lg p-5">
         <div className="flex flex-col sm:flex-row gap-5">
-          {/* A chosen 3D model stands in for the avatar entirely — it IS the
-              player's likeness here, so showing both would be redundant. Falls
-              back to the avatar image, then initials. */}
-          {fields.model ? (
-            <ProfileModelFigure modelId={fields.model} />
-          ) : (
-            <div
-              className="w-24 h-24 shrink-0 rounded-xl border-2 border-[var(--pa40,#66fcf166)] bg-[#0b0c10] flex items-center justify-center overflow-hidden"
-              style={{ boxShadow: "0 0 20px rgba(102,252,241,0.15)" }}
-            >
-              {fields.avatar_url ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={fields.avatar_url} alt={player.name} className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-4xl font-bold font-mono text-[var(--pa,#66fcf1)]">{initials}</span>
-              )}
-            </div>
-          )}
+          {/* Custom avatar image if set, else initials. The 3D model lives in the
+              This Month panel rather than here — the avatar is the player's
+              identity across the rest of the site, so it stays put. */}
+          <div
+            className="w-24 h-24 shrink-0 rounded-xl border-2 border-[var(--pa40,#66fcf166)] bg-[#0b0c10] flex items-center justify-center overflow-hidden"
+            style={{ boxShadow: "0 0 20px rgba(102,252,241,0.15)" }}
+          >
+            {fields.avatar_url ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={fields.avatar_url} alt={player.name} className="w-full h-full object-cover" />
+            ) : (
+              <span className="text-4xl font-bold font-mono text-[var(--pa,#66fcf1)]">{initials}</span>
+            )}
+          </div>
 
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-3">
@@ -995,7 +991,11 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
               {data.currentMonth.games === 0 ? (
                 <p className="text-sm text-[#8892a0]">No matches played this month yet.</p>
               ) : (
-                <>
+                // Stats left, model right. The model sits in space the stat grid
+                // wasn't using rather than claiming a panel of its own, which is
+                // what made it feel bolted on.
+                <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6">
+                <div className="flex-1 min-w-0">
                   <div className="flex items-baseline gap-4 mb-4">
                     <div className="text-3xl font-bold font-mono">
                       <span className="text-[#27ae60]">{data.currentMonth.wins}W</span>
@@ -1018,7 +1018,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                   </div>
                   {data.currentMonth.stats ? (
                     <>
-                      <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
+                      {/* 5 across rather than 9: two shorter rows leave room for
+                          the model beside them instead of one wide strip. */}
+                      <div className="grid grid-cols-3 sm:grid-cols-5 gap-2">
                         <StatTile label="Caps" value={data.currentMonth.stats.captures} hint="Flag captures this month" />
                         <StatTile label="Returns" value={data.currentMonth.stats.returns} hint="Flag returns this month" />
                         <StatTile label="Assists" value={data.currentMonth.stats.assists} hint="Capture assists this month" />
@@ -1045,7 +1047,10 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                   ) : (
                     <p className="text-xs text-[#8892a0]">No scoreboard stats uploaded for this month yet.</p>
                   )}
-                </>
+                </div>
+
+                {fields.model && <ProfileModelFigure modelId={fields.model} />}
+                </div>
               )}
             </SectionCard>
 
