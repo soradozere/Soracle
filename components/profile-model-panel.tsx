@@ -31,6 +31,7 @@ const ModelViewer = dynamic(() => import("@/components/model-viewer").then((m) =
  */
 export function ProfileModelFigure({
   modelId,
+  skin,
   saber,
   // Tall enough for a full-height figure, since the viewer's zoomed-out framing
   // fills the canvas exactly. Centred when it stacks underneath on narrow
@@ -39,6 +40,14 @@ export function ProfileModelFigure({
   className = "w-full max-w-[300px] h-[420px] shrink-0 mx-auto lg:mx-0 lg:max-w-none lg:w-[380px]",
 }: {
   modelId: string | null | undefined
+  /**
+   * Skin id from the model's catalogue entry, or nothing for its default.
+   *
+   * No profile stores one yet — it belongs in the loadout column alongside the
+   * saber colour and the flag, rather than getting a column of its own on the
+   * way there. Wired through now so that lands as one line.
+   */
+  skin?: string | null
   /** Blade colour id, or null for an unarmed model. */
   saber?: string | null
   className?: string
@@ -63,6 +72,8 @@ export function ProfileModelFigure({
         {url ? (
           <ModelViewer
             src={url}
+            modelId={model.id}
+            skin={skin}
             autoRotate={spin}
             actionTrigger={actionTrigger}
             saber={saber}

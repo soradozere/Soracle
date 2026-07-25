@@ -2,10 +2,10 @@
 
 import { useCallback, useState } from "react"
 import dynamic from "next/dynamic"
-import { Bomb, Boxes, Flag, Monitor, Pause, Play, RotateCw, Smartphone } from "lucide-react"
+import { Bomb, Boxes, Flag, Monitor, Palette, Pause, Play, RotateCw, Smartphone } from "lucide-react"
 import { usePrefersReducedMotion } from "@/components/model-viewer"
 import { useModelUrl } from "@/hooks/use-model-url"
-import { PLAYER_MODELS } from "@/lib/player-models"
+import { DEFAULT_SKIN, PLAYER_MODELS, findPlayerModel } from "@/lib/player-models"
 import { SABER_COLOURS } from "@/lib/saber-colours"
 import { FLAG_TEAMS } from "@/lib/prop-assets"
 
@@ -31,6 +31,8 @@ const LAB_MODELS = [
     label: `${m.label} (JK2)`,
     /** null = resolve via the signed-URL API */
     staticSrc: null as string | null,
+    /** Catalogue entry this is, which is what skins are defined against. */
+    catalogueId: m.id as string | null,
   })),
   // The same models straight off disk, bypassing storage. A conversion has to be
   // checked before it's uploaded — bolts baked in, scale right, animation
@@ -39,8 +41,11 @@ const LAB_MODELS = [
     id: `${m.id}-local`,
     label: `${m.label} (local file)`,
     staticSrc: `/models/${m.file}`,
+    // Still the same model, so its skins still apply — those come down from the
+    // bucket either way, since only the mesh has a copy under /public.
+    catalogueId: m.id as string | null,
   })),
-  { id: "fox", label: "Fox (sample)", staticSrc: "/models/fox.glb" },
+  { id: "fox", label: "Fox (sample)", staticSrc: "/models/fox.glb", catalogueId: null },
 ]
 
 // Two framings: the roomy lab view, and the size the widget would actually be
@@ -84,6 +89,7 @@ export function ModelLab() {
   const [autoRotate, setAutoRotate] = useState(true)
   const [paused, setPaused] = useState(false)
   const [viewport, setViewport] = useState<ViewportKey>("desktop")
+  const [skin, setSkin] = useState(DEFAULT_SKIN)
   const [hand, setHand] = useState<HandSlot>("blue")
   const [flag, setFlag] = useState<string | null>(null)
   const [flagScale, setFlagScale] = useState(0.4)
@@ -91,6 +97,12 @@ export function ModelLab() {
 
   const reducedMotion = usePrefersReducedMotion()
   const model = LAB_MODELS.find((m) => m.id === modelId) ?? LAB_MODELS[0]
+
+  // Skins are per model, so switching model can leave a skin selected that the
+  // new one has never heard of. Fall back rather than render nothing.
+  const catalogue = findPlayerModel(model.catalogueId)
+  const skins = catalogue?.skins ?? []
+  const activeSkin = skins.some((s) => s.id === skin) ? skin : DEFAULT_SKIN
 
   // Catalogue models resolve to a signed URL; the committed sample doesn't.
   const resolved = useModelUrl(model.staticSrc ? null : model.id)
@@ -127,6 +139,8 @@ export function ModelLab() {
             <ModelViewer
               key={src}
               src={src}
+              modelId={model.catalogueId}
+              skin={activeSkin}
               animation={clip}
               autoRotate={autoRotate}
               paused={effectivePaused}
@@ -205,6 +219,16 @@ export function ModelLab() {
               {name}
             </button>
           ))}
+
+          {/* Only shown when the model actually has variants — Kyle has team
+              skins, the Khronos sample has nothing to switch between. */}
+          {skins.length > 1 &&
+            skins.map((s) => (
+              <button key={s.id} onClick={() => setSkin(s.id)} className={controlClass(activeSkin === s.id)}>
+                <Palette className="w-4 h-4" style={{ color: activeSkin === s.id ? undefined : TEAM_COLOURS[s.id] }} />
+                {s.label}
+              </button>
+            ))}
 
           <button onClick={() => setHand("none")} className={controlClass(hand === "none")}>
             Empty hand

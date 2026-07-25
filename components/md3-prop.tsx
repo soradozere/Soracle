@@ -2,7 +2,8 @@
 
 import { useLayoutEffect, useMemo } from "react"
 import { useGLTF } from "@react-three/drei"
-import { MeshStandardMaterial, type Mesh, type Object3D } from "three"
+import type { Mesh, Object3D } from "three"
+import { flattenMeshMaterials } from "@/lib/three-materials"
 
 /** Every model is rescaled to this height by <Model>; see model-viewer.tsx. */
 const TARGET_HEIGHT = 2
@@ -42,20 +43,12 @@ export function Md3Prop({ src, scale = 1 }: { src: string; scale?: number }) {
   const { scene } = useGLTF(src)
   const model = useMemo(() => scene.clone(true), [scene])
 
-  // Flat diffuse, same as the player models — JK2's renderer has no specular,
-  // and Blender's exported roughness of 0.5 puts a wet highlight on everything.
+  // Flat diffuse, same as the player models — see flattenToDiffuse.
   useLayoutEffect(() => {
     model.traverse((obj: Object3D) => {
       const mesh = obj as Mesh
       if (!mesh.isMesh) return
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-      for (const mat of materials) {
-        if (mat instanceof MeshStandardMaterial) {
-          mat.roughness = 1
-          mat.metalness = 0
-          mat.needsUpdate = true
-        }
-      }
+      flattenMeshMaterials(mesh.material)
     })
   }, [model])
 
