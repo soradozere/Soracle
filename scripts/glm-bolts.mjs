@@ -288,31 +288,44 @@ const quakeToGltf = ([x, y, z]) => [x, z, -y]
 /**
  * Turns a tag triangle into an orientation.
  *
- * The first edge gives the axis a prop points along, and it runs v1 → v0, not
- * the other way round. That direction is worth stating precisely because both
- * readings look plausible on screen — the saber lies along the same line either
- * way, just end for end — and the wrong one puts the blade up the inside of the
- * forearm with the hilt hanging past the fingertips.
+ * A tag encodes a full basis, the same way an MD3 tag does: the first edge is
+ * *forward*, the triangle normal is *up*, and left follows from the two. A prop
+ * is then aligned to that basis exactly as it sits in its own model space.
  *
- * The check that settles it: project the hand's own vertices onto this axis.
- * `r_hand` covers t ∈ [-6.33, 2.54] with the fingers at the positive end (the
- * forearm sits at t ∈ [-14.97, -4.89], so the negative end is the wrist). The
- * hilt occupies [-8.06, 4.28] and its emitter is at 4.36 — the fist closes
- * around the middle of the grip and the blade starts 1.8 units clear of the
- * fingertips. Reverse the axis and the emitter ends up buried in the wrist.
+ * The part that is easy to get wrong — and that I did get wrong — is which of
+ * those three a blade runs along. It is **up**, the normal. The hilt MD3 is
+ * modelled along Quake +Z with `tag_flash` at z=4.36, and Ghoul2 lines a
+ * weapon's +Z up with the tag's up axis. Using the first edge instead puts the
+ * blade along the forearm, which reads as "nearly right" from most angles and is
+ * off by ninety degrees.
  *
- * +Y because that's the axis props are modelled along. The third vertex only
- * fixes the roll, and it isn't perpendicular to the first edge on most tags, so
- * the frame is squared up through the triangle normal rather than used raw.
- * Flipping the axis doesn't affect handedness — zAxis is derived from the other
- * two, so the basis stays right-handed either way.
+ * Projecting the model's own vertices onto each candidate settles it outright:
+ *
+ *   axis            hand width   arm
+ *   first edge         8.86      t ∈ [ 4.89, 14.97]  ← arm lies along it
+ *   normal (up)        3.49      t ∈ [-1.71,  2.78]  ← arm crosses it
+ *   third axis         5.06      t ∈ [-11.91, -1.79] ← arm lies along it
+ *
+ * Only the normal has the arm running *across* it, and only the normal meets the
+ * hand at its narrow dimension — 3.49 units, with a 12.34-unit hilt crossing it
+ * and standing proud at both ends. That is a fist round a hilt. The other two
+ * are a blade lying along the arm.
+ *
+ * Sign: +up puts the emitter 2.5 units past the fingers and the pommel 6.4 below
+ * them, which matches the game — a saber is gripped near the pommel with most of
+ * the hilt above the fist.
  */
 function boltBasis(v0, v1, v2) {
-  const yAxis = normalize(sub(v0, v1))
-  const normal = normalize(cross(sub(v1, v0), sub(v2, v0)))
-  const xAxis = normalize(cross(yAxis, normal))
-  const zAxis = cross(xAxis, yAxis)
-  return [xAxis, yAxis, zAxis]
+  const forward = normalize(sub(v1, v0))
+  // Squared up through the normal because v2 - v0 is not perpendicular to the
+  // first edge on most tags.
+  const up = normalize(cross(forward, sub(v2, v0)))
+  const left = cross(up, forward)
+
+  // Columns map the prop's own axes onto the tag's. glTF Y is Quake Z, so the
+  // prop's +Y (its blade) goes to up; glTF Z is -Quake Y, hence the negated
+  // left. forward × up = -left, so the basis stays right-handed.
+  return [forward, up, [-left[0], -left[1], -left[2]]]
 }
 
 function main() {
