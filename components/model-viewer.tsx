@@ -44,8 +44,11 @@ const FOV = 40
  */
 const HEIGHT_PER_UNIT = 2 * Math.tan(MathUtils.degToRad(FOV) / 2)
 
-/** Zoomed out: the whole figure, with a hair of margin so the feet aren't clipped. */
-const FAR_FRAME_HEIGHT = TARGET_HEIGHT * 1.04
+/**
+ * Zoomed out: the whole figure with a margin around it. The margin used to be
+ * 4%, which framed the figure exactly and left carried props with nowhere to go.
+ */
+const FAR_FRAME_HEIGHT = TARGET_HEIGHT * 1.15
 /** Zoomed in: about a head and a half — a face close-up, not a bust. */
 const NEAR_FRAME_HEIGHT = TARGET_HEIGHT * 0.2
 
@@ -108,19 +111,22 @@ const FLAG_BOLT = "back"
  * unit pole and a 66.4 unit banner against a 64.0 unit player, so 1.76x a
  * person. Rendered at face value it towers over the figure and leaves the frame.
  *
- * Measured off in-game screenshots rather than guessed. The Imperial crest on
- * the banner renders as a circle squashed to 0.81 of its width, which fixes the
- * banner's tilt at ~36° out of the image plane; correcting the pole's on-screen
- * length for exactly that tilt gives a true pole of 1.23-1.28 player heights
- * against the file's 1.76, and the same sum on the banner alone gives 0.68. So
- * the engine's factor is 0.70-0.73 by measurement, and Sam — who plays daily —
- * independently put it at 0.75. Taking the round number, since it's inside the
- * measurement error and is the kind of constant an engine hardcodes.
+ * Still provisional. Measuring it off in-game stills has now failed twice —
+ * those shots are taken from above and behind with the flag leaning toward the
+ * camera, which inflates every vertical estimate, and two careful passes over
+ * the same image disagreed by 40%. 0.75 came out of that and Sam says it is
+ * still far too big.
+ *
+ * The one estimate anchored to something solid rather than to pixel-counting:
+ * this bolt puts the flag's base at 0.82 player heights and the pole rises
+ * 1.32 of them at full size, so matching a flag whose tip sits near 1.3 player
+ * heights needs roughly 0.4. That's the default until Sam picks a better one
+ * with the lab's pickers — see FLAG_SCALES in model-lab.tsx.
  *
  * This is the ONLY scale factor in the prop pipeline, and it exists because the
  * game applies one. It is not a knob for making things look right.
  */
-const CARRIED_FLAG_SCALE = 0.75
+const CARRIED_FLAG_SCALE = 0.4
 
 // Resolved on its own, so switching blade colour doesn't change the hilt's URL.
 // Every resolve mints a fresh signed URL, and a new URL makes useGLTF treat the
