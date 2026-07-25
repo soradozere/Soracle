@@ -159,7 +159,33 @@ function parseMd3(buf) {
  * the same folder are the first-person view model, the pickup, and LOD variants
  * — see docs/jk2-model-conversion.md §7.5.
  */
-function parseGlm(buf) {
+/** Origin and [forward, left, up] basis encoded by a 3-vertex `*` tag surface. */
+function tagFrame(v0, v1, v2) {
+  const sub = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]]
+  const cross = (a, b) => [
+    a[1] * b[2] - a[2] * b[1],
+    a[2] * b[0] - a[0] * b[2],
+    a[0] * b[1] - a[1] * b[0],
+  ]
+  const norm = (a) => {
+    const l = Math.hypot(a[0], a[1], a[2])
+    return [a[0] / l, a[1] / l, a[2] / l]
+  }
+  const forward = norm(sub(v1, v0))
+  // Squared up through the normal: v2 - v0 isn't perpendicular to the first edge.
+  const up = norm(cross(forward, sub(v2, v0)))
+  const left = cross(up, forward)
+  return { origin: v0, forward, left, up }
+}
+
+/** Expresses a point in the tag's frame: R^T (p - origin), Quake axes throughout. */
+function intoFrame(frame, p, isDirection) {
+  const d = isDirection ? p : [p[0] - frame.origin[0], p[1] - frame.origin[1], p[2] - frame.origin[2]]
+  const dot = (a) => a[0] * d[0] + a[1] * d[1] + a[2] * d[2]
+  return [dot(frame.forward), dot(frame.left), dot(frame.up)]
+}
+
+function parseGlm(buf, mountTag) {
   const ident = buf.toString("latin1", 0, 4)
   const version = buf.readInt32LE(4)
   if (ident !== GLM_IDENT) throw new Error(`Not a Ghoul2 model (ident "${ident}")`)
@@ -192,8 +218,35 @@ function parseGlm(buf) {
   // LOD 0 is the full-detail mesh. Its surface offsets are relative to the start
   // of the offset table, which sits just past the LOD's own ofsEnd.
   const table = ofsLODs + 4
+  const surfaceAt = (i) => table + buf.readInt32LE(table + 4 * i)
+  const vertexAt = (s, k) => {
+    const o = s + buf.readInt32LE(s + 16) + k * GLM_VERTEX_SIZE
+    return [buf.readFloatLE(o + 12), buf.readFloatLE(o + 16), buf.readFloatLE(o + 20)]
+  }
+
+  // Resolve the mount tag first — the geometry pass needs it.
+  //
+  // Ghoul2 does NOT attach a weapon by its origin: it hangs the weapon model off
+  // the player by aligning the weapon's own `*weapon` tag with the hand bolt. On
+  // laser_trap_w.glm that tag's up points along -Z and its forward is rotated
+  // ~136°, so ignoring it puts the mine in the fist backwards. It went unnoticed
+  // on the saber because saber_w's tag_parent is at the origin with identity
+  // axes, so origin-mounting happened to be right and proved nothing.
+  let mount = null
+  if (mountTag) {
+    const want = mountTag.startsWith("*") ? mountTag : `*${mountTag}`
+    const i = meta.findIndex((m) => m.name === want)
+    if (i === -1) {
+      const tags = meta.filter((m) => m.name.startsWith("*")).map((m) => m.name)
+      throw new Error(`no ${want} tag in this model (has: ${tags.join(", ") || "none"})`)
+    }
+    const s = surfaceAt(i)
+    mount = tagFrame(vertexAt(s, 0), vertexAt(s, 1), vertexAt(s, 2))
+    console.log(`  mounting on ${want} (origin ${mount.origin.map((n) => n.toFixed(2)).join(", ")})`)
+  }
+
   for (let i = 0; i < numSurfaces; i++) {
-    const s = table + buf.readInt32LE(table + 4 * i)
+    const s = surfaceAt(i)
     const { name, shader } = meta[i]
 
     // `*`-prefixed surfaces are bolt tags: three vertices encoding a transform,
@@ -225,16 +278,23 @@ function parseGlm(buf) {
       // Reading them the intuitive way round is the classic way to get a model
       // that looks vaguely right and is subtly inside out.
       const vo = s + ofsVerts + v * GLM_VERTEX_SIZE
-      const [nx, ny, nz] = quakeToGltf(buf.readFloatLE(vo), buf.readFloatLE(vo + 4), buf.readFloatLE(vo + 8))
+
+      // Into the mount's frame FIRST, while still in Quake axes, then convert.
+      // Doing it the other way round would need the basis converted too, for
+      // the same answer and more chances to get a sign wrong.
+      let normal = [buf.readFloatLE(vo), buf.readFloatLE(vo + 4), buf.readFloatLE(vo + 8)]
+      let position = [buf.readFloatLE(vo + 12), buf.readFloatLE(vo + 16), buf.readFloatLE(vo + 20)]
+      if (mount) {
+        normal = intoFrame(mount, normal, true)
+        position = intoFrame(mount, position, false)
+      }
+
+      const [nx, ny, nz] = quakeToGltf(normal[0], normal[1], normal[2])
       surface.normals[v * 3 + 0] = nx
       surface.normals[v * 3 + 1] = ny
       surface.normals[v * 3 + 2] = nz
 
-      const [gx, gy, gz] = quakeToGltf(
-        buf.readFloatLE(vo + 12),
-        buf.readFloatLE(vo + 16),
-        buf.readFloatLE(vo + 20),
-      )
+      const [gx, gy, gz] = quakeToGltf(position[0], position[1], position[2])
       surface.positions[v * 3 + 0] = gx
       surface.positions[v * 3 + 1] = gy
       surface.positions[v * 3 + 2] = gz
@@ -448,18 +508,20 @@ function main() {
   const positional = []
   let override = null
   let assetsRoot = null
+  let mountTag = null
   const excluded = new Set()
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--texture") override = args[++i]
     else if (args[i] === "--exclude") excluded.add(args[++i])
     else if (args[i] === "--assets") assetsRoot = args[++i]
+    else if (args[i] === "--mount") mountTag = args[++i]
     else positional.push(args[i])
   }
   const [input, output] = positional
 
   if (!input || !output) {
     console.error(
-      "usage: node scripts/md3-to-gltf.mjs <input.md3|.glm> <output.glb> [--assets root] [--texture path] [--exclude surface]...",
+      "usage: node scripts/md3-to-gltf.mjs <input.md3|.glm> <output.glb> [--assets root] [--texture path] [--exclude surface]... [--mount tag]",
     )
     process.exit(1)
   }
@@ -468,7 +530,7 @@ function main() {
   // once the surfaces are read, and a mislabelled file should fail loudly.
   const buf = readFileSync(input)
   const magic = buf.toString("latin1", 0, 4)
-  const model = magic === GLM_IDENT ? parseGlm(buf) : parseMd3(buf)
+  const model = magic === GLM_IDENT ? parseGlm(buf, mountTag) : parseMd3(buf)
   console.log(`${model.name}  [${magic === GLM_IDENT ? "Ghoul2" : "MD3"}]`)
   console.log(`  frames ${model.numFrames}  tags ${model.numTags}  surfaces ${model.numSurfaces}`)
 

@@ -522,6 +522,57 @@ two can be compared side by side against the game instead of argued from stills.
 
 ---
 
+## 7.6 How JK2 actually mounts props — from the source
+
+Two of these were guessed wrong for days. The answers are in JK2's own multiplayer
+cgame, `code/cgame/cg_players.c` in [mvdevs/mvsdk](https://github.com/mvdevs/mvsdk),
+which is the real JK2 MP source (OpenJK's `codemp/` is Jedi Academy, not this).
+
+**A weapon mounts by the WEAPON'S own tag, not by its origin.** The worn model is
+attached as a second Ghoul2 model and the engine aligns its `*weapon` tag with the
+player's `*r_hand` bolt. On `laser_trap_w.glm` that tag's up runs along −Z and its
+forward is rotated ~136°, so mounting by origin puts the mine in the fist backwards.
+Hence `--mount weapon`, which bakes the inverse of that frame into the geometry.
+
+This went unnoticed on the saber for a reason worth remembering: `saber_w.md3`'s
+`tag_parent` sits at the origin with identity axes, so origin-mounting happened to
+be correct there and proved nothing about the rule.
+
+**The flag is not bolted to a tag at all.** `CG_PlayerFlag` positions it against the
+`lower_lumbar` **bone** — `trap_G2API_AddBolt(ghoul2, 0, "lower_lumbar")`, a bone
+name, not a `*` surface — and then builds the orientation from the *player's* angles
+rather than inheriting the bolt's. That is why none of the 46 tag bolts lines up, and
+no amount of picking between them ever would have:
+
+```c
+GetBoltMatrix(... bolt_llumbar ...);          // origin of the lower_lumbar bone
+GiveMeVectorFromMatrix(&boltMatrix, POSITIVE_X, tAng);  vectoangles(tAng, tAng);
+VectorCopy(cent->lerpAngles, angles);         // the PLAYER's angles
+
+boltOrg[2] -= 12;                             // down 12
+AngleVectors((0, lerpAngles[YAW], 0), 0, right, 0);
+boltOrg += right * 8;                         // 8 to the player's right
+
+angles[PITCH] = -lerpAngles[PITCH]/2 - 30;
+angles[YAW]   = tAng[YAW] + 270;
+AnglesToAxis(angles, axis);
+ent.origin = boltOrg + 24 * axis[0];          // 24 along the flag's own forward
+
+angles[ROLL] += 20;
+AnglesToAxis(angles, ent.axis);
+ent.modelScale = { 0.5, 0.5, 0.5 };           // the carried-flag scale, exactly
+```
+
+So the carried flag is: the lower-lumbar bone's position, dropped 12 and pushed 8
+right and 24 forward, at a fixed −30° pitch, yaw offset 270° from the bone's own X
+axis, 20° of roll, and **scale exactly 0.5**. All offsets are Quake units.
+
+**The lesson**, having burned two rounds on it: when a prop won't line up, read the
+engine rather than measuring screenshots or cycling through mount points. The game
+is open source and the answer is fifteen lines long.
+
+---
+
 ## 8. Troubleshooting
 
 | Symptom | Cause / fix |
