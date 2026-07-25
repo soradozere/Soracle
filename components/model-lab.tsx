@@ -66,15 +66,11 @@ const MINES = "mines"
 /** Only so the inactive flag buttons read at a glance which team they are. */
 const TEAM_COLOURS: Record<string, string> = { red: "#e74c3c", blue: "#3b7dff" }
 
-// Flag mount and size are the only two numbers in the prop pipeline that aren't
-// read out of the game's files — JK2 shrinks a carried flag by an amount no
-// model records, and which of the 46 bolts it uses is a judgement. These let
-// them be compared against real footage instead of argued about. The candidates
-// are every bolt a flag could plausibly hang from.
-const FLAG_BOLTS = ["back", "chestg", "hip_bl", "hip_br", "hip_l", "hip_r", "shldr_l", "shldr_r"]
-// Range opened downwards after 0.75 turned out to still be far too big. At full
-// size the pole rises 1.32 player heights from a bolt already 0.82 up, so the
-// small end of this is where a flag that reads like the game's has to live.
+// Flag mount and size are the only two things in the prop pipeline not read out
+// of the game's files — JK2 shrinks a carried flag by an amount no model
+// records, and which bolt it hangs from is a judgement. The mount list used to
+// be eight hand-picked candidates; it's now every bolt the loaded model
+// actually has, because the right one turned out not to be among my eight.
 const FLAG_SCALES = [0.25, 0.3, 0.4, 0.5, 0.6, 0.75, 1]
 
 export function ModelLab() {
@@ -89,6 +85,7 @@ export function ModelLab() {
   const [flag, setFlag] = useState<string | null>(null)
   const [flagBolt, setFlagBolt] = useState("back")
   const [flagScale, setFlagScale] = useState(0.4)
+  const [bolts, setBolts] = useState<string[]>([])
 
   const reducedMotion = usePrefersReducedMotion()
   const model = LAB_MODELS.find((m) => m.id === modelId) ?? LAB_MODELS[0]
@@ -103,6 +100,7 @@ export function ModelLab() {
     setClip((current) => (current && names.includes(current) ? current : names[0]))
   }, [])
   const handleFps = useCallback((next: number) => setFps(next), [])
+  const handleBolts = useCallback((names: string[]) => setBolts(names), [])
 
   const effectivePaused = paused || reducedMotion
   const { className: viewportClass } = VIEWPORTS[viewport]
@@ -137,6 +135,7 @@ export function ModelLab() {
               flagBolt={flagBolt}
               flagScale={flagScale}
               onClipsLoaded={handleClips}
+              onBoltsLoaded={handleBolts}
               onFps={handleFps}
               className="w-full h-full"
             />
@@ -239,15 +238,28 @@ export function ModelLab() {
         {flag && (
           <div className="mt-3 pt-3 border-t border-[#3d4855]/60">
             <p className="text-xs text-[#8892a0] mb-2">
-              Flag mount and size — the two numbers not read from the game&apos;s files. Match these against
-              the game, then tell me which pair is right and they become the defaults.
+              Flag mount and size — the two things not read from the game&apos;s files. Every bolt on this
+              model is listed, not a shortlist. Tell me the pair that matches the game and they become the
+              defaults.
             </p>
-            <div className="flex flex-wrap gap-2">
-              {FLAG_BOLTS.map((bolt) => (
-                <button key={bolt} onClick={() => setFlagBolt(bolt)} className={controlClass(flagBolt === bolt)}>
-                  *{bolt}
-                </button>
-              ))}
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-[#8892a0]">
+                Mount{" "}
+                <select
+                  value={flagBolt}
+                  onChange={(e) => setFlagBolt(e.target.value)}
+                  className="ml-1 px-2 py-1.5 rounded-md text-sm font-mono bg-[#2a3441] text-[#e6edf3] border border-[#3d4855]"
+                >
+                  {/* Keep the current value selectable even before the model has
+                      reported, so the dropdown never blanks on load. */}
+                  {(bolts.length > 0 ? bolts : [flagBolt]).map((bolt) => (
+                    <option key={bolt} value={bolt}>
+                      *{bolt}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <span className="text-xs text-[#8892a0]">{bolts.length} bolts</span>
               {FLAG_SCALES.map((scale) => (
                 <button key={scale} onClick={() => setFlagScale(scale)} className={controlClass(flagScale === scale)}>
                   {scale.toFixed(2)}x

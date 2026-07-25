@@ -29,6 +29,11 @@ const MD3_VERSION = 15
 /** MD3 stores vertex positions as shorts in 1/64th units. */
 const XYZ_SCALE = 1 / 64
 
+const GLM_IDENT = "2LGM"
+const GLM_VERSION = 6
+/** mdxmVertex_t: normal (12), position (12), packed weights (4), byte weights (4). */
+const GLM_VERTEX_SIZE = 32
+
 // ---------------------------------------------------------------------------
 // MD3 parsing
 // ---------------------------------------------------------------------------
@@ -133,6 +138,122 @@ function parseMd3(buf) {
     o += surface.ofsEnd
   }
 
+  return model
+}
+
+// ---------------------------------------------------------------------------
+// Ghoul2 (.glm) parsing — static models only
+// ---------------------------------------------------------------------------
+
+/**
+ * Reads LOD0 of a Ghoul2 `.glm` into the same shape as parseMd3.
+ *
+ * Only for models with no real skeleton — `animName` of `*default` and a single
+ * bone, which is what JK2 uses for the WORN weapon models. Every vertex is then
+ * rigidly bound to that one bone, so its stored position is already the final
+ * position and no skinning is needed. Animated player `.glm`s carry per-vertex
+ * weights against a separate `.gla` and still need the Blender route; this
+ * refuses them rather than silently emitting a bind-pose puddle.
+ *
+ * Worth having because the worn weapon models exist ONLY as `.glm`. The MD3s in
+ * the same folder are the first-person view model, the pickup, and LOD variants
+ * — see docs/jk2-model-conversion.md §7.5.
+ */
+function parseGlm(buf) {
+  const ident = buf.toString("latin1", 0, 4)
+  const version = buf.readInt32LE(4)
+  if (ident !== GLM_IDENT) throw new Error(`Not a Ghoul2 model (ident "${ident}")`)
+  if (version !== GLM_VERSION) throw new Error(`Unsupported .glm version ${version}, expected ${GLM_VERSION}`)
+
+  const animName = readString(buf, 72, 64)
+  const numBones = buf.readInt32LE(140)
+  if (numBones > 1 || (animName && animName !== "*default")) {
+    throw new Error(
+      `${animName || "this model"} is a skinned Ghoul2 model (${numBones} bones) — ` +
+        "it needs the Blender route in docs/jk2-model-conversion.md, not this converter",
+    )
+  }
+
+  const ofsLODs = buf.readInt32LE(148)
+  const numSurfaces = buf.readInt32LE(152)
+  const ofsSurfHierarchy = buf.readInt32LE(156)
+
+  // The hierarchy carries the names and shaders. Each entry ends in a
+  // variable-length child list, so it has to be walked rather than indexed.
+  const meta = []
+  let p = ofsSurfHierarchy
+  for (let i = 0; i < numSurfaces; i++) {
+    meta.push({ name: readString(buf, p, 64), shader: readString(buf, p + 68, 64) })
+    p += 144 + 4 * buf.readInt32LE(p + 140)
+  }
+
+  const model = { name: readString(buf, 8, 64), numFrames: 1, numTags: 0, tags: [], surfaces: [] }
+
+  // LOD 0 is the full-detail mesh. Its surface offsets are relative to the start
+  // of the offset table, which sits just past the LOD's own ofsEnd.
+  const table = ofsLODs + 4
+  for (let i = 0; i < numSurfaces; i++) {
+    const s = table + buf.readInt32LE(table + 4 * i)
+    const { name, shader } = meta[i]
+
+    // `*`-prefixed surfaces are bolt tags: three vertices encoding a transform,
+    // not geometry. glm-bolts.mjs is what reads those; drawn here they'd be
+    // stray triangles floating in the model.
+    if (name.startsWith("*")) continue
+
+    const numVerts = buf.readInt32LE(s + 12)
+    const ofsVerts = buf.readInt32LE(s + 16)
+    const numTriangles = buf.readInt32LE(s + 20)
+    const ofsTriangles = buf.readInt32LE(s + 24)
+
+    const surface = { name, shader, numVerts, numTriangles }
+
+    surface.indices = new Uint16Array(numTriangles * 3)
+    for (let t = 0; t < numTriangles; t++) {
+      const to = s + ofsTriangles + t * 12
+      // Same reversed winding as the MD3 path, for the same reason: the axis
+      // conversion mirrors one axis and flips every face.
+      surface.indices[t * 3 + 0] = buf.readInt32LE(to)
+      surface.indices[t * 3 + 1] = buf.readInt32LE(to + 8)
+      surface.indices[t * 3 + 2] = buf.readInt32LE(to + 4)
+    }
+
+    surface.positions = new Float32Array(numVerts * 3)
+    surface.normals = new Float32Array(numVerts * 3)
+    for (let v = 0; v < numVerts; v++) {
+      // mdxmVertex_t is 32 bytes and the NORMAL comes first, then the position.
+      // Reading them the intuitive way round is the classic way to get a model
+      // that looks vaguely right and is subtly inside out.
+      const vo = s + ofsVerts + v * GLM_VERTEX_SIZE
+      const [nx, ny, nz] = quakeToGltf(buf.readFloatLE(vo), buf.readFloatLE(vo + 4), buf.readFloatLE(vo + 8))
+      surface.normals[v * 3 + 0] = nx
+      surface.normals[v * 3 + 1] = ny
+      surface.normals[v * 3 + 2] = nz
+
+      const [gx, gy, gz] = quakeToGltf(
+        buf.readFloatLE(vo + 12),
+        buf.readFloatLE(vo + 16),
+        buf.readFloatLE(vo + 20),
+      )
+      surface.positions[v * 3 + 0] = gx
+      surface.positions[v * 3 + 1] = gy
+      surface.positions[v * 3 + 2] = gz
+    }
+
+    // Texture coordinates are a separate array sitting immediately after the
+    // vertices, rather than interleaved with them as MD3 does it.
+    const ofsUvs = ofsVerts + numVerts * GLM_VERTEX_SIZE
+    surface.uvs = new Float32Array(numVerts * 2)
+    for (let v = 0; v < numVerts; v++) {
+      const uo = s + ofsUvs + v * 8
+      surface.uvs[v * 2 + 0] = buf.readFloatLE(uo)
+      surface.uvs[v * 2 + 1] = buf.readFloatLE(uo + 4)
+    }
+
+    model.surfaces.push(surface)
+  }
+
+  model.numSurfaces = model.surfaces.length
   return model
 }
 
@@ -338,13 +459,17 @@ function main() {
 
   if (!input || !output) {
     console.error(
-      "usage: node scripts/md3-to-gltf.mjs <input.md3> <output.glb> [--assets root] [--texture path] [--exclude surface]...",
+      "usage: node scripts/md3-to-gltf.mjs <input.md3|.glm> <output.glb> [--assets root] [--texture path] [--exclude surface]...",
     )
     process.exit(1)
   }
 
-  const model = parseMd3(readFileSync(input))
-  console.log(`${model.name}`)
+  // Dispatch on the magic rather than the extension: same pipeline either way
+  // once the surfaces are read, and a mislabelled file should fail loudly.
+  const buf = readFileSync(input)
+  const magic = buf.toString("latin1", 0, 4)
+  const model = magic === GLM_IDENT ? parseGlm(buf) : parseMd3(buf)
+  console.log(`${model.name}  [${magic === GLM_IDENT ? "Ghoul2" : "MD3"}]`)
   console.log(`  frames ${model.numFrames}  tags ${model.numTags}  surfaces ${model.numSurfaces}`)
 
   // JK2 bundles pieces we don't want into some models — laser_trap.md3 carries a
