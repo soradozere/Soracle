@@ -15,6 +15,11 @@
 //     --model jan \
 //     --model lando \
 //     --model jedi \
+//     --model stormtrooper \
+//     --model swamptrooper \
+//     --model imperial \
+//     --model rebel \
+//     --model jeditrainer \
 //     --write lib/model-skins.ts
 
 import type { ModelSkin } from "@/lib/player-models"
@@ -183,6 +188,93 @@ export const MODEL_SKINS: Record<string, ModelSkin[]> = {
       label: "Red team",
       textures: 5,
       surfaces: { hips: 0, hips_torso: 1, torso: 1, torso_l_shoulder: 1, torso_r_shoulder: 1, r_arm: 1, r_hand_wrist: 1, l_arm: 1, l_hand_wrist: 1, head: 2, head_face: 3, head_eyes_mouth: 4 },
+    },
+  ],
+  stormtrooper: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 3,
+      surfaces: { hips: 0, hips_body: 0, l_leg: 0, l_leg_knee: 0, r_leg: 0, r_leg_knee: 0, torso: 0, torso_armor_neck_augment: 0, torso_body: 0, head: 1, l_arm: 0, l_arm_sleeve: 2, l_hand: 0, l_hand_plate: 0, l_arm_shoulder: 0, r_arm: 0, r_arm_shoulder: 0, r_arm_sleeve: 2, r_hand: 0, r_hand_plate: 0, torso_body_neck_augment: 0 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 3,
+      surfaces: { hips: 0, hips_body: 0, l_leg: 0, l_leg_knee: 0, r_leg: 0, r_leg_knee: 0, torso: 0, torso_armor_neck_augment: 0, torso_body: 0, head: 1, l_arm: 0, l_arm_sleeve: 2, l_hand: 0, l_hand_plate: 0, l_arm_shoulder: 0, r_arm: 0, r_arm_shoulder: 0, r_arm_sleeve: 2, r_hand: 0, r_hand_plate: 0, torso_body_neck_augment: 0 },
+    },
+  ],
+  swamptrooper: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 3,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, hips_torso: 1, torso: 1, head: 2, torso_accessories: 2, r_arm: 0, r_hand_wrist: 0, l_arm: 0, l_hand_wrist: 0 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 3,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, hips_torso: 1, torso: 1, head: 2, torso_accessories: 2, r_arm: 0, r_hand_wrist: 0, l_arm: 0, l_hand_wrist: 0 },
+    },
+  ],
+  imperial: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 4,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, hips_legs: 1, torso: 2, l_arm: 2, l_hand_wrist: 2, r_arm: 2, r_hand_wrist: 2, torso_collar: 3, torso_l_shoulder: 2, torso_r_shoulder: 2, head: 3 },
+    },
+    {
+      id: "commander",
+      label: "Commander",
+      textures: 6,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, hips_legs: 1, torso: 2, l_arm: 2, l_hand_wrist: 2, r_arm: 2, r_hand_wrist: 2, torso_collar: 3, torso_l_shoulder: 2, torso_r_shoulder: 2, head: 3, head_face: 4, head_eyes_mouth: 5 },
+    },
+    {
+      id: "officer",
+      label: "Officer",
+      textures: 5,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, hips_legs: 1, torso: 2, l_arm: 2, l_hand_wrist: 2, r_arm: 2, r_hand_wrist: 2, torso_collar: 3, torso_l_shoulder: 2, torso_r_shoulder: 2, head: 3, head_face: 4 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 4,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, hips_legs: 1, torso: 2, l_arm: 2, l_hand_wrist: 2, r_arm: 2, r_hand_wrist: 2, torso_collar: 3, torso_l_shoulder: 2, torso_r_shoulder: 2, head: 3 },
+    },
+  ],
+  rebel: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 4,
+      surfaces: { hips: 0, torso: 1, torso_l_shoulder: 1, torso_r_shoulder: 1, l_arm: 1, l_hand: 2, r_arm: 1, r_hand: 2, torso_vest: 3, head_helmet: 3, l_leg: 0, r_leg: 0, hips_belt: 3, hips_vest: 3, hips_torso: 1, torso_collar: 3, l_hand_wrist: 1, r_hand_wrist: 1 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 4,
+      surfaces: { hips: 0, torso: 1, torso_l_shoulder: 1, torso_r_shoulder: 1, l_arm: 1, l_hand: 2, r_arm: 1, r_hand: 2, torso_vest: 3, head_helmet: 3, l_leg: 0, r_leg: 0, hips_belt: 3, hips_vest: 3, hips_torso: 1, torso_collar: 3, l_hand_wrist: 1, r_hand_wrist: 1 },
+    },
+  ],
+  jeditrainer: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 5,
+      surfaces: { hips: 0, hips_torso: 1, torso: 1, torso_l_shoulder: 1, torso_r_shoulder: 1, r_arm: 1, r_hand: 2, r_hand_wrist: 1, l_arm: 1, l_hand: 2, l_hand_wrist: 1, head_eyes_mouth: 3, torso_shoulder_pad: 4, torso_collar: 4, l_leg: 0, r_leg: 0, hips_belt: 4 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 4,
+      surfaces: { hips: 0, hips_torso: 1, torso: 1, torso_l_shoulder: 1, torso_r_shoulder: 1, r_arm: 1, r_hand_wrist: 1, l_arm: 1, l_hand_wrist: 1, head_eyes_mouth: 2, torso_shoulder_pad: 3, torso_collar: 3, l_leg: 0, r_leg: 0, hips_belt: 3 },
     },
   ],
 }

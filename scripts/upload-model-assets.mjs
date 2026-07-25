@@ -48,6 +48,11 @@ const ASSETS = [
   ["jan.glb", "public/models/jan.glb"],
   ["lando.glb", "public/models/lando.glb"],
   ["jedi.glb", "public/models/jedi.glb"],
+  ["stormtrooper.glb", "public/models/stormtrooper.glb"],
+  ["swamptrooper.glb", "public/models/swamptrooper.glb"],
+  ["imperial.glb", "public/models/imperial.glb"],
+  ["rebel.glb", "public/models/rebel.glb"],
+  ["jeditrainer.glb", "public/models/jeditrainer.glb"],
   ["saber-hilt.glb", "public/models/saber-hilt.glb"],
   ...["blue", "green", "red", "purple", "orange", "yellow"].flatMap((colour) => [
     [`saber/${colour}_line.jpg`, `public/models/saber/${colour}_line.jpg`],
