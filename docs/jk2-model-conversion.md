@@ -695,6 +695,34 @@ bolts landing on the same bones with zero translation delta.
   This isn't one, deliberately: the compressed quaternion bone frames are the
   fiddly part and the donor's clips make them unnecessary.
 
+### When a texture is missing
+
+Both `glm-graft.mjs` and `glm-skins.mjs` print `no image for "<surface>"` (or
+throw, for a skin) when a shader names a `.tga` with no `.jpg` on the disc —
+JK2's own conversion just didn't ship one. Two on the roster so far: jan's own
+head, and jedi's `blue`/`red`/`j2` skins, which reach into `prisoner/` for a
+face and head that model never got a JPEG for either.
+
+Convert it yourself with `sips` (macOS) or any TGA-capable tool, into a
+**throwaway root that mirrors the real tree** — never into the game's own
+folders — then pass it as a second search location:
+
+```bash
+mkdir -p /tmp/jk2-textures/models/players/prisoner
+sips -s format jpeg <assets>/models/players/prisoner/head_01.tga \
+  --out /tmp/jk2-textures/models/players/prisoner/head_01.jpg
+
+node scripts/glm-skins.mjs --assets <root> --assets-fallback /tmp/jk2-textures \
+  --model jedi --write lib/model-skins.ts
+```
+
+Both scripts check every `--assets-fallback` for a `.jpg` **before** falling
+back to any root's `.tga` — extension outermost, root innermost — so a
+fallback can supply a *better* copy of a texture the main extract only has as
+`.tga`, not merely one it's missing outright. Getting that order backwards was
+a real bug here: root-outer found the main extract's own `.tga` first and
+never looked at the fallback at all.
+
 ---
 
 ## 8. Troubleshooting
