@@ -459,23 +459,30 @@ node scripts/md3-to-gltf.mjs "$A/models/flags/b_flag.md3" public/models/props/fl
 T=/tmp/texroot/models/weapons2/laser_trap && mkdir -p "$T"
 sips -s format jpeg "$A/models/weapons2/laser_trap/laser_trap.tga" --out "$T/laser_trap.jpg"
 sips -s format jpeg "$A/models/weapons2/laser_trap/carrier.tga"    --out "$T/carrier.jpg"
-node scripts/md3-to-gltf.mjs "$A/models/weapons2/laser_trap/laser_trap_pu.md3" \
+node scripts/md3-to-gltf.mjs "$A/models/weapons2/laser_trap/laser_trap_w.glm" \
   public/models/props/trip-mine.glb --assets /tmp/texroot
 ```
 
-**Pick the right one of the four.** A JK2 weapon folder holds several models and
-only one is what other players see in your hand:
+**Pick the right one of the five.** A JK2 weapon folder holds a model for each
+context, and only the `_w` one is what other players see you carrying:
 
 | File | What it is |
 |---|---|
-| `laser_trap.md3` | The **first-person view** model — a single flat charge, plus a `w_hand` to hold it. Converting this is why the mine first rendered as a 2D sliver. |
-| `laser_trap_pu.md3` | The **pickup / carried** bundle: three mine bodies and a carrier strap. This is the one. |
-| `laser_trap_w.glm` | Ghoul2 world model. Needs the `.glm` converter. |
-| `laser_trap_1/2.md3` | Damage or LOD states. |
+| `laser_trap.md3` | **First-person view** model — a single flat charge plus a `w_hand` to hold it. Converting this is why the mine first rendered as a 2D sliver. |
+| `laser_trap_1/2.md3` | LOD variants of the view model — same surfaces, fewer verts. |
+| `laser_trap_pu.md3` | The **pickup** lying on the ground: three mine bodies and a carrier strap. Looks convincing in a screenshot and is still wrong. |
+| **`laser_trap_w.glm`** | The **worn / world** model — what's in the hand of the player you're looking at. Ghoul2, not MD3. **This is the one.** |
 
-The tell is shape, not name: if a held prop looks flat, you probably have the
-view model. Check it against a screenshot of someone carrying it before
-converting anything else.
+I got this wrong twice: first the view model, then the pickup. The rule that
+actually works is the suffix — `_w` is the worn model, `_pu` is the pickup, bare
+is first-person — not how right the shape looks in isolation.
+
+Worn weapon models exist **only** as `.glm`, which is why this converter reads
+Ghoul2 as well as MD3. It takes them because they are static: `animName` of
+`*default` and a single bone, so every vertex is rigidly bound and its stored
+position is final. Animated player `.glm`s are weighted against a separate
+`.gla` and still need the Blender route — the converter refuses those rather
+than quietly emitting a bind-pose puddle.
 
 Nothing about placement is configured anywhere. The converter keeps the MD3's own origin and axes,
 §7 bakes each bolt with the orientation Ghoul2 gives it, and the viewer just parents one to the
