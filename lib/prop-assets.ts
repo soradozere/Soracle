@@ -1,7 +1,7 @@
 import { SABER_COLOURS } from "@/lib/saber-colours"
 
 // Catalogue of the shared prop assets the 3D viewer can request — the saber
-// hilt and its blade textures.
+// hilt and its blade textures, the CTF flags, and the trip mine.
 //
 // Same job, and same security boundary, as PLAYER_MODELS in lib/player-models.ts:
 // /api/model-url will only sign an object that appears here, so an id from a
@@ -17,15 +17,35 @@ import { SABER_COLOURS } from "@/lib/saber-colours"
 /** The converted `w_saber.md3` hilt, shared by every blade colour. */
 export const SABER_HILT_ASSET = "saber-hilt"
 
+/** The converted `laser_trap.md3`, carried in the right hand. */
+export const MINES_ASSET = "trip-mine"
+
+/** CTF teams whose flag a model can carry, in the order they're offered. */
+export const FLAG_TEAMS = ["red", "blue"] as const
+export type FlagTeam = (typeof FLAG_TEAMS)[number]
+
 /** Object name in the bucket for every prop the viewer may ask for. */
 export const PROP_ASSETS: Record<string, string> = {
   [SABER_HILT_ASSET]: "saber-hilt.glb",
+  [MINES_ASSET]: "props/trip-mine.glb",
+  ...Object.fromEntries(FLAG_TEAMS.map((team) => [flagAsset(team), `props/flag-${team}.glb`])),
   ...Object.fromEntries(
     SABER_COLOURS.flatMap((colour) => [
       [saberTextureAsset(colour.id, "line"), `saber/${colour.id}_line.jpg`],
       [saberTextureAsset(colour.id, "glow"), `saber/${colour.id}_glow.jpg`],
     ]),
   ),
+}
+
+/** Asset id for a team's flag. */
+export function flagAsset(team: string): string {
+  return `flag-${team}`
+}
+
+/** The flag asset for a team id, or null for anything not on the list. */
+export function findFlagAsset(team: string | null | undefined): string | null {
+  if (!team) return null
+  return (FLAG_TEAMS as readonly string[]).includes(team) ? flagAsset(team) : null
 }
 
 /**

@@ -14,18 +14,13 @@ import {
   type Texture,
 } from "three"
 import type { SaberColour } from "@/lib/saber-colours"
+import { MD3_SCALE } from "@/components/md3-prop"
 
 // Everything here is in NORMALISED model units — <Model> rescales every model so
 // the figure stands TARGET_HEIGHT = 2 tall, so 1.0 is half a person. The parent
 // counter-scales for the bone it hangs off, so these numbers mean the same thing
-// whatever units the source model used.
-const TARGET_HEIGHT = 2
-/**
- * A JK2 player is 64 Quake units tall and MD3 props are in raw Quake units, so
- * this puts a converted hilt at the right size against a normalised figure.
- */
-const QUAKE_UNITS_PER_PLAYER = 64
-const MD3_SCALE = TARGET_HEIGHT / QUAKE_UNITS_PER_PLAYER
+// whatever units the source model used. MD3_SCALE is shared with the other
+// converted props so everything the model carries is sized by one rule.
 
 /** Blade length in Quake units — JK2's is 40, scaled to match the hilt. */
 const BLADE_LENGTH = 40 * MD3_SCALE

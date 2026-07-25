@@ -446,6 +446,44 @@ already been through it — it refuses rather than corrupting node indices.
 
 ---
 
+## 7.5 Converting the props themselves
+
+Props are `.md3`, not `.glm` — static geometry, no skeleton — so they skip Blender entirely:
+
+```bash
+A="/path/to/assets0"
+node scripts/md3-to-gltf.mjs "$A/models/flags/r_flag.md3" public/models/props/flag-red.glb --assets "$A"
+node scripts/md3-to-gltf.mjs "$A/models/flags/b_flag.md3" public/models/props/flag-blue.glb --assets "$A"
+node scripts/md3-to-gltf.mjs "$A/models/weapons2/laser_trap/laser_trap.md3" \
+  public/models/props/trip-mine.glb --texture "$A/models/weapons2/laser_trap/laser_trap.jpg" --exclude w_hand
+```
+
+Nothing about placement is configured anywhere. The converter keeps the MD3's own origin and axes,
+§7 bakes each bolt with the orientation Ghoul2 gives it, and the viewer just parents one to the
+other — so a prop lands where the game puts it, or the conversion is wrong. Resist the urge to nudge
+an offset until it looks right; that hides the real fault and only holds for one model.
+
+Three flags earn their keep:
+
+| Flag | Why |
+|---|---|
+| `--assets <root>` | JK2 shader strings are full asset-root-relative paths. The flags live in `models/flags/` but name textures in `models/map_objects/mp/`, so a resolver that only looks in the MD3's own directory finds nothing — and *succeeds*, writing an untextured white model. Always pass this. |
+| `--exclude <surface>` | World weapon models ship a gloved `w_hand` so the first-person view has something to hold. Leave it in and the player grows a second right hand. |
+| `--texture <path>` | Last resort, when the shader name doesn't resolve to a file at all. |
+
+Two things about JK2's texture naming, both handled but worth knowing: shaders name `.tga` while the
+assets ship `.jpg` (a Quake 3 convention), and a model with more than one shader needs one material
+per shader — share a material across a flag's pole and cloth and the pole gets painted with the
+banner.
+
+**Sizing is derived, never dialled in.** MD3s are in raw Quake units and a JK2 player is 64 of them,
+so `MD3_SCALE` in `components/md3-prop.tsx` is `TARGET_HEIGHT / 64` and that's the whole story. The
+CTF flag is genuinely enormous — a 112-unit pole on a 64-unit player, banner alone as tall as the
+player. That's not a conversion error: measured off an in-game screenshot the banner covers 0.74 of
+the player's on-screen height, and 66 units of banner at the bolt's ~45° tilt predicts 0.73.
+
+---
+
 ## 8. Troubleshooting
 
 | Symptom | Cause / fix |
@@ -460,6 +498,9 @@ already been through it — it refuses rather than corrupting node indices.
 | Rig looks wrong / import errors on the JK2 `.gla` | Re-import with **Skeleton Changes: none** (see the JK2-vs-JA note above). |
 | Saber / flag doesn't appear at all | The `.glb` has no bolt nodes — §7 wasn't run, or the model in the bucket predates it. |
 | `glm-bolts.mjs` says the files disagree about axes | The `.glm` and `.glb` aren't the same model, or the export used a non-uniform scale. |
+| Converted prop is plain white, conversion reported success | `--assets <root>` wasn't passed, so the shader's asset-relative texture path never resolved (§7.5). |
+| Prop appears, but a spare gloved hand comes with it | World weapon models bundle a `w_hand` surface. `--exclude w_hand`. |
+| Prop is attached but nothing is on screen | Probably not a bug: the CTF flag is 1.75x a player tall and leaves a frame built around the figure. Check the bolt chain in the devtools scene graph before assuming it's misplaced. |
 
 ---
 

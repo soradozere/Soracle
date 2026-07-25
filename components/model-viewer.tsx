@@ -26,9 +26,10 @@ import {
   type SkinnedMesh,
 } from "three"
 import { Saber } from "@/components/saber"
+import { Md3Prop } from "@/components/md3-prop"
 import { useAssetUrls } from "@/hooks/use-asset-urls"
 import { findSaberColour } from "@/lib/saber-colours"
-import { SABER_HILT_ASSET, saberTextureAsset } from "@/lib/prop-assets"
+import { MINES_ASSET, SABER_HILT_ASSET, findFlagAsset, saberTextureAsset } from "@/lib/prop-assets"
 
 /** Every model is rescaled to this height in world units, so one camera fits all. */
 const TARGET_HEIGHT = 2
@@ -92,14 +93,21 @@ const HIP_BONES = ["pelvis", "hips", "lower_lumbar"]
  * scripts/glm-bolts.mjs — `bolt_r_hand`, `bolt_back`, `bolt_hip_bl` and so on.
  */
 const BOLT_PREFIX = "bolt_"
-/** JK2 bolts the in-hand saber to `*r_hand`, not to the hand joint itself. */
-const SABER_BOLT = "r_hand"
+/**
+ * JK2 bolts whatever the player is holding to `*r_hand`, not to the hand joint
+ * itself. The saber and the trip mines both go here, which is precisely why a
+ * model can't carry both: it's one slot in the geometry, not a rule we imposed.
+ */
+const HAND_BOLT = "r_hand"
+/** The flag rides `*back`, the tag between the shoulder blades. */
+const FLAG_BOLT = "back"
 
 // Resolved on its own, so switching blade colour doesn't change the hilt's URL.
 // Every resolve mints a fresh signed URL, and a new URL makes useGLTF treat the
 // same file as a new asset: re-download, re-suspend, and the model gets refitted
 // on the way back. Hoisted so the identity never changes.
 const HILT_ONLY = [SABER_HILT_ASSET]
+const MINES_ONLY = [MINES_ASSET]
 
 // Client-only animated glTF viewer. Everything here runs in the browser — the
 // page that renders it dynamic-imports with `ssr: false`, because WebGL has no
@@ -124,6 +132,17 @@ export type ModelViewerProps = {
   actionTrigger?: number
   /** Blade colour id from lib/saber-colours. Omit for an unarmed model. */
   saber?: string | null
+  /**
+   * Carry a handful of trip mines instead of a saber.
+   *
+   * Takes precedence over `saber`, because both hang off the same `*r_hand`
+   * bolt and drawing them together puts a hilt through a mine. Two props rather
+   * than one tagged union only because the profile still stores a bare colour
+   * column; the loadout makes the invalid pair unrepresentable.
+   */
+  mines?: boolean
+  /** CTF flag to carry on the back: "red", "blue", or nothing. */
+  flag?: string | null
   /** Reports the model's available clip names once loaded. */
   onClipsLoaded?: (names: string[]) => void
   /** Reports measured frames-per-second, roughly once a second. */
@@ -433,11 +452,13 @@ function Model({
   paused,
   actionTrigger,
   saber,
+  mines,
+  flag,
   onClipsLoaded,
   onFit,
 }: Pick<
   ModelViewerProps,
-  "src" | "animation" | "paused" | "actionTrigger" | "saber" | "onClipsLoaded"
+  "src" | "animation" | "paused" | "actionTrigger" | "saber" | "mines" | "flag" | "onClipsLoaded"
 > & {
   onFit: (nearTargetY: number) => void
 }) {
@@ -579,11 +600,16 @@ function Model({
     onFit(fitModel(fitGroup.current, scene, bones, overhang))
   })
 
-  // The hilt and blade textures live in the same private bucket as the models,
-  // so they're resolved to signed URLs rather than loaded from a path. The hilt
-  // is resolved separately from the textures because it's the same file whatever
+  // Every prop lives in the same private bucket as the models, so they're
+  // resolved to signed URLs rather than loaded from a path. The hilt is resolved
+  // separately from the blade textures because it's the same file whatever
   // colour the blade is — see HILT_ONLY.
-  const saberColour = findSaberColour(saber)
+  //
+  // Resolving the hand slot to at most one prop here is the whole exclusion:
+  // downstream there is no state in which both a hilt and a mine have a URL.
+  const saberColour = mines ? null : findSaberColour(saber)
+  const flagId = findFlagAsset(flag)
+
   const hilt = useAssetUrls(saberColour ? HILT_ONLY : null)
   const blade = useAssetUrls(
     saberColour
@@ -600,20 +626,41 @@ function Model({
     }
   }, [saberColour, hilt.urls, blade.urls])
 
+  const mine = useAssetUrls(mines ? MINES_ONLY : null)
+  const flagUrls = useAssetUrls(flagId ? [flagId] : null)
+
   return (
     <group ref={group}>
       <group ref={fitGroup}>
         <primitive object={scene} />
       </group>
 
-      {/* The saber gets its own Suspense boundary. Sharing the viewer's would
+      {/* Every prop gets its OWN Suspense boundary. Sharing the viewer's would
           mean a blade texture loading takes the whole model down to the fallback
           and remounts it — which re-runs the fit, and is why switching colour
-          used to resize the figure. A prop should never be able to do that. */}
+          used to resize the figure. Sharing one between the props would do the
+          same to each other: picking up a flag would blink the saber out. A prop
+          should never be able to do that. */}
       {saberColour && saberAssets && (
         <Suspense fallback={null}>
-          <Bolt point={bolts.get(SABER_BOLT)}>
+          <Bolt point={bolts.get(HAND_BOLT)}>
             <Saber colour={saberColour} assets={saberAssets} />
+          </Bolt>
+        </Suspense>
+      )}
+
+      {mines && mine.urls && (
+        <Suspense fallback={null}>
+          <Bolt point={bolts.get(HAND_BOLT)}>
+            <Md3Prop src={mine.urls[MINES_ASSET]} />
+          </Bolt>
+        </Suspense>
+      )}
+
+      {flagId && flagUrls.urls && (
+        <Suspense fallback={null}>
+          <Bolt point={bolts.get(FLAG_BOLT)}>
+            <Md3Prop src={flagUrls.urls[flagId]} />
           </Bolt>
         </Suspense>
       )}
@@ -629,6 +676,8 @@ export function ModelViewer({
   interactive = true,
   actionTrigger,
   saber,
+  mines,
+  flag,
   onClipsLoaded,
   onFps,
   className,
@@ -676,6 +725,8 @@ export function ModelViewer({
             paused={paused}
             actionTrigger={actionTrigger}
             saber={saber}
+            mines={mines}
+            flag={flag}
             onClipsLoaded={onClipsLoaded}
             onFit={handleFit}
           />
