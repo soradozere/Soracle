@@ -10,6 +10,8 @@
 // repo: they're Raven/Activision assets and this repo is public, so they live in
 // a private Supabase Storage bucket instead (see MODEL_BUCKET below).
 
+import { MODEL_SKINS } from "@/lib/model-skins"
+
 export const MODEL_BUCKET = "models"
 
 /** How long a minted signed URL stays valid. Long enough to load, short enough
@@ -57,57 +59,54 @@ export type PlayerModel = {
   skins: ModelSkin[]
 }
 
+/** Every model has a default; the variants come from the generated catalogue. */
+const PLAIN_SKINS: ModelSkin[] = [{ id: DEFAULT_SKIN, label: "Default", textures: 0, surfaces: {} }]
+
+function skinsFor(id: string): ModelSkin[] {
+  return MODEL_SKINS[id] ?? PLAIN_SKINS
+}
+
+// Kyle came through Blender; the rest were grafted onto his skeleton by
+// scripts/glm-graft.mjs, which is why they all animate identically — they are
+// literally driven by the same clips.
 export const PLAYER_MODELS: PlayerModel[] = [
   {
     id: "kyle",
     label: "Kyle Katarn",
     file: "kyle.glb",
     blurb: "The stock JK2 protagonist",
-    skins: [
-      { id: DEFAULT_SKIN, label: "Default", textures: 0, surfaces: {} },
-      {
-        id: "blue",
-        label: "Blue team",
-        textures: 3,
-        surfaces: {
-          hips: 0,
-          hips_torso: 1,
-          r_leg: 0,
-          l_leg: 0,
-          hips_belt: 2,
-          torso: 1,
-          torso_l_shoulder: 1,
-          torso_r_shoulder: 1,
-          r_arm: 1,
-          r_hand_wrist: 1,
-          l_arm: 1,
-          l_hand_wrist: 1,
-          torso_shoulder_pad: 2,
-          torso_collar: 2,
-        },
-      },
-      {
-        id: "red",
-        label: "Red team",
-        textures: 3,
-        surfaces: {
-          hips: 0,
-          hips_torso: 1,
-          r_leg: 0,
-          l_leg: 0,
-          hips_belt: 2,
-          torso: 1,
-          torso_l_shoulder: 1,
-          torso_r_shoulder: 1,
-          r_arm: 1,
-          r_hand_wrist: 1,
-          l_arm: 1,
-          l_hand_wrist: 1,
-          torso_shoulder_pad: 2,
-          torso_collar: 2,
-        },
-      },
-    ],
+    skins: skinsFor("kyle"),
+  },
+  {
+    id: "reborn",
+    label: "Reborn",
+    file: "reborn.glb",
+    blurb: "Hooded Sith apprentice — six skins, the most on the disc",
+    skins: skinsFor("reborn"),
+  },
+  {
+    id: "shadowtrooper",
+    label: "Shadowtrooper",
+    file: "shadowtrooper.glb",
+    blurb: "Cortosis-armoured stormtrooper with a saber",
+    skins: skinsFor("shadowtrooper"),
+  },
+  {
+    id: "tavion",
+    label: "Tavion",
+    file: "tavion.glb",
+    blurb: "Desann's apprentice",
+    skins: skinsFor("tavion"),
+  },
+  {
+    id: "desann",
+    label: "Desann",
+    file: "desann.glb",
+    // Worth knowing before anyone reports it as a bug: the viewer normalises
+    // every model to the same height, so he doesn't tower here the way he does
+    // in game.
+    blurb: "The fallen Jedi — huge in game, same height as everyone here",
+    skins: skinsFor("desann"),
   },
 ]
 

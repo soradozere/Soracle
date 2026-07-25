@@ -355,8 +355,17 @@ function main() {
   // The .glm is in raw Quake units; the .glb is whatever scale the Blender
   // import used. Rather than hardcode that, derive it by comparing the two
   // bounding boxes — they describe the same vertices, so the ratio is exact.
+  //
+  // ...but only over the surfaces BOTH files have. A `.glm` carries every LOD's
+  // worth of caps and bolt tags, and the export keeps only the ~19 drawn ones,
+  // so measuring all of them compares two different sets of vertices. On Kyle
+  // the extras happened to sit inside the visible mesh and the ratios agreed
+  // anyway; on Desann a cap reaches past it and the Y ratio came out 0.09823
+  // against 0.10000 elsewhere, which read as "these are different models".
+  const drawn = new Set((json.meshes ?? []).map((mesh) => mesh.name.replace(/_\d+$/, "")))
   const glmBox = { min: [Infinity, Infinity, Infinity], max: [-Infinity, -Infinity, -Infinity] }
   for (const surface of glm.surfaces) {
+    if (!drawn.has(surface.name)) continue
     for (const vert of surface.verts) {
       const p = quakeToGltf(vert.co)
       for (let i = 0; i < 3; i++) {
