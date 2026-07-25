@@ -31,17 +31,21 @@ const FLAG_PITCH = -30
 /**
  * Yaw is taken from the lumbar bone's +X axis, then turned by this.
  *
- * The engine's number is 270, and that is NOT necessarily ours. `CG_PlayerFlag`
- * reads `POSITIVE_X` off a Ghoul2 bone matrix; we read it off the same bone as
- * Blender exported it, and Blender's armatures run along local +Y rather than
- * +X, so the two conventions can differ by a quadrant. Everything else in this
- * file transcribes cleanly because it's expressed in the player's frame; this
- * one term is the only place the bone's own axes leak in.
+ * The engine's number is 270 and ours is 0, because the two aren't measuring
+ * from the same place: `CG_PlayerFlag` reads `POSITIVE_X` off a Ghoul2 bone
+ * matrix, and we read it off the same bone as Blender exported it, where
+ * armatures run along local +Y. Everything else in this file transcribes
+ * cleanly because it's expressed in the player's frame; this is the only term
+ * where the bone's own axes leak in.
  *
- * So it's the one flag constant that has to be settled by eye. The candidates
- * are just the four quadrants — see FLAG_YAWS in model-lab.tsx.
+ * DERIVED, not guessed, after two rounds of guessing wasted Sam's time. The
+ * banner's mean normal is the prop's local +X (measured off flag-red.glb),
+ * which this basis maps to the flag's forward. Forward in glTF is
+ * (cos·cos(yaw), sin, -cos·sin(yaw)) at pitch -30, so pointing it out of the
+ * player's back — +Z, since the model faces -Z — needs a total yaw of 270°.
+ * The lumbar bone measures -93.1°, so the offset is 270 - (-93.1) = 363 ≈ 0.
  */
-export const FLAG_YAW_OFFSET = 270
+export const FLAG_YAW_OFFSET = 0
 const FLAG_ROLL = 20
 
 /** The bone the game measures from. A bone, not a `*` tag surface. */

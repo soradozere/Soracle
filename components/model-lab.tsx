@@ -87,7 +87,7 @@ export function ModelLab() {
   const [hand, setHand] = useState<HandSlot>("blue")
   const [flag, setFlag] = useState<string | null>(null)
   const [flagScale, setFlagScale] = useState(0.4)
-  const [flagYaw, setFlagYaw] = useState(270)
+  const [flagYaw, setFlagYaw] = useState(0)
 
   const reducedMotion = usePrefersReducedMotion()
   const model = LAB_MODELS.find((m) => m.id === modelId) ?? LAB_MODELS[0]
