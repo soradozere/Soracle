@@ -75,12 +75,25 @@ function readSkin(path) {
  * JK2's `.skin` files name `.tga` almost everywhere while the assets shipped as
  * `.jpg` — a Quake 3 convention the engine resolves at load time — so the
  * extension in the file is a hint, not an answer.
+ *
+ * Tries every root for a `.jpg` before any root's `.tga` — extension outermost,
+ * root innermost — not the other way round. A `--assets-fallback` supplies a
+ * texture the main extract only has as `.tga`: jedi's blue/red/j2 skins point at
+ * `prisoner/head_01.tga`, which never shipped a `.jpg` counterpart on this disc.
+ * Root-outer would find the main extract's own `.tga` first and never look at
+ * the fallback at all — the preference has to run across every root before it
+ * drops to the next extension, or the fallback can only ever supply a file the
+ * main extract is missing outright, not one it has a worse copy of. See the
+ * matching note in scripts/glm-graft.mjs for why the conversion happens once,
+ * by hand, rather than here.
  */
-function resolveTexture(assetsRoot, shader) {
+function resolveTexture(assetsRoots, shader) {
   const stem = shader.replace(/\.[^./]+$/, "")
   for (const ext of TEXTURE_EXTENSIONS) {
-    const candidate = resolve(assetsRoot, stem + ext)
-    if (existsSync(candidate)) return candidate
+    for (const root of assetsRoots) {
+      const candidate = resolve(root, stem + ext)
+      if (existsSync(candidate)) return candidate
+    }
   }
   return null
 }
@@ -97,19 +110,25 @@ function parseArgs() {
   const opts = { out: DEFAULT_OUT, models: [] }
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--assets") opts.assets = args[++i]
+    else if (args[i] === "--assets-fallback") (opts.assetsFallback ??= []).push(args[++i])
     else if (args[i] === "--model") opts.models.push(args[++i])
     else if (args[i] === "--out") opts.out = args[++i]
     else if (args[i] === "--write") opts.write = args[++i]
     else throw new Error(`unrecognised argument: ${args[i]}`)
   }
   if (!opts.assets || opts.models.length === 0) {
-    throw new Error("usage: node scripts/glm-skins.mjs --assets <root> --model <name>... [--out dir] [--write path]")
+    throw new Error(
+      "usage: node scripts/glm-skins.mjs --assets <root> --model <name>... " +
+        "[--assets-fallback root]... [--out dir] [--write path]",
+    )
   }
+  opts.assetsFallback ??= []
   return opts
 }
 
 /** Extracts one model's variants, writing its textures and returning its entries. */
-function extractModel(assets, model, out) {
+function extractModel(assets, assetsFallback, model, out) {
+  const textureRoots = [assets, ...assetsFallback]
   const modelDir = resolve(assets, "models/players", model)
   if (!existsSync(modelDir)) throw new Error(`no such model: ${modelDir}`)
 
@@ -170,7 +189,7 @@ function extractModel(assets, model, out) {
 
     let bytes = 0
     for (const [shader, slot] of slots) {
-      const source = resolveTexture(assets, shader)
+      const source = resolveTexture(textureRoots, shader)
       if (!source) throw new Error(`${model}/${skin}: no image found for "${shader}"`)
 
       // Copied byte for byte, not re-encoded. A TGA would need converting first
@@ -237,11 +256,11 @@ function renderCatalogue(byModel) {
 }
 
 function main() {
-  const { assets, models, out, write } = parseArgs()
+  const { assets, assetsFallback, models, out, write } = parseArgs()
 
   const byModel = new Map()
   for (const model of models) {
-    byModel.set(model, extractModel(assets, model, out))
+    byModel.set(model, extractModel(assets, assetsFallback, model, out))
   }
 
   const catalogue = renderCatalogue(byModel)
