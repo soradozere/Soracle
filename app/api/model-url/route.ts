@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/admin"
-import { MODEL_BUCKET, MODEL_URL_TTL_SECONDS, findPlayerModel } from "@/lib/player-models"
+import { MODEL_BUCKET, MODEL_URL_TTL_SECONDS, findPlayerModel, findSkinAsset } from "@/lib/player-models"
 import { findPropAsset } from "@/lib/prop-assets"
 
 // Mints a short-lived signed URL for a JK2 player model.
@@ -17,13 +17,13 @@ import { findPropAsset } from "@/lib/prop-assets"
 //
 // The `id` is looked up in the catalogue rather than used as a path, so this
 // route can only ever sign objects we ship — no traversal, no enumeration. It
-// serves two catalogues: player models, and the shared props (saber hilt, blade
-// textures) that hang off them.
+// serves three catalogues: player models, the skin textures that repaint them,
+// and the shared props (saber hilt, blade textures) that hang off them.
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const id = searchParams.get("id")
-  const file = findPlayerModel(id)?.file ?? findPropAsset(id)
+  const file = findPlayerModel(id)?.file ?? findSkinAsset(id) ?? findPropAsset(id)
 
   if (!file) {
     return NextResponse.json({ error: "Unknown model" }, { status: 404 })
