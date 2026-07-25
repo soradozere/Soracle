@@ -26,7 +26,9 @@ import {
   type SkinnedMesh,
 } from "three"
 import { Saber } from "@/components/saber"
+import { useAssetUrls } from "@/hooks/use-asset-urls"
 import { findSaberColour } from "@/lib/saber-colours"
+import { SABER_HILT_ASSET, saberAssetIds, saberTextureAsset } from "@/lib/prop-assets"
 
 /** Every model is rescaled to this height in world units, so one camera fits all. */
 const TARGET_HEIGHT = 2
@@ -571,7 +573,20 @@ function Model({
     onFit(fitModel(fitGroup.current, scene, bones, overhang))
   })
 
+  // The hilt and blade textures live in the same private bucket as the models,
+  // so they're resolved to signed URLs rather than loaded from a path. Held back
+  // until all three have arrived — see useAssetUrls.
   const saberColour = findSaberColour(saber)
+  const { urls } = useAssetUrls(saberColour ? saberAssetIds(saberColour.id) : null)
+
+  const saberAssets = useMemo(() => {
+    if (!saberColour || !urls) return null
+    return {
+      hilt: urls[SABER_HILT_ASSET],
+      core: urls[saberTextureAsset(saberColour.id, "line")],
+      glow: urls[saberTextureAsset(saberColour.id, "glow")],
+    }
+  }, [saberColour, urls])
 
   return (
     <group ref={group}>
@@ -579,9 +594,9 @@ function Model({
         <primitive object={scene} />
       </group>
 
-      {saberColour && (
+      {saberColour && saberAssets && (
         <Bolt point={bolts.get(SABER_BOLT)}>
-          <Saber colour={saberColour} />
+          <Saber colour={saberColour} assets={saberAssets} />
         </Bolt>
       )}
     </group>
