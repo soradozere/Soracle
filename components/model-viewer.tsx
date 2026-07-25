@@ -45,17 +45,31 @@ const FOV = 40
 const HEIGHT_PER_UNIT = 2 * Math.tan(MathUtils.degToRad(FOV) / 2)
 
 /**
- * Zoomed out: the whole figure with a margin around it. The margin used to be
- * 4%, which framed the figure exactly and left carried props with nowhere to go.
+ * The framing the viewer OPENS at: the whole figure with a little margin.
+ *
+ * This is what a profile page shows, so it stays tight around the person. It
+ * used to double as the zoom-out limit, which is why widening it to fit a
+ * carried flag also shrank the figure everywhere it's embedded.
  */
 const FAR_FRAME_HEIGHT = TARGET_HEIGHT * 1.15
+/**
+ * How far you can PULL BACK from that, which is a separate question.
+ *
+ * Sized to the tallest thing a model can carry: the CTF flag at full size tips
+ * out at ~2.24 figure-heights, and this frames 0 to ~2.25 of them once the
+ * target has risen (see ZoomAwareTarget). So the far end of the scroll wheel
+ * shows everything, whatever the flag scale turns out to be, without the
+ * default view paying for it.
+ */
+const PULLBACK_FRAME_HEIGHT = TARGET_HEIGHT * 2.5
 /** Zoomed in: about a head and a half — a face close-up, not a bust. */
 const NEAR_FRAME_HEIGHT = TARGET_HEIGHT * 0.2
 
-// Zoom limits are the two framings above, converted to distances. Deriving them
-// rather than picking numbers is what guarantees "fully zoomed out" means "the
+// Zoom limits are the framings above, converted to distances. Deriving them
+// rather than picking numbers is what guarantees "the default view" means "the
 // figure exactly fills the canvas" instead of "the figure plus some sky".
-const MAX_DISTANCE = FAR_FRAME_HEIGHT / HEIGHT_PER_UNIT
+const FAR_DISTANCE = FAR_FRAME_HEIGHT / HEIGHT_PER_UNIT
+const MAX_DISTANCE = PULLBACK_FRAME_HEIGHT / HEIGHT_PER_UNIT
 const MIN_DISTANCE = NEAR_FRAME_HEIGHT / HEIGHT_PER_UNIT
 
 // The orbit target RISES as you zoom in. With a fixed target you have to choose
@@ -65,6 +79,12 @@ const MIN_DISTANCE = NEAR_FRAME_HEIGHT / HEIGHT_PER_UNIT
 const FAR_TARGET_Y = TARGET_HEIGHT * 0.5
 /** Only used when a model has no recognisable head bone. */
 const FALLBACK_NEAR_TARGET_Y = TARGET_HEIGHT * 0.9
+/**
+ * Where the target ends up at full pull-back. It rises AGAIN out here, so the
+ * room the extra distance buys is spent above the head, where anything carried
+ * sticks up, rather than half of it on empty floor.
+ */
+const PULLBACK_TARGET_Y = TARGET_HEIGHT
 
 /** How far above the target the camera sits — just enough to avoid a dead-flat view. */
 const CAMERA_RISE = TARGET_HEIGHT * 0.04
@@ -72,12 +92,16 @@ const CAMERA_RISE = TARGET_HEIGHT * 0.04
 // Vertical orbit is locked to the camera's starting elevation: players get to
 // spin the model and zoom, but can't tumble it upside down or stare at the soles
 // of its feet. Free vertical orbit read as chaotic in testing.
-const POLAR_ANGLE = Math.acos(CAMERA_RISE / MAX_DISTANCE)
+//
+// Taken from FAR_DISTANCE, not MAX_DISTANCE — this has to be the elevation the
+// camera actually STARTS at, and the camera now opens short of the zoom-out
+// limit rather than sitting on it.
+const POLAR_ANGLE = Math.acos(CAMERA_RISE / FAR_DISTANCE)
 
 // Hoisted so the object identity never changes — r3f re-applies Canvas props
 // that look new, and re-seating the camera mid-zoom would fight OrbitControls.
 const INITIAL_CAMERA = {
-  position: [0, FAR_TARGET_Y + CAMERA_RISE, Math.sqrt(MAX_DISTANCE ** 2 - CAMERA_RISE ** 2)] as [
+  position: [0, FAR_TARGET_Y + CAMERA_RISE, Math.sqrt(FAR_DISTANCE ** 2 - CAMERA_RISE ** 2)] as [
     number,
     number,
     number,
@@ -422,9 +446,30 @@ function ZoomAwareTarget({ nearTargetY }: { nearTargetY: number }) {
 
   useFrame(() => {
     if (!controls?.getDistance || !controls.target) return
-    // 0 at closest, 1 at furthest.
-    const t = MathUtils.clamp((controls.getDistance() - MIN_DISTANCE) / (MAX_DISTANCE - MIN_DISTANCE), 0, 1)
-    const desiredY = MathUtils.lerp(nearTargetY, FAR_TARGET_Y, t)
+    const distance = controls.getDistance()
+
+    // Two segments, hinged at the default framing.
+    //
+    // Closest → default is the original behaviour, unchanged: the target slides
+    // down from the face to mid-body as you pull out. Default → fully out is
+    // new, and sends it back UP towards head height, because everything the
+    // extra room is for — a flag, a pole, whatever comes next — is above the
+    // model, and a target left at mid-body would spend half the new frame on
+    // floor. Anchoring the first segment to FAR_DISTANCE rather than to the
+    // zoom-out limit is what keeps the normal range feeling exactly as before.
+    const desiredY =
+      distance <= FAR_DISTANCE
+        ? MathUtils.lerp(
+            nearTargetY,
+            FAR_TARGET_Y,
+            MathUtils.clamp((distance - MIN_DISTANCE) / (FAR_DISTANCE - MIN_DISTANCE), 0, 1),
+          )
+        : MathUtils.lerp(
+            FAR_TARGET_Y,
+            PULLBACK_TARGET_Y,
+            MathUtils.clamp((distance - FAR_DISTANCE) / (MAX_DISTANCE - FAR_DISTANCE), 0, 1),
+          )
+
     const delta = desiredY - controls.target.y
     if (Math.abs(delta) < 1e-4) return
 
