@@ -66,6 +66,14 @@ const MINES = "mines"
 /** Only so the inactive flag buttons read at a glance which team they are. */
 const TEAM_COLOURS: Record<string, string> = { red: "#e74c3c", blue: "#3b7dff" }
 
+// Flag mount and size are the only two numbers in the prop pipeline that aren't
+// read out of the game's files — JK2 shrinks a carried flag by an amount no
+// model records, and which of the 46 bolts it uses is a judgement. These let
+// them be compared against real footage instead of argued about. The candidates
+// are every bolt a flag could plausibly hang from.
+const FLAG_BOLTS = ["back", "chestg", "hip_bl", "hip_br", "hip_l", "hip_r", "shldr_l", "shldr_r"]
+const FLAG_SCALES = [0.5, 0.6, 0.75, 0.9, 1]
+
 export function ModelLab() {
   const [modelId, setModelId] = useState(LAB_MODELS[0].id)
   const [clips, setClips] = useState<string[]>([])
@@ -76,6 +84,8 @@ export function ModelLab() {
   const [viewport, setViewport] = useState<ViewportKey>("desktop")
   const [hand, setHand] = useState<HandSlot>("blue")
   const [flag, setFlag] = useState<string | null>(null)
+  const [flagBolt, setFlagBolt] = useState("back")
+  const [flagScale, setFlagScale] = useState(0.75)
 
   const reducedMotion = usePrefersReducedMotion()
   const model = LAB_MODELS.find((m) => m.id === modelId) ?? LAB_MODELS[0]
@@ -121,6 +131,8 @@ export function ModelLab() {
               saber={hand === "none" || hand === MINES ? null : hand}
               mines={hand === MINES}
               flag={flag}
+              flagBolt={flagBolt}
+              flagScale={flagScale}
               onClipsLoaded={handleClips}
               onFps={handleFps}
               className="w-full h-full"
@@ -218,6 +230,29 @@ export function ModelLab() {
             </button>
           ))}
         </div>
+
+        {/* Only shown while a flag is up, because that's the only time either
+            control does anything, and they'd otherwise be 13 dead buttons. */}
+        {flag && (
+          <div className="mt-3 pt-3 border-t border-[#3d4855]/60">
+            <p className="text-xs text-[#8892a0] mb-2">
+              Flag mount and size — the two numbers not read from the game&apos;s files. Match these against
+              the game, then tell me which pair is right and they become the defaults.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {FLAG_BOLTS.map((bolt) => (
+                <button key={bolt} onClick={() => setFlagBolt(bolt)} className={controlClass(flagBolt === bolt)}>
+                  *{bolt}
+                </button>
+              ))}
+              {FLAG_SCALES.map((scale) => (
+                <button key={scale} onClick={() => setFlagScale(scale)} className={controlClass(flagScale === scale)}>
+                  {scale.toFixed(2)}x
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
         {resolved.source === "local" && (
           <p className="mt-4 text-xs text-[#f39c12]">

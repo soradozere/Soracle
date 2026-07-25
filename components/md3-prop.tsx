@@ -29,14 +29,16 @@ export const MD3_SCALE = TARGET_HEIGHT / QUAKE_UNITS_PER_PLAYER
  * anyone tuned an offset. A prop that needs tuning to sit right is a sign the
  * conversion is wrong, not that the number needs nudging.
  *
- * Checked against in-game screenshots: the CTF banner measures 0.74 of a
- * player's height on screen there, and 66 Quake units of banner on a 64-unit
- * player leaning ~45° gives 0.73. Nothing here is scaled to taste.
+ * `scale` is the one exception, and it is NOT a fudge factor — it's for a scale
+ * the engine applies at render time that the model file has no way to record.
+ * See CARRIED_FLAG_SCALE in model-viewer.tsx for the only current case. Reach
+ * for it only with evidence that the game itself does the same; a prop that
+ * merely *looks* wrong is a conversion bug, and scaling it hides that.
  *
  * The scene is cloned because drei caches one object per URL: two viewers on a
  * page would otherwise be moving the same nodes around.
  */
-export function Md3Prop({ src }: { src: string }) {
+export function Md3Prop({ src, scale = 1 }: { src: string; scale?: number }) {
   const { scene } = useGLTF(src)
   const model = useMemo(() => scene.clone(true), [scene])
 
@@ -57,5 +59,5 @@ export function Md3Prop({ src }: { src: string }) {
     })
   }, [model])
 
-  return <primitive object={model} scale={MD3_SCALE} />
+  return <primitive object={model} scale={MD3_SCALE * scale} />
 }

@@ -476,11 +476,23 @@ assets ship `.jpg` (a Quake 3 convention), and a model with more than one shader
 per shader — share a material across a flag's pole and cloth and the pole gets painted with the
 banner.
 
-**Sizing is derived, never dialled in.** MD3s are in raw Quake units and a JK2 player is 64 of them,
-so `MD3_SCALE` in `components/md3-prop.tsx` is `TARGET_HEIGHT / 64` and that's the whole story. The
-CTF flag is genuinely enormous — a 112-unit pole on a 64-unit player, banner alone as tall as the
-player. That's not a conversion error: measured off an in-game screenshot the banner covers 0.74 of
-the player's on-screen height, and 66 units of banner at the bolt's ~45° tilt predicts 0.73.
+**Sizing is derived, never dialled in.** MD3s are in raw Quake units and a JK2 player is 64 of them
+(Kyle measures 64.0 exactly), so `MD3_SCALE` in `components/md3-prop.tsx` is `TARGET_HEIGHT / 64` and
+that's the whole story for every prop but one.
+
+**The exception, and the lesson.** `r_flag.md3` is the flag that STANDS IN THE BASE: a 112.8-unit
+pole and a 66.4-unit banner, so 1.76x a player. JK2 shrinks it when a player picks it up, and
+*nothing in the file records that* — so reading the file alone gives a confidently wrong answer, and
+the render towers over the figure. `CARRIED_FLAG_SCALE` in `components/model-viewer.tsx` exists for
+exactly this, and it is the only scale factor in the pipeline.
+
+The general rule still holds: a prop that looks wrong is a conversion bug, not a number to nudge.
+The flag is the one case where the *engine* applies something the asset doesn't carry. Before adding
+another such factor, get evidence the game does the same — and prefer checking against real footage
+over measuring screenshots, which carry more perspective error than this kind of question can
+tolerate (an in-game shot from above and behind, with the flag leaning toward the camera, inflated
+every vertical estimate I took from it). `/lab/model` has bolt and scale pickers for the flag so the
+two can be compared side by side against the game instead of argued from stills.
 
 ---
 
@@ -500,7 +512,7 @@ the player's on-screen height, and 66 units of banner at the bolt's ~45° tilt p
 | `glm-bolts.mjs` says the files disagree about axes | The `.glm` and `.glb` aren't the same model, or the export used a non-uniform scale. |
 | Converted prop is plain white, conversion reported success | `--assets <root>` wasn't passed, so the shader's asset-relative texture path never resolved (§7.5). |
 | Prop appears, but a spare gloved hand comes with it | World weapon models bundle a `w_hand` surface. `--exclude w_hand`. |
-| Prop is attached but nothing is on screen | Probably not a bug: the CTF flag is 1.75x a player tall and leaves a frame built around the figure. Check the bolt chain in the devtools scene graph before assuming it's misplaced. |
+| Prop is attached but nothing is on screen | Check the bolt chain in the scene graph before assuming it's misplaced — it's usually mounted correctly and simply out of frame. The base-standing CTF flag at full size does this. |
 
 ---
 
