@@ -14,6 +14,7 @@ import type { Player } from "@/lib/types"
 import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucide-react"
 import { ProfileModelFigure } from "@/components/profile-model-panel"
 import { PLAYER_MODELS } from "@/lib/player-models"
+import { SABER_COLOURS } from "@/lib/saber-colours"
 import { BADGE_META } from "@/lib/badge-meta"
 import { BadgeIcon } from "@/components/badge-icon"
 import { AchievementsStrip } from "@/components/achievements-strip"
@@ -78,6 +79,7 @@ interface EditableFields {
   title: string
   profile_theme: string
   model: string
+  saber: string
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -509,6 +511,7 @@ function EditProfileDialog({
     const title = fields.title || null
     const profile_theme = fields.profile_theme || null
     const model = fields.model || null
+    const saber = fields.saber || null
 
     if (canEditTooltip) {
       // Admin path: writes straight to the players table via the browser
@@ -517,14 +520,14 @@ function EditProfileDialog({
       const supabase = createClient()
       const { error } = await supabase
         .from("players")
-        .update({ tooltip, avatar_url, spotlight_url, title, profile_theme, model })
+        .update({ tooltip, avatar_url, spotlight_url, title, profile_theme, model, saber })
         .eq("id", playerId)
       setSaving(false)
       if (error) {
         setSaveError(error.message)
         return
       }
-      onSaved({ tooltip: tooltip ?? "", avatar_url: avatar_url ?? "", spotlight_url: spotlight_url ?? "", title: title ?? "", profile_theme: profile_theme ?? "", model: model ?? "" })
+      onSaved({ tooltip: tooltip ?? "", avatar_url: avatar_url ?? "", spotlight_url: spotlight_url ?? "", title: title ?? "", profile_theme: profile_theme ?? "", model: model ?? "", saber: saber ?? "" })
       onOpenChange(false)
       return
     }
@@ -534,7 +537,7 @@ function EditProfileDialog({
     const res = await fetch("/api/player-profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ avatar_url, spotlight_url, title, profile_theme, model }),
+      body: JSON.stringify({ avatar_url, spotlight_url, title, profile_theme, model, saber }),
     })
     const data = await res.json()
     setSaving(false)
@@ -549,6 +552,7 @@ function EditProfileDialog({
       title: title ?? "",
       profile_theme: profile_theme ?? "",
       model: model ?? "",
+      saber: saber ?? "",
     })
     onOpenChange(false)
   }
@@ -701,6 +705,39 @@ function EditProfileDialog({
               An animated JK2 player model on your profile. Not tied to crests — anyone can pick any model.
             </p>
           </div>
+          {/* Only offered once a model is set — a blade colour on its own has
+              nothing to hang off, and an enabled control that does nothing is
+              worse than one that isn't there. */}
+          {fields.model && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8892a0]">Lightsaber</Label>
+              <Select
+                value={fields.saber || "none"}
+                onValueChange={(v) => setFields((f) => ({ ...f, saber: v === "none" ? "" : v }))}
+              >
+                <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                  <SelectValue placeholder="No saber" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                  <SelectItem value="none">No saber</SelectItem>
+                  {SABER_COLOURS.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      <span className="inline-flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full inline-block"
+                          style={{ background: c.glow, boxShadow: `0 0 6px ${c.glow}` }}
+                        />
+                        {c.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-[#8892a0]">
+                Ignited in your model&apos;s hand. Also free — pick whichever colour you like.
+              </p>
+            </div>
+          )}
           {canChangePassword && (
             <div className="pt-3 border-t border-[#3d4855]">
               {!showPassword ? (
@@ -784,6 +821,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
     title: player.title ?? "",
     profile_theme: player.profile_theme ?? "",
     model: player.model ?? "",
+    saber: player.saber ?? "",
   })
   useEffect(() => {
     setFields({
@@ -793,6 +831,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
       title: player.title ?? "",
       profile_theme: player.profile_theme ?? "",
       model: player.model ?? "",
+      saber: player.saber ?? "",
     })
   }, [player.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1139,7 +1178,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                   )}
                 </div>
 
-                {fields.model && <ProfileModelFigure modelId={fields.model} />}
+                {fields.model && <ProfileModelFigure modelId={fields.model} saber={fields.saber || null} />}
               </div>
             </SectionCard>
 

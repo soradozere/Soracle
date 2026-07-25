@@ -26,6 +26,9 @@ export interface Player {
   // Chosen JK2 3D model (migration 023). A catalogue id from lib/player-models.ts,
   // never a path — the asset itself is resolved through /api/model-url.
   model?: string | null
+  // Lightsaber blade colour (migration 024). A catalogue id from
+  // lib/saber-colours.ts. Only visible on a model that has bolt points baked in.
+  saber?: string | null
 }
 
 export interface BalanceResult {
