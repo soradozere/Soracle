@@ -288,15 +288,27 @@ const quakeToGltf = ([x, y, z]) => [x, z, -y]
 /**
  * Turns a tag triangle into an orientation.
  *
- * The first edge is the axis a prop points along: on `*r_hand` it comes out
- * near-vertical in the bind pose, which is a fist holding a blade upright. That
- * becomes +Y, because that's the axis our props are modelled along. The third
- * vertex only has to fix the roll, and it isn't perpendicular to the first edge
- * on most tags, so the frame is squared up through the triangle normal rather
- * than used raw.
+ * The first edge gives the axis a prop points along, and it runs v1 → v0, not
+ * the other way round. That direction is worth stating precisely because both
+ * readings look plausible on screen — the saber lies along the same line either
+ * way, just end for end — and the wrong one puts the blade up the inside of the
+ * forearm with the hilt hanging past the fingertips.
+ *
+ * The check that settles it: project the hand's own vertices onto this axis.
+ * `r_hand` covers t ∈ [-6.33, 2.54] with the fingers at the positive end (the
+ * forearm sits at t ∈ [-14.97, -4.89], so the negative end is the wrist). The
+ * hilt occupies [-8.06, 4.28] and its emitter is at 4.36 — the fist closes
+ * around the middle of the grip and the blade starts 1.8 units clear of the
+ * fingertips. Reverse the axis and the emitter ends up buried in the wrist.
+ *
+ * +Y because that's the axis props are modelled along. The third vertex only
+ * fixes the roll, and it isn't perpendicular to the first edge on most tags, so
+ * the frame is squared up through the triangle normal rather than used raw.
+ * Flipping the axis doesn't affect handedness — zAxis is derived from the other
+ * two, so the basis stays right-handed either way.
  */
 function boltBasis(v0, v1, v2) {
-  const yAxis = normalize(sub(v1, v0))
+  const yAxis = normalize(sub(v0, v1))
   const normal = normalize(cross(sub(v1, v0), sub(v2, v0)))
   const xAxis = normalize(cross(yAxis, normal))
   const zAxis = cross(xAxis, yAxis)
