@@ -14,11 +14,21 @@
  *   node scripts/upload-model-assets.mjs kyle.glb       # just one object
  */
 
-import { readFileSync, existsSync } from "node:fs"
-import { resolve, extname } from "node:path"
+import { readFileSync, existsSync, readdirSync } from "node:fs"
+import { resolve, extname, join } from "node:path"
 import { createClient } from "@supabase/supabase-js"
 
 const BUCKET = "models"
+
+/** Every `.jpg` under a directory, as paths relative to it. */
+function walkJpegs(root, prefix = "") {
+  if (!existsSync(root)) return []
+  return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(root, entry.name)
+    if (entry.isDirectory()) return walkJpegs(path, join(prefix, entry.name))
+    return entry.name.endsWith(".jpg") ? [join(prefix, entry.name)] : []
+  })
+}
 
 /**
  * Object name in the bucket → path under public/. They match today, but the
@@ -26,7 +36,14 @@ const BUCKET = "models"
  * than a silent 404.
  */
 const ASSETS = [
+  // Player models. Kyle came through Blender; the rest were grafted onto his
+  // skeleton by scripts/glm-graft.mjs. Listed rather than globbed, so uploading
+  // a model is as deliberate as adding it to PLAYER_MODELS.
   ["kyle.glb", "public/models/kyle.glb"],
+  ["reborn.glb", "public/models/reborn.glb"],
+  ["shadowtrooper.glb", "public/models/shadowtrooper.glb"],
+  ["tavion.glb", "public/models/tavion.glb"],
+  ["desann.glb", "public/models/desann.glb"],
   ["saber-hilt.glb", "public/models/saber-hilt.glb"],
   ...["blue", "green", "red", "purple", "orange", "yellow"].flatMap((colour) => [
     [`saber/${colour}_line.jpg`, `public/models/saber/${colour}_line.jpg`],
@@ -38,14 +55,18 @@ const ASSETS = [
   ["props/flag-red.glb", "public/models/props/flag-red.glb"],
   ["props/flag-blue.glb", "public/models/props/flag-blue.glb"],
   // Skin variants: only the textures that differ from the model's default, which
-  // is already embedded in its .glb. Written by scripts/glm-skins.mjs, and the
-  // slot numbering has to match the `surfaces` maps in lib/player-models.ts.
-  ...["blue", "red"].flatMap((skin) =>
-    [0, 1, 2].map((slot) => [
-      `skins/kyle/${skin}/${slot}.jpg`,
-      `public/models/skins/kyle/${skin}/${slot}.jpg`,
-    ]),
-  ),
+  // is already embedded in its .glb.
+  //
+  // Scanned rather than listed, because these are generated — 72 files across
+  // five models, and scripts/glm-skins.mjs decides how many. Enumerating them
+  // here would be a second copy of that decision, out of date the moment a model
+  // is added. Uploading one that isn't in the catalogue costs a few KB and
+  // nothing else: /api/model-url only ever signs ids it can find in
+  // lib/player-models.ts, so the read side stays the boundary it was.
+  ...walkJpegs(resolve(process.cwd(), "public/models/skins")).map((relative) => [
+    `skins/${relative}`,
+    `public/models/skins/${relative}`,
+  ]),
 ]
 
 const CONTENT_TYPES = {

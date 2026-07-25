@@ -9,6 +9,12 @@ and no custom code.
 
 **Target for the first pass:** stock Kyle, one idle animation, under 2 MB.
 
+> **Adding a humanoid player model? You probably don't need any of this.** All 30
+> humanoid models on the disc share one skeleton, and Kyle has already been
+> through Blender — so `scripts/glm-graft.mjs` can put a new model's mesh on his
+> rig in one command. **Skip to §7.8.** Sections 1–6 are for the first model on a
+> skeleton, or for a non-humanoid (the sentry, R2-D2, the ATST).
+
 ---
 
 ## 0. What you need
@@ -623,6 +629,74 @@ second wrong and they look washed out beside the surfaces you didn't swap.
 
 ---
 
+## 7.8 Adding a humanoid model without Blender
+
+Every humanoid player model on the disc declares the same skeleton. Read it
+straight out of the `.glm` headers:
+
+```
+kyle           anim=models/players/_humanoid/_humanoid  bones=72
+reborn         anim=models/players/_humanoid/_humanoid  bones=72
+desann         anim=models/players/_humanoid/_humanoid  bones=72
+...30 of them, identical
+```
+
+Same bones, same names, same base pose. So the expensive half of a conversion —
+the skeleton, its inverse bind matrices, and the animation clips — is the *same
+file every time*, and Kyle already has it. `scripts/glm-graft.mjs` takes all of
+that verbatim and swaps in another model's geometry:
+
+```bash
+node scripts/glm-graft.mjs --assets "<extracted assets0>" --model reborn
+node scripts/glm-bolts.mjs "<assets>/models/players/reborn/model.glm" \
+  "<assets>/models/players/_humanoid/_humanoid.gla" \
+  public/models/reborn.glb --out public/models/reborn.glb
+```
+
+Two commands, no Blender, and the result animates identically to Kyle because it
+is literally driven by his clips. **Bolts are a separate step on purpose**: a
+different model's tags sit in different places, so the graft drops the donor's
+rather than leaving Kyle's hands on someone else.
+
+### What it checks before it will run
+
+Nothing here is assumed. It refuses rather than producing something subtly wrong:
+
+- the two models declare the **same skeleton and bone count**;
+- **every `.gla` bone name exists in the donor's `.glb`** — and it maps by NAME,
+  because the two orders differ (the `.gla`'s third bone is `Motion`, the glTF's
+  is `lfemurX`). Wrong here means limbs driven by the wrong joints;
+- the `.glm` → `.glb` **scale agrees across all three axes**, derived by
+  comparing the donor's own two files rather than hardcoding 0.1.
+
+It also **works out the triangle winding rather than assuming it**. Each triangle
+carries the answer — a face wound counter-clockwise about its vertex normals has
+`cross(v1-v0, v2-v0)` pointing the same way — so it counts the agreements and
+prints the verdict (`99.6% of 2689 triangles agree`). This matters because these
+materials are exported double-sided: get the winding wrong and you don't see
+holes, you see lighting that's subtly inverted everywhere, which nobody spots
+until it's uploaded.
+
+### Proving it works
+
+Graft Kyle onto Kyle and compare against the real export. That run reproduces it
+exactly: identical bounding box to four decimal places, identical mesh and joint
+names, identical clips, **byte-identical inverse bind matrices**, and all 46
+bolts landing on the same bones with zero translation delta.
+
+### Limits
+
+- **Humanoid only.** The sentry, R2-D2, the ATST, galak_mech and the rest carry
+  their own skeletons and still need §1–6.
+- **It inherits the donor's clips**, including the 24-vs-20 fps issue in §8 —
+  fixing that means re-exporting Kyle, and every grafted model then inherits the
+  fix for free.
+- Non-humanoids and new animation sets are the case for a real `.gla` decoder.
+  This isn't one, deliberately: the compressed quaternion bone frames are the
+  fiddly part and the donor's clips make them unnecessary.
+
+---
+
 ## 8. Troubleshooting
 
 | Symptom | Cause / fix |
@@ -643,6 +717,9 @@ second wrong and they look washed out beside the surfaces you didn't swap.
 | Skin swaps some surfaces and not others | The `surfaces` map in `PLAYER_MODELS` is stale — re-run `glm-skins.mjs` and paste it again. It's generated for a reason. |
 | Skinned surfaces look garbled, or washed out beside the rest | `flipY` / colour space on the loaded texture (§7.7). |
 | Skin picker doesn't appear in the lab | The model has one skin, or `catalogueId` is null (the Khronos sample). |
+| `glm-bolts.mjs` says the files disagree about axes, on a grafted model | It measures the `.glm` over the surfaces the `.glb` actually has. If they still disagree, the graft and the bolt step were pointed at different models. |
+| Grafted model is lit oddly from every angle, no obvious holes | Inverted winding. `glm-graft.mjs` prints its verdict and the percentage that agreed — anything under ~98% means the normals were read wrong. |
+| Lab shows only Kyle, or the canvas is blank after edits | Turbopack serving a stale bundle. `rm -rf .next` and restart. Not a code bug — this recurs constantly. |
 
 ---
 
