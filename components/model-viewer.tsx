@@ -517,6 +517,22 @@ function Model({
     scene.traverse((obj) => {
       const mesh = obj as Mesh
       if (!mesh.isMesh) return
+
+      // Never frustum-cull a piece of this model.
+      //
+      // three decides visibility from a bounding volume computed off the vertex
+      // positions, which for a SkinnedMesh describes the BIND pose — the mesh is
+      // actually drawn wherever the bones have since dragged it, and three never
+      // recomputes. On a model split into 19 surfaces that shows up as limbs and
+      // torsos blinking out one at a time while the parts that happen to still
+      // overlap their stale volume keep drawing: a half-rendered figure, varying
+      // between loads, which reads exactly like missing textures.
+      //
+      // The saving would be nothing anyway. Every surface is inside a canvas
+      // framed on the whole figure, so culling can only ever reject something
+      // that should have been drawn.
+      mesh.frustumCulled = false
+
       const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
       for (const mat of materials) {
         if (mat instanceof MeshStandardMaterial) {
