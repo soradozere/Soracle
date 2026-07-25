@@ -102,6 +102,26 @@ const HAND_BOLT = "r_hand"
 /** The flag rides `*back`, the tag between the shoulder blades. */
 const FLAG_BOLT = "back"
 
+/**
+ * JK2 shrinks the CTF flag when a player picks it up, and nothing in the model
+ * file records that — `r_flag.md3` is the one that STANDS IN THE BASE: a 112.8
+ * unit pole and a 66.4 unit banner against a 64.0 unit player, so 1.76x a
+ * person. Rendered at face value it towers over the figure and leaves the frame.
+ *
+ * Measured off in-game screenshots rather than guessed. The Imperial crest on
+ * the banner renders as a circle squashed to 0.81 of its width, which fixes the
+ * banner's tilt at ~36° out of the image plane; correcting the pole's on-screen
+ * length for exactly that tilt gives a true pole of 1.23-1.28 player heights
+ * against the file's 1.76, and the same sum on the banner alone gives 0.68. So
+ * the engine's factor is 0.70-0.73 by measurement, and Sam — who plays daily —
+ * independently put it at 0.75. Taking the round number, since it's inside the
+ * measurement error and is the kind of constant an engine hardcodes.
+ *
+ * This is the ONLY scale factor in the prop pipeline, and it exists because the
+ * game applies one. It is not a knob for making things look right.
+ */
+const CARRIED_FLAG_SCALE = 0.75
+
 // Resolved on its own, so switching blade colour doesn't change the hilt's URL.
 // Every resolve mints a fresh signed URL, and a new URL makes useGLTF treat the
 // same file as a new asset: re-download, re-suspend, and the model gets refitted
@@ -143,6 +163,17 @@ export type ModelViewerProps = {
   mines?: boolean
   /** CTF flag to carry on the back: "red", "blue", or nothing. */
   flag?: string | null
+  /**
+   * Bolt and scale overrides for the flag, for the lab only.
+   *
+   * Everything else in the prop pipeline is derived from the game's own files,
+   * and these two aren't: the mount is a judgement about which of 46 tags JK2
+   * uses, and CARRIED_FLAG_SCALE is a factor the engine applies that no file
+   * records. Both were settled by eye against in-game footage, so the lab needs
+   * to be able to put them side by side. Nothing else should pass these.
+   */
+  flagBolt?: string
+  flagScale?: number
   /** Reports the model's available clip names once loaded. */
   onClipsLoaded?: (names: string[]) => void
   /** Reports measured frames-per-second, roughly once a second. */
@@ -454,11 +485,22 @@ function Model({
   saber,
   mines,
   flag,
+  flagBolt = FLAG_BOLT,
+  flagScale = CARRIED_FLAG_SCALE,
   onClipsLoaded,
   onFit,
 }: Pick<
   ModelViewerProps,
-  "src" | "animation" | "paused" | "actionTrigger" | "saber" | "mines" | "flag" | "onClipsLoaded"
+  | "src"
+  | "animation"
+  | "paused"
+  | "actionTrigger"
+  | "saber"
+  | "mines"
+  | "flag"
+  | "flagBolt"
+  | "flagScale"
+  | "onClipsLoaded"
 > & {
   onFit: (nearTargetY: number) => void
 }) {
@@ -659,8 +701,8 @@ function Model({
 
       {flagId && flagUrls.urls && (
         <Suspense fallback={null}>
-          <Bolt point={bolts.get(FLAG_BOLT)}>
-            <Md3Prop src={flagUrls.urls[flagId]} />
+          <Bolt point={bolts.get(flagBolt)}>
+            <Md3Prop src={flagUrls.urls[flagId]} scale={flagScale} />
           </Bolt>
         </Suspense>
       )}
@@ -678,6 +720,8 @@ export function ModelViewer({
   saber,
   mines,
   flag,
+  flagBolt,
+  flagScale,
   onClipsLoaded,
   onFps,
   className,
@@ -727,6 +771,8 @@ export function ModelViewer({
             saber={saber}
             mines={mines}
             flag={flag}
+            flagBolt={flagBolt}
+            flagScale={flagScale}
             onClipsLoaded={onClipsLoaded}
             onFit={handleFit}
           />
