@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { MODEL_BUCKET, MODEL_URL_TTL_SECONDS, findPlayerModel } from "@/lib/player-models"
+import { findPropAsset } from "@/lib/prop-assets"
 
 // Mints a short-lived signed URL for a JK2 player model.
 //
@@ -15,13 +16,16 @@ import { MODEL_BUCKET, MODEL_URL_TTL_SECONDS, findPlayerModel } from "@/lib/play
 // the assets staying out of git history.
 //
 // The `id` is looked up in the catalogue rather than used as a path, so this
-// route can only ever sign objects we ship — no traversal, no enumeration.
+// route can only ever sign objects we ship — no traversal, no enumeration. It
+// serves two catalogues: player models, and the shared props (saber hilt, blade
+// textures) that hang off them.
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
-  const model = findPlayerModel(searchParams.get("id"))
+  const id = searchParams.get("id")
+  const file = findPlayerModel(id)?.file ?? findPropAsset(id)
 
-  if (!model) {
+  if (!file) {
     return NextResponse.json({ error: "Unknown model" }, { status: 404 })
   }
 
@@ -29,10 +33,10 @@ export async function GET(request: Request) {
     const supabase = createServiceClient()
     const { data, error } = await supabase.storage
       .from(MODEL_BUCKET)
-      .createSignedUrl(model.file, MODEL_URL_TTL_SECONDS)
+      .createSignedUrl(file, MODEL_URL_TTL_SECONDS)
 
     if (error || !data?.signedUrl) {
-      return fallback(model.file, error?.message ?? "No signed URL returned")
+      return fallback(file, error?.message ?? "No signed URL returned")
     }
 
     return NextResponse.json(
@@ -42,7 +46,7 @@ export async function GET(request: Request) {
       { headers: { "Cache-Control": `private, max-age=${Math.floor(MODEL_URL_TTL_SECONDS / 2)}` } },
     )
   } catch (err) {
-    return fallback(model.file, err instanceof Error ? err.message : "Storage unavailable")
+    return fallback(file, err instanceof Error ? err.message : "Storage unavailable")
   }
 }
 
