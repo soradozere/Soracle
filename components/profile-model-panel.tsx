@@ -31,6 +31,7 @@ const ModelViewer = dynamic(() => import("@/components/model-viewer").then((m) =
  */
 export function ProfileModelFigure({
   modelId,
+  saber,
   // Tall enough for a full-height figure, since the viewer's zoomed-out framing
   // fills the canvas exactly. Centred when it stacks underneath on narrow
   // screens. The narrow-screen cap has to be lifted at lg or it would win over
@@ -38,6 +39,8 @@ export function ProfileModelFigure({
   className = "w-full max-w-[300px] h-[420px] shrink-0 mx-auto lg:mx-0 lg:max-w-none lg:w-[380px]",
 }: {
   modelId: string | null | undefined
+  /** Blade colour id, or null for an unarmed model. */
+  saber?: string | null
   className?: string
 }) {
   const model = findPlayerModel(modelId)
@@ -58,7 +61,13 @@ export function ProfileModelFigure({
     <div className={`${className} relative group/model`}>
       <div className="w-full h-full" title={`${model.label} — drag to turn, scroll to zoom`}>
         {url ? (
-          <ModelViewer src={url} autoRotate={spin} actionTrigger={actionTrigger} className="w-full h-full" />
+          <ModelViewer
+            src={url}
+            autoRotate={spin}
+            actionTrigger={actionTrigger}
+            saber={saber}
+            className="w-full h-full"
+          />
         ) : error ? (
           <FigureShell muted />
         ) : (
