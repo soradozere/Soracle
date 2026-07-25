@@ -454,9 +454,28 @@ Props are `.md3`, not `.glm` — static geometry, no skeleton — so they skip B
 A="/path/to/assets0"
 node scripts/md3-to-gltf.mjs "$A/models/flags/r_flag.md3" public/models/props/flag-red.glb --assets "$A"
 node scripts/md3-to-gltf.mjs "$A/models/flags/b_flag.md3" public/models/props/flag-blue.glb --assets "$A"
-node scripts/md3-to-gltf.mjs "$A/models/weapons2/laser_trap/laser_trap.md3" \
-  public/models/props/trip-mine.glb --texture "$A/models/weapons2/laser_trap/laser_trap.jpg" --exclude w_hand
+# Textures are TGA, which glTF can't embed. Convert them into a throwaway asset
+# root that mirrors the real one, rather than writing into the game's folders.
+T=/tmp/texroot/models/weapons2/laser_trap && mkdir -p "$T"
+sips -s format jpeg "$A/models/weapons2/laser_trap/laser_trap.tga" --out "$T/laser_trap.jpg"
+sips -s format jpeg "$A/models/weapons2/laser_trap/carrier.tga"    --out "$T/carrier.jpg"
+node scripts/md3-to-gltf.mjs "$A/models/weapons2/laser_trap/laser_trap_pu.md3" \
+  public/models/props/trip-mine.glb --assets /tmp/texroot
 ```
+
+**Pick the right one of the four.** A JK2 weapon folder holds several models and
+only one is what other players see in your hand:
+
+| File | What it is |
+|---|---|
+| `laser_trap.md3` | The **first-person view** model — a single flat charge, plus a `w_hand` to hold it. Converting this is why the mine first rendered as a 2D sliver. |
+| `laser_trap_pu.md3` | The **pickup / carried** bundle: three mine bodies and a carrier strap. This is the one. |
+| `laser_trap_w.glm` | Ghoul2 world model. Needs the `.glm` converter. |
+| `laser_trap_1/2.md3` | Damage or LOD states. |
+
+The tell is shape, not name: if a held prop looks flat, you probably have the
+view model. Check it against a screenshot of someone carrying it before
+converting anything else.
 
 Nothing about placement is configured anywhere. The converter keeps the MD3's own origin and axes,
 §7 bakes each bolt with the orientation Ghoul2 gives it, and the viewer just parents one to the
