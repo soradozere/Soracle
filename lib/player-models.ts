@@ -136,6 +136,41 @@ export const PLAYER_MODELS: PlayerModel[] = [
     blurb: "Generic Jedi trainee — three skins, including a second face (J2)",
     skins: skinsFor("jedi"),
   },
+  {
+    id: "stormtrooper",
+    label: "Stormtrooper",
+    file: "stormtrooper.glb",
+    blurb: "Imperial rank and file",
+    skins: skinsFor("stormtrooper"),
+  },
+  {
+    id: "swamptrooper",
+    label: "Swamptrooper",
+    file: "swamptrooper.glb",
+    blurb: "Kejim outpost garrison",
+    skins: skinsFor("swamptrooper"),
+  },
+  {
+    id: "imperial",
+    label: "Imperial Officer",
+    file: "imperial.glb",
+    blurb: "Four skins, including commander and officer ranks",
+    skins: skinsFor("imperial"),
+  },
+  {
+    id: "rebel",
+    label: "Rebel Trooper",
+    file: "rebel.glb",
+    blurb: "Alliance infantry",
+    skins: skinsFor("rebel"),
+  },
+  {
+    id: "jeditrainer",
+    label: "Jedi Trainer",
+    file: "jeditrainer.glb",
+    blurb: "Luke's academy instructor",
+    skins: skinsFor("jeditrainer"),
+  },
 ]
 
 /**
