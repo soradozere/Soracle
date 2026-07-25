@@ -206,6 +206,14 @@ export type ModelViewerProps = {
   flagScale?: number
   /** Reports the model's available clip names once loaded. */
   onClipsLoaded?: (names: string[]) => void
+  /**
+   * Reports every bolt baked into the model, for the lab's mount picker.
+   *
+   * Read from the file rather than listed anywhere, because a hand-written list
+   * is exactly how you end up offering eight candidates when the model has 46
+   * and the right one isn't among them.
+   */
+  onBoltsLoaded?: (names: string[]) => void
   /** Reports measured frames-per-second, roughly once a second. */
   onFps?: (fps: number) => void
   className?: string
@@ -539,6 +547,7 @@ function Model({
   flagBolt = FLAG_BOLT,
   flagScale = CARRIED_FLAG_SCALE,
   onClipsLoaded,
+  onBoltsLoaded,
   onFit,
 }: Pick<
   ModelViewerProps,
@@ -552,6 +561,7 @@ function Model({
   | "flagBolt"
   | "flagScale"
   | "onClipsLoaded"
+  | "onBoltsLoaded"
 > & {
   onFit: (nearTargetY: number) => void
 }) {
@@ -674,6 +684,12 @@ function Model({
   const overhang = useMemo(() => measureOverhang(scene), [scene])
   const fitted = useRef(false)
 
+  // Declared here rather than up with the clip reporting, because the dependency
+  // array is evaluated during render and `bolts` isn't initialised until above.
+  useEffect(() => {
+    onBoltsLoaded?.([...bolts.keys()].sort())
+  }, [bolts, onBoltsLoaded])
+
   useLayoutEffect(() => {
     const wrapper = fitGroup.current
     if (!wrapper) return
@@ -774,6 +790,7 @@ export function ModelViewer({
   flagBolt,
   flagScale,
   onClipsLoaded,
+  onBoltsLoaded,
   onFps,
   className,
 }: ModelViewerProps) {
@@ -825,6 +842,7 @@ export function ModelViewer({
             flagBolt={flagBolt}
             flagScale={flagScale}
             onClipsLoaded={onClipsLoaded}
+            onBoltsLoaded={onBoltsLoaded}
             onFit={handleFit}
           />
           <ContactShadows position={[0, -0.01, 0]} opacity={0.5} scale={TARGET_HEIGHT * 3} blur={2.4} far={4} />
