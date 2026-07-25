@@ -72,7 +72,10 @@ const TEAM_COLOURS: Record<string, string> = { red: "#e74c3c", blue: "#3b7dff" }
 // them be compared against real footage instead of argued about. The candidates
 // are every bolt a flag could plausibly hang from.
 const FLAG_BOLTS = ["back", "chestg", "hip_bl", "hip_br", "hip_l", "hip_r", "shldr_l", "shldr_r"]
-const FLAG_SCALES = [0.5, 0.6, 0.75, 0.9, 1]
+// Range opened downwards after 0.75 turned out to still be far too big. At full
+// size the pole rises 1.32 player heights from a bolt already 0.82 up, so the
+// small end of this is where a flag that reads like the game's has to live.
+const FLAG_SCALES = [0.25, 0.3, 0.4, 0.5, 0.6, 0.75, 1]
 
 export function ModelLab() {
   const [modelId, setModelId] = useState(LAB_MODELS[0].id)
@@ -85,7 +88,7 @@ export function ModelLab() {
   const [hand, setHand] = useState<HandSlot>("blue")
   const [flag, setFlag] = useState<string | null>(null)
   const [flagBolt, setFlagBolt] = useState("back")
-  const [flagScale, setFlagScale] = useState(0.75)
+  const [flagScale, setFlagScale] = useState(0.4)
 
   const reducedMotion = usePrefersReducedMotion()
   const model = LAB_MODELS.find((m) => m.id === modelId) ?? LAB_MODELS[0]
