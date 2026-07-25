@@ -32,6 +32,11 @@ const ASSETS = [
     [`saber/${colour}_line.jpg`, `public/models/saber/${colour}_line.jpg`],
     [`saber/${colour}_glow.jpg`, `public/models/saber/${colour}_glow.jpg`],
   ]),
+  // Bolt-on props. Textures are embedded in the .glb by md3-to-gltf.mjs, so
+  // unlike the saber these are one object each.
+  ["props/trip-mine.glb", "public/models/props/trip-mine.glb"],
+  ["props/flag-red.glb", "public/models/props/flag-red.glb"],
+  ["props/flag-blue.glb", "public/models/props/flag-blue.glb"],
 ]
 
 const CONTENT_TYPES = {

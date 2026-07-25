@@ -153,7 +153,7 @@ function alignTo4(n) {
   return (n + 3) & ~3
 }
 
-function buildGlb(model, texture) {
+function buildGlb(model, textures) {
   const json = {
     asset: { version: "2.0", generator: "soracle md3-to-gltf" },
     scenes: [{ nodes: [] }],
@@ -192,23 +192,29 @@ function buildGlb(model, texture) {
     return { min, max }
   }
 
-  let materialIndex = null
-  if (texture) {
-    const imageView = pushView(texture.data)
-    json.images = [{ bufferView: imageView, mimeType: texture.mimeType }]
+  // One material per distinct shader. A single-texture model gets exactly one,
+  // as before; a flag gets two, because its cloth and its pole are different
+  // images and sharing a material would paint the pole with the banner.
+  const materialByShader = new Map()
+  if (textures.size > 0) {
+    json.images = []
     json.samplers = [{ magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 }]
-    json.textures = [{ sampler: 0, source: 0 }]
-    json.materials.push({
-      name: "hilt",
-      pbrMetallicRoughness: {
-        baseColorTexture: { index: 0 },
-        // JK2 has no PBR: flat diffuse, so no specular sheen. Same reasoning as
-        // the player-model viewer, which forces this at load time.
-        metallicFactor: 0,
-        roughnessFactor: 1,
-      },
-    })
-    materialIndex = 0
+    json.textures = []
+    for (const [shader, texture] of textures) {
+      json.images.push({ bufferView: pushView(texture.data), mimeType: texture.mimeType })
+      json.textures.push({ sampler: 0, source: json.images.length - 1 })
+      json.materials.push({
+        name: basename(texture.path).replace(/\.[^.]+$/, ""),
+        pbrMetallicRoughness: {
+          baseColorTexture: { index: json.textures.length - 1 },
+          // JK2 has no PBR: flat diffuse, so no specular sheen. Same reasoning as
+          // the player-model viewer, which forces this at load time.
+          metallicFactor: 0,
+          roughnessFactor: 1,
+        },
+      })
+      materialByShader.set(shader, json.materials.length - 1)
+    }
   }
 
   for (const surface of model.surfaces) {
@@ -237,7 +243,8 @@ function buildGlb(model, texture) {
       attributes: { POSITION: base, NORMAL: base + 1, TEXCOORD_0: base + 2 },
       indices: base + 3,
     }
-    if (materialIndex !== null) primitive.material = materialIndex
+    const material = materialByShader.get(surface.shader)
+    if (material !== undefined) primitive.material = material
 
     json.meshes.push({ name: surface.name || "surface", primitives: [primitive] })
     json.nodes.push({ name: surface.name || "surface", mesh: json.meshes.length - 1 })
@@ -279,18 +286,22 @@ function buildGlb(model, texture) {
 
 // ---------------------------------------------------------------------------
 
-function resolveTexture(md3Path, shaderName, override) {
+function resolveTexture(md3Path, shaderName, override, assetsRoot) {
   const candidates = []
   if (override) {
     candidates.push(override)
   } else if (shaderName) {
-    // JK2's shader strings are relative to the assets root, and routinely name a
-    // .tga that shipped as a .jpg. Try the sibling directory too, which is where
-    // a single-model extraction usually leaves it.
+    // JK2's shader strings are full paths relative to the assets root, and
+    // routinely name a .tga that actually shipped as a .jpg. A model's textures
+    // are often nowhere near it — the CTF flags live in models/flags/ but point
+    // at models/map_objects/mp/ — so resolve against the root when we have one,
+    // and fall back to the sibling directory for a single-model extraction.
     const stem = shaderName.replace(/\.[^./]+$/, "")
-    const local = resolve(dirname(md3Path), basename(stem))
-    for (const ext of [".jpg", ".tga", ".png", ".jpeg"]) {
-      candidates.push(local + ext)
+    const roots = []
+    if (assetsRoot) roots.push(resolve(assetsRoot, stem))
+    roots.push(resolve(dirname(md3Path), basename(stem)))
+    for (const base of roots) {
+      for (const ext of [".jpg", ".tga", ".png", ".jpeg"]) candidates.push(base + ext)
     }
   }
 
@@ -311,20 +322,38 @@ function resolveTexture(md3Path, shaderName, override) {
 }
 
 function main() {
+  // Flags take a value; --exclude may be repeated.
   const args = process.argv.slice(2)
-  const textureFlag = args.indexOf("--texture")
-  const override = textureFlag !== -1 ? args[textureFlag + 1] : null
-  const positional = args.filter((_, i) => i !== textureFlag && (textureFlag === -1 || i !== textureFlag + 1))
+  const positional = []
+  let override = null
+  let assetsRoot = null
+  const excluded = new Set()
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === "--texture") override = args[++i]
+    else if (args[i] === "--exclude") excluded.add(args[++i])
+    else if (args[i] === "--assets") assetsRoot = args[++i]
+    else positional.push(args[i])
+  }
   const [input, output] = positional
 
   if (!input || !output) {
-    console.error("usage: node scripts/md3-to-gltf.mjs <input.md3> <output.glb> [--texture path]")
+    console.error(
+      "usage: node scripts/md3-to-gltf.mjs <input.md3> <output.glb> [--assets root] [--texture path] [--exclude surface]...",
+    )
     process.exit(1)
   }
 
   const model = parseMd3(readFileSync(input))
   console.log(`${model.name}`)
   console.log(`  frames ${model.numFrames}  tags ${model.numTags}  surfaces ${model.numSurfaces}`)
+
+  // JK2 bundles pieces we don't want into some models — laser_trap.md3 carries a
+  // gloved hand, which on a player who already has hands is one hand too many.
+  if (excluded.size > 0) {
+    const before = model.surfaces.length
+    model.surfaces = model.surfaces.filter((s) => !excluded.has(s.name))
+    console.log(`  excluded ${before - model.surfaces.length} surface(s): ${[...excluded].join(", ")}`)
+  }
 
   let tris = 0
   let verts = 0
@@ -337,11 +366,22 @@ function main() {
     console.log(`  tag "${t.name}" at [${t.origin.map((v) => v.toFixed(2)).join(", ")}]`)
   }
 
-  const texture = resolveTexture(input, model.surfaces[0]?.shader, override)
-  if (texture) console.log(`  texture ${basename(texture.path)} (${(texture.data.length / 1024).toFixed(1)} KB)`)
-  else console.warn("  ! no texture found — writing an untextured mesh")
+  // Resolved per distinct shader, so a model whose surfaces use different images
+  // keeps them. --texture overrides everything, for the single-texture case.
+  const textures = new Map()
+  for (const surface of model.surfaces) {
+    if (textures.has(surface.shader)) continue
+    const texture = resolveTexture(input, surface.shader, override, assetsRoot)
+    if (!texture) {
+      console.warn(`  ! no texture for "${surface.name}" (shader "${surface.shader}")`)
+      continue
+    }
+    textures.set(surface.shader, texture)
+    console.log(`  texture ${basename(texture.path)} (${(texture.data.length / 1024).toFixed(1)} KB)`)
+  }
+  if (textures.size === 0) console.warn("  ! no textures found — writing an untextured mesh")
 
-  const glb = buildGlb(model, texture)
+  const glb = buildGlb(model, textures)
   writeFileSync(output, glb)
   console.log(`\n→ ${output}  ${(glb.length / 1024).toFixed(1)} KB, ${verts} verts, ${tris} tris`)
 }

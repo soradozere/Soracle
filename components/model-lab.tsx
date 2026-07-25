@@ -2,11 +2,12 @@
 
 import { useCallback, useState } from "react"
 import dynamic from "next/dynamic"
-import { Boxes, Monitor, Pause, Play, RotateCw, Smartphone } from "lucide-react"
+import { Bomb, Boxes, Flag, Monitor, Pause, Play, RotateCw, Smartphone } from "lucide-react"
 import { usePrefersReducedMotion } from "@/components/model-viewer"
 import { useModelUrl } from "@/hooks/use-model-url"
 import { PLAYER_MODELS } from "@/lib/player-models"
 import { SABER_COLOURS } from "@/lib/saber-colours"
+import { FLAG_TEAMS } from "@/lib/prop-assets"
 
 // The canvas is client-only: WebGL can't prerender, and r3f's reconciler throws
 // if it runs during SSR. This file is already a client component, so `ssr: false`
@@ -51,6 +52,20 @@ const VIEWPORTS = {
 
 type ViewportKey = keyof typeof VIEWPORTS
 
+/**
+ * What's in the model's right hand — one choice, not two.
+ *
+ * The saber and the trip mines both bolt to `*r_hand`, so there is exactly one
+ * slot; "mines" is modelled here as another value of it rather than as a
+ * separate toggle. That's the shape the loadout wants too, so the lab is a
+ * cheap place to find out whether it feels right to use.
+ */
+type HandSlot = "none" | "mines" | (string & {})
+const MINES = "mines"
+
+/** Only so the inactive flag buttons read at a glance which team they are. */
+const TEAM_COLOURS: Record<string, string> = { red: "#e74c3c", blue: "#3b7dff" }
+
 export function ModelLab() {
   const [modelId, setModelId] = useState(LAB_MODELS[0].id)
   const [clips, setClips] = useState<string[]>([])
@@ -59,7 +74,8 @@ export function ModelLab() {
   const [autoRotate, setAutoRotate] = useState(true)
   const [paused, setPaused] = useState(false)
   const [viewport, setViewport] = useState<ViewportKey>("desktop")
-  const [saber, setSaber] = useState<string | null>("blue")
+  const [hand, setHand] = useState<HandSlot>("blue")
+  const [flag, setFlag] = useState<string | null>(null)
 
   const reducedMotion = usePrefersReducedMotion()
   const model = LAB_MODELS.find((m) => m.id === modelId) ?? LAB_MODELS[0]
@@ -102,7 +118,9 @@ export function ModelLab() {
               animation={clip}
               autoRotate={autoRotate}
               paused={effectivePaused}
-              saber={saber}
+              saber={hand === "none" || hand === MINES ? null : hand}
+              mines={hand === MINES}
+              flag={flag}
               onClipsLoaded={handleClips}
               onFps={handleFps}
               className="w-full h-full"
@@ -174,17 +192,29 @@ export function ModelLab() {
             </button>
           ))}
 
-          <button onClick={() => setSaber(null)} className={controlClass(saber === null)}>
-            No saber
+          <button onClick={() => setHand("none")} className={controlClass(hand === "none")}>
+            Empty hand
           </button>
           {SABER_COLOURS.map((colour) => (
-            <button
-              key={colour.id}
-              onClick={() => setSaber(colour.id)}
-              className={controlClass(saber === colour.id)}
-            >
+            <button key={colour.id} onClick={() => setHand(colour.id)} className={controlClass(hand === colour.id)}>
               <span className="w-3 h-3 rounded-full" style={{ background: colour.glow }} />
               {colour.label}
+            </button>
+          ))}
+          <button onClick={() => setHand(MINES)} className={controlClass(hand === MINES)}>
+            <Bomb className="w-4 h-4" />
+            Trip mines
+          </button>
+
+          {/* The flag is its own slot: in game you run the flag back with a
+              saber out, so it has to be able to coexist with the hand slot. */}
+          <button onClick={() => setFlag(null)} className={controlClass(flag === null)}>
+            No flag
+          </button>
+          {FLAG_TEAMS.map((team) => (
+            <button key={team} onClick={() => setFlag(team)} className={controlClass(flag === team)}>
+              <Flag className="w-4 h-4" style={{ color: flag === team ? undefined : TEAM_COLOURS[team] }} />
+              {team === "red" ? "Red flag" : "Blue flag"}
             </button>
           ))}
         </div>
