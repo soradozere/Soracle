@@ -108,6 +108,34 @@ export const PLAYER_MODELS: PlayerModel[] = [
     blurb: "The fallen Jedi — huge in game, same height as everyone here",
     skins: skinsFor("desann"),
   },
+  {
+    id: "luke",
+    label: "Luke Skywalker",
+    file: "luke.glb",
+    blurb: "Cameo appearance from the original trilogy",
+    skins: skinsFor("luke"),
+  },
+  {
+    id: "jan",
+    label: "Jan Ors",
+    file: "jan.glb",
+    blurb: "Kyle's partner and pilot",
+    skins: skinsFor("jan"),
+  },
+  {
+    id: "lando",
+    label: "Lando Calrissian",
+    file: "lando.glb",
+    blurb: "Cloud City's administrator",
+    skins: skinsFor("lando"),
+  },
+  {
+    id: "jedi",
+    label: "Jedi",
+    file: "jedi.glb",
+    blurb: "Generic Jedi trainee — three skins, including a second face (J2)",
+    skins: skinsFor("jedi"),
+  },
 ]
 
 /**

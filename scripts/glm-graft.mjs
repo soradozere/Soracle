@@ -207,12 +207,22 @@ function readSkin(path) {
  * Finds the image a shader path refers to. JK2's files name `.tga` almost
  * everywhere while the assets shipped as `.jpg`, a Quake 3 convention the engine
  * resolves at load time — so the extension in the file is a hint, not an answer.
+ *
+ * Checked against every root in order, so a `--assets-fallback` can supply a
+ * texture the main extract is missing (JK2's own `.jpg` conversion for that
+ * asset didn't ship — jan's and jedi's heads are the two on this disc) without
+ * writing anything into the original assets. The fallback has to be a JPEG
+ * already; converting a `.tga` here would mean guessing at quality settings the
+ * game never made — do that once, by hand, into a throwaway root that mirrors
+ * the real tree, the same way docs/jk2-model-conversion.md §7.5 does for props.
  */
-function resolveTexture(assetsRoot, shader) {
+function resolveTexture(assetsRoots, shader) {
   const stem = shader.replace(/\.[^./]+$/, "")
-  for (const ext of [".jpg", ".jpeg", ".png"]) {
-    const candidate = resolve(assetsRoot, stem + ext)
-    if (existsSync(candidate)) return { path: candidate, mimeType: ext === ".png" ? "image/png" : "image/jpeg" }
+  for (const root of assetsRoots) {
+    for (const ext of [".jpg", ".jpeg", ".png"]) {
+      const candidate = resolve(root, stem + ext)
+      if (existsSync(candidate)) return { path: candidate, mimeType: ext === ".png" ? "image/png" : "image/jpeg" }
+    }
   }
   return null
 }
@@ -308,6 +318,7 @@ function parseArgs() {
   const opts = { donor: "kyle" }
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--assets") opts.assets = args[++i]
+    else if (args[i] === "--assets-fallback") (opts.assetsFallback ??= []).push(args[++i])
     else if (args[i] === "--model") opts.model = args[++i]
     else if (args[i] === "--donor") opts.donor = args[++i]
     else if (args[i] === "--donor-glb") opts.donorGlb = args[++i]
@@ -316,9 +327,11 @@ function parseArgs() {
   }
   if (!opts.assets || !opts.model) {
     throw new Error(
-      "usage: node scripts/glm-graft.mjs --assets <root> --model <name> [--donor kyle] [--donor-glb path] [--out path]",
+      "usage: node scripts/glm-graft.mjs --assets <root> --model <name> " +
+        "[--donor kyle] [--donor-glb path] [--assets-fallback root]... [--out path]",
     )
   }
+  opts.assetsFallback ??= []
   opts.donorGlb ??= `public/models/${opts.donor}.glb`
   opts.out ??= `public/models/${opts.model}.glb`
   return opts
@@ -403,7 +416,8 @@ function decideWinding(surfaces) {
 }
 
 function main() {
-  const { assets, model, donor, donorGlb, out } = parseArgs()
+  const { assets, assetsFallback, model, donor, donorGlb, out } = parseArgs()
+  const textureRoots = [assets, ...assetsFallback]
 
   const playersDir = resolve(assets, "models/players")
   const glmPath = join(playersDir, model, "model.glm")
@@ -532,7 +546,7 @@ function main() {
   const imageOfShader = new Map()
   for (const surface of surfaces) {
     if (imageOfShader.has(surface.shader)) continue
-    const texture = resolveTexture(assets, surface.shader)
+    const texture = resolveTexture(textureRoots, surface.shader)
     if (!texture) {
       console.warn(`  ! no image for "${surface.name}" (shader "${surface.shader}") — it'll render untextured`)
       imageOfShader.set(surface.shader, null)
