@@ -82,6 +82,14 @@ function writeGlb(path, json, bin) {
   return out.length
 }
 
+/**
+ * JK2 animations are authored at 20 fps. Blender's scene default is 24, and the
+ * exporter writes keyframe times in seconds against whatever the scene says, so
+ * a clip exported without changing it plays 1.2x too fast. Rescaling the time
+ * accessors here fixes existing exports without anyone re-doing them.
+ */
+const JK2_FPS = 20
+
 /** The bytes an accessor actually reads, de-interleaved into a tight block. */
 function accessorBytes(json, bin, index) {
   const accessor = json.accessors[index]
@@ -104,14 +112,47 @@ function accessorBytes(json, bin, index) {
   return out
 }
 
+/**
+ * Rescales the keyframe times of animations already in the base file.
+ *
+ * The extras get retimed as they're copied, but the base's clip is untouched
+ * data sitting in its own buffer — miss it and one clip in the output plays at a
+ * different speed from the rest, which is worse than all of them being wrong.
+ */
+function retimeBase(json, bin, scale) {
+  const done = new Set()
+  for (const animation of json.animations ?? []) {
+    for (const sampler of animation.samplers) {
+      // Samplers can share an input accessor; scaling one twice would compound.
+      if (done.has(sampler.input)) continue
+      done.add(sampler.input)
+
+      const accessor = json.accessors[sampler.input]
+      const view = json.bufferViews[accessor.bufferView]
+      const start = (view.byteOffset || 0) + (accessor.byteOffset || 0)
+      const stride = view.byteStride || 4
+      for (let i = 0; i < accessor.count; i++) {
+        const at = start + i * stride
+        bin.writeFloatLE(bin.readFloatLE(at) * scale, at)
+      }
+      if (accessor.min) accessor.min = accessor.min.map((v) => v * scale)
+      if (accessor.max) accessor.max = accessor.max.map((v) => v * scale)
+    }
+  }
+}
+
 function main() {
   const argv = process.argv.slice(2)
   const sources = []
   let out = null
+  let sourceFps = null
 
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--out") {
       out = argv[++i]
+    } else if (argv[i] === "--source-fps") {
+      sourceFps = Number(argv[++i])
+      if (!Number.isFinite(sourceFps) || sourceFps <= 0) throw new Error("--source-fps needs a positive number")
     } else if (argv[i] === "--name") {
       if (sources.length === 0) throw new Error("--name must follow a .glb")
       sources[sources.length - 1].name = argv[++i]
@@ -121,14 +162,18 @@ function main() {
   }
 
   if (sources.length < 2 || !out) {
-    console.error("usage: glb-merge-anims.mjs base.glb [--name x] extra.glb [--name y] ... --out merged.glb")
+    console.error(
+      "usage: glb-merge-anims.mjs base.glb [--name x] extra.glb [--name y] ... [--source-fps 24] --out merged.glb",
+    )
     process.exit(1)
   }
 
   const base = readGlb(sources[0].path)
   const json = base.json
-  const parts = [base.bin]
-  let binLength = base.bin.length
+  // A writable copy: retimeBase edits the base's keyframe times in place.
+  const baseBin = Buffer.from(base.bin)
+  const parts = [baseBin]
+  let binLength = baseBin.length
 
   // Node lookup by name — the only stable identity across separate exports.
   const nodeByName = new Map()
@@ -139,6 +184,12 @@ function main() {
   json.animations = json.animations ?? []
   if (sources[0].name && json.animations[0]) json.animations[0].name = sources[0].name
   console.log(`base ${basename(sources[0].path)}: ${json.animations.map((a) => a.name).join(", ") || "no animations"}`)
+
+  const timeScale = sourceFps ? sourceFps / JK2_FPS : 1
+  if (timeScale !== 1) {
+    console.log(`retiming ${sourceFps}fps → ${JK2_FPS}fps (clips play ${timeScale.toFixed(2)}x longer)\n`)
+    retimeBase(json, baseBin, timeScale)
+  }
 
   for (const source of sources.slice(1)) {
     const extra = readGlb(source.path)
@@ -155,6 +206,14 @@ function main() {
         for (const key of ["input", "output"]) {
           const src = extra.json.accessors[sampler[key]]
           const bytes = accessorBytes(extra.json, extra.bin, sampler[key])
+
+          // Keyframe TIMES only. Scaling the outputs would stretch the poses
+          // themselves rather than the playback.
+          if (key === "input" && timeScale !== 1) {
+            for (let i = 0; i < bytes.length; i += 4) {
+              bytes.writeFloatLE(bytes.readFloatLE(i) * timeScale, i)
+            }
+          }
 
           // Every bufferView must start 4-byte aligned.
           const pad = (4 - (binLength % 4)) % 4
@@ -174,8 +233,8 @@ function main() {
             type: src.type,
             // Keyframe times are range-queried by the sampler, so glTF requires
             // min/max on the input accessor.
-            ...(src.min ? { min: src.min } : {}),
-            ...(src.max ? { max: src.max } : {}),
+            ...(src.min ? { min: key === "input" ? src.min.map((v) => v * timeScale) : src.min } : {}),
+            ...(src.max ? { max: key === "input" ? src.max.map((v) => v * timeScale) : src.max } : {}),
           })
           copy[key] = json.accessors.length - 1
         }
