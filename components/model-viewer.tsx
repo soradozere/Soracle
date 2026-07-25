@@ -27,6 +27,7 @@ import {
 } from "three"
 import { Saber } from "@/components/saber"
 import { Md3Prop } from "@/components/md3-prop"
+import { CarriedFlag, FLAG_BONE } from "@/components/carried-flag"
 import { useAssetUrls } from "@/hooks/use-asset-urls"
 import { findSaberColour } from "@/lib/saber-colours"
 import { MINES_ASSET, SABER_HILT_ASSET, findFlagAsset, saberTextureAsset } from "@/lib/prop-assets"
@@ -126,29 +127,19 @@ const BOLT_PREFIX = "bolt_"
  * model can't carry both: it's one slot in the geometry, not a rule we imposed.
  */
 const HAND_BOLT = "r_hand"
-/** The flag rides `*back`, the tag between the shoulder blades. */
-const FLAG_BOLT = "back"
-
 /**
  * JK2 shrinks the CTF flag when a player picks it up, and nothing in the model
  * file records that — `r_flag.md3` is the one that STANDS IN THE BASE: a 112.8
  * unit pole and a 66.4 unit banner against a 64.0 unit player, so 1.76x a
  * person. Rendered at face value it towers over the figure and leaves the frame.
  *
- * Still provisional. Measuring it off in-game stills has now failed twice —
- * those shots are taken from above and behind with the flag leaning toward the
- * camera, which inflates every vertical estimate, and two careful passes over
- * the same image disagreed by 40%. 0.75 came out of that and Sam says it is
- * still far too big.
+ * The game's own number is exactly 0.5 (`ent.modelScale` in `CG_PlayerFlag`).
+ * We deliberately run smaller: Sam compared the two against the game and chose
+ * 0.4 as reading cleaner in a profile-sized canvas. So this is the one number
+ * here that is a taste decision rather than a transcription — which is fine, as
+ * long as nobody later "corrects" it back to 0.5 thinking it's a bug.
  *
- * The one estimate anchored to something solid rather than to pixel-counting:
- * this bolt puts the flag's base at 0.82 player heights and the pole rises
- * 1.32 of them at full size, so matching a flag whose tip sits near 1.3 player
- * heights needs roughly 0.4. That's the default until Sam picks a better one
- * with the lab's pickers — see FLAG_SCALES in model-lab.tsx.
- *
- * This is the ONLY scale factor in the prop pipeline, and it exists because the
- * game applies one. It is not a knob for making things look right.
+ * This is also the ONLY scale factor in the prop pipeline.
  */
 const CARRIED_FLAG_SCALE = 0.4
 
@@ -194,26 +185,17 @@ export type ModelViewerProps = {
   /** CTF flag to carry on the back: "red", "blue", or nothing. */
   flag?: string | null
   /**
-   * Bolt and scale overrides for the flag, for the lab only.
+   * Scale override for the flag, for the lab only.
    *
-   * Everything else in the prop pipeline is derived from the game's own files,
-   * and these two aren't: the mount is a judgement about which of 46 tags JK2
-   * uses, and CARRIED_FLAG_SCALE is a factor the engine applies that no file
-   * records. Both were settled by eye against in-game footage, so the lab needs
-   * to be able to put them side by side. Nothing else should pass these.
+   * The mount, offsets, pitch and roll are transcribed from the engine and have
+   * no business being tweaked. The size is a taste call (see CARRIED_FLAG_SCALE)
+   * and the yaw offset is the one term Blender's bone convention makes
+   * unknowable from the source alone. Nothing but the lab should pass these.
    */
-  flagBolt?: string
   flagScale?: number
+  flagYaw?: number
   /** Reports the model's available clip names once loaded. */
   onClipsLoaded?: (names: string[]) => void
-  /**
-   * Reports every bolt baked into the model, for the lab's mount picker.
-   *
-   * Read from the file rather than listed anywhere, because a hand-written list
-   * is exactly how you end up offering eight candidates when the model has 46
-   * and the right one isn't among them.
-   */
-  onBoltsLoaded?: (names: string[]) => void
   /** Reports measured frames-per-second, roughly once a second. */
   onFps?: (fps: number) => void
   className?: string
@@ -544,10 +526,9 @@ function Model({
   saber,
   mines,
   flag,
-  flagBolt = FLAG_BOLT,
   flagScale = CARRIED_FLAG_SCALE,
+  flagYaw,
   onClipsLoaded,
-  onBoltsLoaded,
   onFit,
 }: Pick<
   ModelViewerProps,
@@ -558,10 +539,9 @@ function Model({
   | "saber"
   | "mines"
   | "flag"
-  | "flagBolt"
   | "flagScale"
+  | "flagYaw"
   | "onClipsLoaded"
-  | "onBoltsLoaded"
 > & {
   onFit: (nearTargetY: number) => void
 }) {
@@ -681,14 +661,9 @@ function Model({
   // sibling suspending, Fast Refresh — without needing to be re-measured.
   const bones = useMemo(() => collectBones(scene), [scene])
   const bolts = useMemo(() => collectBolts(scene), [scene])
+  const flagBone = useMemo(() => scene.getObjectByName(FLAG_BONE) ?? null, [scene])
   const overhang = useMemo(() => measureOverhang(scene), [scene])
   const fitted = useRef(false)
-
-  // Declared here rather than up with the clip reporting, because the dependency
-  // array is evaluated during render and `bolts` isn't initialised until above.
-  useEffect(() => {
-    onBoltsLoaded?.([...bolts.keys()].sort())
-  }, [bolts, onBoltsLoaded])
 
   useLayoutEffect(() => {
     const wrapper = fitGroup.current
@@ -766,11 +741,11 @@ function Model({
         </Suspense>
       )}
 
-      {flagId && flagUrls.urls && (
+      {/* Not a <Bolt>: the flag is the one prop the game doesn't hang off a
+          bolt. See components/carried-flag.tsx. */}
+      {flagId && flagUrls.urls && flagBone && (
         <Suspense fallback={null}>
-          <Bolt point={bolts.get(flagBolt)}>
-            <Md3Prop src={flagUrls.urls[flagId]} scale={flagScale} />
-          </Bolt>
+          <CarriedFlag bone={flagBone} src={flagUrls.urls[flagId]} scale={flagScale} yawOffset={flagYaw} />
         </Suspense>
       )}
     </group>
@@ -787,10 +762,9 @@ export function ModelViewer({
   saber,
   mines,
   flag,
-  flagBolt,
   flagScale,
+  flagYaw,
   onClipsLoaded,
-  onBoltsLoaded,
   onFps,
   className,
 }: ModelViewerProps) {
@@ -839,10 +813,9 @@ export function ModelViewer({
             saber={saber}
             mines={mines}
             flag={flag}
-            flagBolt={flagBolt}
             flagScale={flagScale}
+            flagYaw={flagYaw}
             onClipsLoaded={onClipsLoaded}
-            onBoltsLoaded={onBoltsLoaded}
             onFit={handleFit}
           />
           <ContactShadows position={[0, -0.01, 0]} opacity={0.5} scale={TARGET_HEIGHT * 3} blur={2.4} far={4} />

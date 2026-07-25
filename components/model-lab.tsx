@@ -66,12 +66,15 @@ const MINES = "mines"
 /** Only so the inactive flag buttons read at a glance which team they are. */
 const TEAM_COLOURS: Record<string, string> = { red: "#e74c3c", blue: "#3b7dff" }
 
-// Flag mount and size are the only two things in the prop pipeline not read out
-// of the game's files — JK2 shrinks a carried flag by an amount no model
-// records, and which bolt it hangs from is a judgement. The mount list used to
-// be eight hand-picked candidates; it's now every bolt the loaded model
-// actually has, because the right one turned out not to be among my eight.
+// Size is now the ONLY thing about the flag that isn't transcribed from the
+// engine — the mount, offsets and angles all come from CG_PlayerFlag, so there
+// is nothing left to pick between. The game uses 0.5; we run 0.4 by choice.
 const FLAG_SCALES = [0.25, 0.3, 0.4, 0.5, 0.6, 0.75, 1]
+// The engine says 270, but it reads the yaw off a Ghoul2 bone matrix and we
+// read it off the same bone as Blender exported it — and Blender's armatures
+// run along local +Y rather than +X. So this one term can be a quadrant out,
+// and the four quadrants are the whole space of possible answers.
+const FLAG_YAWS = [0, 90, 180, 270]
 
 export function ModelLab() {
   const [modelId, setModelId] = useState(LAB_MODELS[0].id)
@@ -83,9 +86,8 @@ export function ModelLab() {
   const [viewport, setViewport] = useState<ViewportKey>("desktop")
   const [hand, setHand] = useState<HandSlot>("blue")
   const [flag, setFlag] = useState<string | null>(null)
-  const [flagBolt, setFlagBolt] = useState("back")
   const [flagScale, setFlagScale] = useState(0.4)
-  const [bolts, setBolts] = useState<string[]>([])
+  const [flagYaw, setFlagYaw] = useState(270)
 
   const reducedMotion = usePrefersReducedMotion()
   const model = LAB_MODELS.find((m) => m.id === modelId) ?? LAB_MODELS[0]
@@ -100,7 +102,6 @@ export function ModelLab() {
     setClip((current) => (current && names.includes(current) ? current : names[0]))
   }, [])
   const handleFps = useCallback((next: number) => setFps(next), [])
-  const handleBolts = useCallback((names: string[]) => setBolts(names), [])
 
   const effectivePaused = paused || reducedMotion
   const { className: viewportClass } = VIEWPORTS[viewport]
@@ -132,10 +133,9 @@ export function ModelLab() {
               saber={hand === "none" || hand === MINES ? null : hand}
               mines={hand === MINES}
               flag={flag}
-              flagBolt={flagBolt}
               flagScale={flagScale}
+              flagYaw={flagYaw}
               onClipsLoaded={handleClips}
-              onBoltsLoaded={handleBolts}
               onFps={handleFps}
               className="w-full h-full"
             />
@@ -238,31 +238,21 @@ export function ModelLab() {
         {flag && (
           <div className="mt-3 pt-3 border-t border-[#3d4855]/60">
             <p className="text-xs text-[#8892a0] mb-2">
-              Flag mount and size — the two things not read from the game&apos;s files. Every bolt on this
-              model is listed, not a shortlist. Tell me the pair that matches the game and they become the
-              defaults.
+              Flag size and yaw. The bone, offsets, pitch and roll are transcribed from{" "}
+              <code>CG_PlayerFlag</code> in JK2&apos;s own source and aren&apos;t adjustable. Size is taste —
+              the game uses 0.50x, we run 0.40x. Yaw is the one term the source can&apos;t settle, because
+              Blender doesn&apos;t preserve Ghoul2&apos;s bone axes; one of these four is right.
             </p>
             <div className="flex flex-wrap items-center gap-2">
-              <label className="text-xs text-[#8892a0]">
-                Mount{" "}
-                <select
-                  value={flagBolt}
-                  onChange={(e) => setFlagBolt(e.target.value)}
-                  className="ml-1 px-2 py-1.5 rounded-md text-sm font-mono bg-[#2a3441] text-[#e6edf3] border border-[#3d4855]"
-                >
-                  {/* Keep the current value selectable even before the model has
-                      reported, so the dropdown never blanks on load. */}
-                  {(bolts.length > 0 ? bolts : [flagBolt]).map((bolt) => (
-                    <option key={bolt} value={bolt}>
-                      *{bolt}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <span className="text-xs text-[#8892a0]">{bolts.length} bolts</span>
               {FLAG_SCALES.map((scale) => (
                 <button key={scale} onClick={() => setFlagScale(scale)} className={controlClass(flagScale === scale)}>
-                  {scale.toFixed(2)}x
+                  {scale.toFixed(2)}x{scale === 0.5 ? " (game)" : ""}
+                </button>
+              ))}
+              <span className="w-full" />
+              {FLAG_YAWS.map((yaw) => (
+                <button key={yaw} onClick={() => setFlagYaw(yaw)} className={controlClass(flagYaw === yaw)}>
+                  yaw {yaw}°
                 </button>
               ))}
             </div>
