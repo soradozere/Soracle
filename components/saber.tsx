@@ -127,11 +127,16 @@ function BladeFace({
  * scene. Deliberately short-range so it picks out the nearest arm and chest
  * instead of floodlighting the figure.
  */
-function Blade({ colour, originY }: { colour: SaberColour; originY: number }) {
-  const [core, glow] = useLoader(TextureLoader, [
-    `/models/saber/${colour.id}_line.jpg`,
-    `/models/saber/${colour.id}_glow.jpg`,
-  ])
+function Blade({
+  colour,
+  originY,
+  assets,
+}: {
+  colour: SaberColour
+  originY: number
+  assets: SaberAssets
+}) {
+  const [core, glow] = useLoader(TextureLoader, [assets.core, assets.glow])
 
   const blade = useRef<Group>(null)
   const ignition = useRef(0)
@@ -160,8 +165,8 @@ function Blade({ colour, originY }: { colour: SaberColour; originY: number }) {
  * tag_flash comes straight out of the MD3, so the blade starts exactly where the
  * game says it does rather than at a hand-tuned offset.
  */
-function Hilt({ colour }: { colour: SaberColour }) {
-  const { scene } = useGLTF("/models/saber-hilt.glb")
+function Hilt({ colour, assets }: { colour: SaberColour; assets: SaberAssets }) {
+  const { scene } = useGLTF(assets.hilt)
 
   const model = useMemo(() => scene.clone(true), [scene])
 
@@ -189,17 +194,26 @@ function Hilt({ colour }: { colour: SaberColour }) {
   return (
     <group>
       <primitive object={model} scale={MD3_SCALE} />
-      <Blade colour={colour} originY={flashY} />
+      <Blade colour={colour} originY={flashY} assets={assets} />
     </group>
   )
 }
 
 /**
- * A lightsaber, built along +Y from the grip so it can be parented straight to a
- * hand bone and rotated into place by the caller.
+ * Loadable URLs for the three files a saber is made of. Resolved by the caller
+ * rather than built here: these are Raven assets served from a private bucket
+ * behind short-lived signed URLs, so there is no stable path to hardcode.
  */
-export function Saber({ colour }: { colour: SaberColour }) {
-  return <Hilt colour={colour} />
+export type SaberAssets = {
+  hilt: string
+  core: string
+  glow: string
 }
 
-useGLTF.preload("/models/saber-hilt.glb")
+/**
+ * A lightsaber, built along +Y from the grip so it can be parented straight to
+ * one of the model's bolt points.
+ */
+export function Saber({ colour, assets }: { colour: SaberColour; assets: SaberAssets }) {
+  return <Hilt colour={colour} assets={assets} />
+}
