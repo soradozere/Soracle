@@ -573,6 +573,56 @@ is open source and the answer is fifteen lines long.
 
 ---
 
+## 7.7 Skin variants — no second export
+
+A JK2 model ships one mesh and several `.skin` files. Each is a plain list of
+`surface,texturepath` lines, so a team skin is the default with a few images
+swapped, never new geometry:
+
+```
+hips,models/players/kyle/kyle_legs_red.tga
+torso,models/players/kyle/kyle_torso_red.tga
+torso_collar,models/players/kyle/kyle_extras_red.tga
+```
+
+**Don't export a `.glb` per skin.** Kyle's red skin differs from his default in
+exactly three textures — 174 KB against the 1.4 MB of mesh that would come with
+it. The viewer loads the one model and repaints the affected surfaces at runtime.
+
+Two facts make that clean, and both are worth knowing before touching it:
+
+- **Blender writes the JK2 shader path as the material name** (`models/players/
+  kyle/kyle_torso.tga`), so the `.glb` and the `.skin` files are already keyed the
+  same way. Nothing needs matching up by hand.
+- **Meshes are named `<surface>_0`** — the surface plus its LOD, and only LOD 0
+  survives §3.5. The `.skin` files name the bare surface.
+
+Run:
+
+```bash
+node scripts/glm-skins.mjs --assets "<extracted assets0>" --model kyle
+```
+
+It diffs every `model_*.skin` against `model_default.skin`, writes only the
+differing textures to `public/models/skins/<model>/<skin>/<n>.jpg`, and prints
+both the `PLAYER_MODELS` entry and the `upload-model-assets.mjs` lines to paste.
+
+Textures are numbered rather than named after their source files: a slot index is
+all the viewer needs, and it keeps Raven's filenames out of a public repo.
+
+**It skips first-person skins automatically.** `model_fpls.skin` maps the head and
+collar to JK2's `clear` shader so you don't see your own chin down the camera —
+a skin that hides a visible surface isn't a player skin, and rendering it gives you
+a decapitated figure. That rule catches exactly the two `fpls` files on the disc.
+
+The runtime half is `components/model-skin.tsx`. The one trap there: `TextureLoader`
+defaults to `flipY = true` and a linear colour space, and glTF specifies the
+opposite on both. Get the first wrong and swapped surfaces render upside-down
+(which on a torso wrap reads as a garbled texture, not an obvious flip); get the
+second wrong and they look washed out beside the surfaces you didn't swap.
+
+---
+
 ## 8. Troubleshooting
 
 | Symptom | Cause / fix |
@@ -590,6 +640,9 @@ is open source and the answer is fifteen lines long.
 | Converted prop is plain white, conversion reported success | `--assets <root>` wasn't passed, so the shader's asset-relative texture path never resolved (§7.5). |
 | Prop appears, but a spare gloved hand comes with it | World weapon models bundle a `w_hand` surface. `--exclude w_hand`. |
 | Prop is attached but nothing is on screen | Check the bolt chain in the scene graph before assuming it's misplaced — it's usually mounted correctly and simply out of frame. The base-standing CTF flag at full size does this. |
+| Skin swaps some surfaces and not others | The `surfaces` map in `PLAYER_MODELS` is stale — re-run `glm-skins.mjs` and paste it again. It's generated for a reason. |
+| Skinned surfaces look garbled, or washed out beside the rest | `flipY` / colour space on the loaded texture (§7.7). |
+| Skin picker doesn't appear in the lab | The model has one skin, or `catalogueId` is null (the Khronos sample). |
 
 ---
 

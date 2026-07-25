@@ -17,7 +17,6 @@ import {
   LoopOnce,
   MathUtils,
   Matrix4,
-  MeshStandardMaterial,
   Vector3,
   type AnimationAction,
   type Group,
@@ -28,8 +27,11 @@ import {
 import { Saber } from "@/components/saber"
 import { Md3Prop } from "@/components/md3-prop"
 import { CarriedFlag, FLAG_BONE } from "@/components/carried-flag"
+import { ModelSkinOverride } from "@/components/model-skin"
 import { useAssetUrls } from "@/hooks/use-asset-urls"
 import { findSaberColour } from "@/lib/saber-colours"
+import { findModelSkin, findPlayerModel, skinAssetIds } from "@/lib/player-models"
+import { flattenMeshMaterials } from "@/lib/three-materials"
 import { MINES_ASSET, SABER_HILT_ASSET, findFlagAsset, saberTextureAsset } from "@/lib/prop-assets"
 
 /** Every model is rescaled to this height in world units, so one camera fits all. */
@@ -161,6 +163,17 @@ const MINES_ONLY = [MINES_ASSET]
 export type ModelViewerProps = {
   /** URL of a .glb/.gltf, e.g. /models/fox.glb */
   src: string
+  /**
+   * Which PLAYER_MODELS entry `src` came from.
+   *
+   * Redundant with `src` on the face of it, but `src` is a signed URL with no
+   * stable name in it, and a skin is defined per model — the surface list for
+   * Kyle's red skin means nothing on anything else. Omit it and skins are simply
+   * off, which is right for the Khronos sample and anything unconverted.
+   */
+  modelId?: string | null
+  /** Skin id from the model's catalogue entry. Omit for the model's default. */
+  skin?: string | null
   /** Looping clip to play. Falls back to a clip named *idle*, then the first one. */
   animation?: string
   /** Slowly spin the camera around the model. */
@@ -520,6 +533,8 @@ function BoltMount({ children }: { children: ReactNode }) {
 
 function Model({
   src,
+  modelId,
+  skin,
   animation,
   paused,
   actionTrigger,
@@ -533,6 +548,8 @@ function Model({
 }: Pick<
   ModelViewerProps,
   | "src"
+  | "modelId"
+  | "skin"
   | "animation"
   | "paused"
   | "actionTrigger"
@@ -620,11 +637,8 @@ function Model({
     }
   }, [actionTrigger])
 
-  // Kill the specular sheen. Blender's glTF export writes Principled's default
-  // roughness of 0.5, which puts a wet-looking highlight across the whole model;
-  // JK2's renderer is flat diffuse with no specular at all. Forcing roughness to
-  // 1 gets us back to the in-game look, and doing it here rather than in Blender
-  // means it holds for every model without anyone remembering to set it.
+  // Kill the specular sheen (see flattenToDiffuse) and stop three culling pieces
+  // of the model away.
   useEffect(() => {
     scene.traverse((obj) => {
       const mesh = obj as Mesh
@@ -645,14 +659,7 @@ function Model({
       // that should have been drawn.
       mesh.frustumCulled = false
 
-      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
-      for (const mat of materials) {
-        if (mat instanceof MeshStandardMaterial) {
-          mat.roughness = 1
-          mat.metalness = 0
-          mat.needsUpdate = true
-        }
-      }
+      flattenMeshMaterials(mesh.material)
     })
   }, [scene])
 
@@ -694,6 +701,24 @@ function Model({
   const saberColour = mines ? null : findSaberColour(saber)
   const flagId = findFlagAsset(flag)
 
+  // Null for the default skin as well as for anything unrecognised, so the
+  // override below simply doesn't mount and the model keeps the textures Blender
+  // embedded. There is no "default skin" to download.
+  const skinDef = useMemo(() => findModelSkin(findPlayerModel(modelId), skin), [modelId, skin])
+  const skinIds = useMemo(
+    () => (skinDef && modelId ? skinAssetIds(modelId, skinDef) : null),
+    [modelId, skinDef],
+  )
+  const skinUrls = useAssetUrls(skinIds)
+
+  // In slot order, and memoised: this array is what useLoader keys its cache on,
+  // so a fresh identity every render would restart the download.
+  const skinTextures = useMemo(() => {
+    const resolved = skinUrls.urls
+    if (!skinIds || !resolved) return null
+    return skinIds.map((id) => resolved[id])
+  }, [skinIds, skinUrls.urls])
+
   const hilt = useAssetUrls(saberColour ? HILT_ONLY : null)
   const blade = useAssetUrls(
     saberColour
@@ -718,6 +743,15 @@ function Model({
       <group ref={fitGroup}>
         <primitive object={scene} />
       </group>
+
+      {/* Repaints surfaces of the model above rather than adding anything, but
+          it still gets its own boundary — while its textures download the figure
+          must stay on screen wearing the default skin, not vanish and refit. */}
+      {skinDef && skinTextures && (
+        <Suspense fallback={null}>
+          <ModelSkinOverride scene={scene} skin={skinDef} urls={skinTextures} />
+        </Suspense>
+      )}
 
       {/* Every prop gets its OWN Suspense boundary. Sharing the viewer's would
           mean a blade texture loading takes the whole model down to the fallback
@@ -754,6 +788,8 @@ function Model({
 
 export function ModelViewer({
   src,
+  modelId,
+  skin,
   animation,
   autoRotate = false,
   paused = false,
@@ -807,6 +843,8 @@ export function ModelViewer({
         <Suspense fallback={null}>
           <Model
             src={src}
+            modelId={modelId}
+            skin={skin}
             animation={animation}
             paused={paused}
             actionTrigger={actionTrigger}

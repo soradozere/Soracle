@@ -37,6 +37,15 @@ const ASSETS = [
   ["props/trip-mine.glb", "public/models/props/trip-mine.glb"],
   ["props/flag-red.glb", "public/models/props/flag-red.glb"],
   ["props/flag-blue.glb", "public/models/props/flag-blue.glb"],
+  // Skin variants: only the textures that differ from the model's default, which
+  // is already embedded in its .glb. Written by scripts/glm-skins.mjs, and the
+  // slot numbering has to match the `surfaces` maps in lib/player-models.ts.
+  ...["blue", "red"].flatMap((skin) =>
+    [0, 1, 2].map((slot) => [
+      `skins/kyle/${skin}/${slot}.jpg`,
+      `public/models/skins/kyle/${skin}/${slot}.jpg`,
+    ]),
+  ),
 ]
 
 const CONTENT_TYPES = {
