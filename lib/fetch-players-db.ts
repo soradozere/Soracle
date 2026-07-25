@@ -93,5 +93,7 @@ export function mapDbPlayer(dbPlayer: any): Player {
     profile_theme: dbPlayer.profile_theme ?? null,
     // Present only once migration 023 has run; undefined before then.
     model: dbPlayer.model ?? null,
+    // Present only once migration 024 has run; undefined before then.
+    saber: dbPlayer.saber ?? null,
   }
 }
