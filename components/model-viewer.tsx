@@ -28,7 +28,7 @@ import {
 import { Saber } from "@/components/saber"
 import { useAssetUrls } from "@/hooks/use-asset-urls"
 import { findSaberColour } from "@/lib/saber-colours"
-import { SABER_HILT_ASSET, saberAssetIds, saberTextureAsset } from "@/lib/prop-assets"
+import { SABER_HILT_ASSET, saberTextureAsset } from "@/lib/prop-assets"
 
 /** Every model is rescaled to this height in world units, so one camera fits all. */
 const TARGET_HEIGHT = 2
@@ -94,6 +94,12 @@ const HIP_BONES = ["pelvis", "hips", "lower_lumbar"]
 const BOLT_PREFIX = "bolt_"
 /** JK2 bolts the in-hand saber to `*r_hand`, not to the hand joint itself. */
 const SABER_BOLT = "r_hand"
+
+// Resolved on its own, so switching blade colour doesn't change the hilt's URL.
+// Every resolve mints a fresh signed URL, and a new URL makes useGLTF treat the
+// same file as a new asset: re-download, re-suspend, and the model gets refitted
+// on the way back. Hoisted so the identity never changes.
+const HILT_ONLY = [SABER_HILT_ASSET]
 
 // Client-only animated glTF viewer. Everything here runs in the browser — the
 // page that renders it dynamic-imports with `ssr: false`, because WebGL has no
@@ -574,19 +580,25 @@ function Model({
   })
 
   // The hilt and blade textures live in the same private bucket as the models,
-  // so they're resolved to signed URLs rather than loaded from a path. Held back
-  // until all three have arrived — see useAssetUrls.
+  // so they're resolved to signed URLs rather than loaded from a path. The hilt
+  // is resolved separately from the textures because it's the same file whatever
+  // colour the blade is — see HILT_ONLY.
   const saberColour = findSaberColour(saber)
-  const { urls } = useAssetUrls(saberColour ? saberAssetIds(saberColour.id) : null)
+  const hilt = useAssetUrls(saberColour ? HILT_ONLY : null)
+  const blade = useAssetUrls(
+    saberColour
+      ? [saberTextureAsset(saberColour.id, "line"), saberTextureAsset(saberColour.id, "glow")]
+      : null,
+  )
 
   const saberAssets = useMemo(() => {
-    if (!saberColour || !urls) return null
+    if (!saberColour || !hilt.urls || !blade.urls) return null
     return {
-      hilt: urls[SABER_HILT_ASSET],
-      core: urls[saberTextureAsset(saberColour.id, "line")],
-      glow: urls[saberTextureAsset(saberColour.id, "glow")],
+      hilt: hilt.urls[SABER_HILT_ASSET],
+      core: blade.urls[saberTextureAsset(saberColour.id, "line")],
+      glow: blade.urls[saberTextureAsset(saberColour.id, "glow")],
     }
-  }, [saberColour, urls])
+  }, [saberColour, hilt.urls, blade.urls])
 
   return (
     <group ref={group}>
@@ -594,10 +606,16 @@ function Model({
         <primitive object={scene} />
       </group>
 
+      {/* The saber gets its own Suspense boundary. Sharing the viewer's would
+          mean a blade texture loading takes the whole model down to the fallback
+          and remounts it — which re-runs the fit, and is why switching colour
+          used to resize the figure. A prop should never be able to do that. */}
       {saberColour && saberAssets && (
-        <Bolt point={bolts.get(SABER_BOLT)}>
-          <Saber colour={saberColour} assets={saberAssets} />
-        </Bolt>
+        <Suspense fallback={null}>
+          <Bolt point={bolts.get(SABER_BOLT)}>
+            <Saber colour={saberColour} assets={saberAssets} />
+          </Bolt>
+        </Suspense>
       )}
     </group>
   )

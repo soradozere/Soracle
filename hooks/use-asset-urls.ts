@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 
 export type AssetUrlsState = {
   /** id → loadable URL, or null until every one has resolved. */
@@ -25,22 +25,27 @@ export function useAssetUrls(ids: string[] | null): AssetUrlsState {
   // restart the fetch on every render. Compare by content instead.
   const key = ids ? ids.join(",") : ""
 
-  const [state, setState] = useState<AssetUrlsState>({
+  // The resolved set is tagged with the ids it was resolved FOR. Without that,
+  // there is a render where a caller has already switched to a new set — a new
+  // saber colour, say — but the effect hasn't run yet, so it reads the previous
+  // set's map with the new set's keys and gets undefined for every one. Handing
+  // that to a loader throws "Could not load undefined: undefined".
+  const [state, setState] = useState<AssetUrlsState & { key: string }>({
+    key,
     urls: null,
     loading: key.length > 0,
     error: null,
   })
 
-  const wanted = useMemo(() => (key ? key.split(",") : []), [key])
-
   useEffect(() => {
+    const wanted = key ? key.split(",") : []
     if (wanted.length === 0) {
-      setState({ urls: null, loading: false, error: null })
+      setState({ key, urls: null, loading: false, error: null })
       return
     }
 
     let cancelled = false
-    setState({ urls: null, loading: true, error: null })
+    setState({ key, urls: null, loading: true, error: null })
 
     Promise.all(
       wanted.map(async (id) => {
@@ -52,17 +57,19 @@ export function useAssetUrls(ids: string[] | null): AssetUrlsState {
     )
       .then((pairs) => {
         if (cancelled) return
-        setState({ urls: Object.fromEntries(pairs), loading: false, error: null })
+        setState({ key, urls: Object.fromEntries(pairs), loading: false, error: null })
       })
       .catch((err: Error) => {
         if (cancelled) return
-        setState({ urls: null, loading: false, error: err.message })
+        setState({ key, urls: null, loading: false, error: err.message })
       })
 
     return () => {
       cancelled = true
     }
-  }, [wanted])
+  }, [key])
 
-  return state
+  // Report nothing until what we hold is what was actually asked for.
+  if (state.key !== key) return { urls: null, loading: key.length > 0, error: null }
+  return { urls: state.urls, loading: state.loading, error: state.error }
 }
