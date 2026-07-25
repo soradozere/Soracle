@@ -386,6 +386,25 @@ Only take **one** clip with `idle` in its name, or the viewer picks the first an
 one-shots — harmless, but not what you meant. An idle plus `BOTH_GESTURE1` and `BOTH_TALKGESTURE1` is
 a good first set.
 
+### The easier way: one animation per file, merged afterwards
+
+Everything above works, and the stashing dance is genuinely fiddly. If it's fighting you, don't do it
+— export **one animation per `.glb`**, which Blender does with no ceremony at all, and merge them:
+
+```bash
+node scripts/glb-merge-anims.mjs idle.glb --name idle gesture.glb --name gesture --out kyle.glb
+```
+
+`--name` sets the clip name, which is what the viewer keys off: the one matching `idle` becomes the
+loop, the rest become one-shots for the action button. Worth passing, because Blender names every
+export `skeleton_rootAction` regardless of what's in it.
+
+Channels are retargeted **by node name**, so the exports don't have to agree on node ordering — and
+Blender's doesn't between runs. Anything pointing at a node the base file hasn't got is dropped with
+a warning rather than quietly producing a file that animates nothing.
+
+Run the merge **before** §7, since the bolt bake wants a fresh export and this produces one.
+
 ---
 
 ## 7. Bake the bolt points back in
