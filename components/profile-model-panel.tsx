@@ -40,7 +40,16 @@ export function ProfileModelFigure({
   // fills the canvas exactly. Centred when it stacks underneath on narrow
   // screens. The narrow-screen cap has to be lifted at lg or it would win over
   // the wider desktop width.
-  className = "w-full max-w-[300px] h-[420px] shrink-0 mx-auto lg:mx-0 lg:max-w-none lg:w-[380px]",
+  //
+  // lg:flex-1 rather than a fixed width: the stats column next to this is
+  // capped narrower than the row it sits in (its grid tops out at 28rem), so a
+  // fixed-width figure left a dead gap between the two on anything wider than
+  // ~950px. Growing into whatever's left also means MORE horizontal FOV (the
+  // camera's vertical framing is aspect-independent — widening the box only
+  // adds width, never changes how tightly the figure is framed top-to-bottom),
+  // which is what was clipping a saber held out to the side. Bounded both ways
+  // so it can't disappear on a cramped row or balloon on an ultrawide one.
+  className = "w-full max-w-[300px] h-[420px] shrink-0 mx-auto lg:mx-0 lg:max-w-[560px] lg:min-w-[380px] lg:flex-1",
 }: {
   modelId: string | null | undefined
   /** Skin id from the model's catalogue entry, or nothing for its default. */

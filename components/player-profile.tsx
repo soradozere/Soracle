@@ -168,9 +168,9 @@ function StatTile({
 
 // Divides one panel into labelled runs of stats — used to sit "this month"
 // underneath the career totals without giving it a card of its own.
-function SubHeading({ children }: { children: React.ReactNode }) {
+function SubHeading({ children, className = "mt-5 mb-3" }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className="flex items-center gap-3 mt-5 mb-3">
+    <div className={`flex items-center gap-3 ${className}`}>
       <h3 className="text-xs font-bold font-mono tracking-wider text-[var(--pa,#66fcf1)] shrink-0">{children}</h3>
       <div className="h-px flex-1 bg-[#3d4855]" />
     </div>
@@ -1187,15 +1187,97 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
         </div>
       ) : (
         <>
-          {/* ---- Career + this month, sharing a panel with the model ----
-               Career all-time on top, this month below it, the model standing
-               alongside both. Two 3x3-ish blocks stacked come out about as tall
-               as the model canvas, which is what closes the dead space a single
-               month block left beside it on desktop. */}
-          <SectionCard title="CAREER STATS">
-              <div className="flex flex-col lg:flex-row lg:items-center gap-4 lg:gap-6">
-                <div className="flex-1 min-w-0">
-                  <div className="grid grid-cols-3 gap-2 max-w-[28rem]">
+          {/* ---- Overview: this month, the model, and career, side by side ----
+               The model is the centrepiece; the two stat blocks flank it,
+               each squeezed into a narrower grid than they'd use on their
+               own so there's room for the figure to actually stand at a
+               reasonable size between them. lg:justify-center keeps the pair
+               centred on a profile with no model set, when there's no
+               flex-1 figure in the middle to soak up the leftover width. */}
+          <SectionCard title="OVERVIEW">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-center gap-4 lg:gap-6">
+                {/* This month — narrower than the old shared column, since it
+                    no longer has to hold both blocks' worth of height on its
+                    own. */}
+                <div className="lg:basis-64 lg:shrink-0 lg:grow-0">
+                  <SubHeading className="mt-0 mb-3">THIS MONTH — {data.currentMonth.label.toUpperCase()}</SubHeading>
+
+                  {data.currentMonth.games === 0 ? (
+                    <p className="text-sm text-[#8892a0]">No matches played this month yet.</p>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
+                        <div className="text-2xl font-bold font-mono">
+                          <span className="text-[#27ae60]">{data.currentMonth.wins}W</span>
+                          <span className="text-[#8892a0] mx-1">–</span>
+                          <span className="text-[#ff4757]">{data.currentMonth.losses}L</span>
+                          {data.currentMonth.draws > 0 && (
+                            <>
+                              <span className="text-[#8892a0] mx-1">–</span>
+                              <span className="text-[#8892a0]">{data.currentMonth.draws}D</span>
+                            </>
+                          )}
+                        </div>
+                        <div className="text-xs text-[#8892a0]">{data.currentMonth.winRate}% win rate</div>
+                        {data.currentMonth.bestStreak >= 2 && (
+                          <div className="flex items-center gap-1 text-xs text-[#f39c12]">
+                            <Flame className="w-3.5 h-3.5" />
+                            {data.currentMonth.bestStreak} streak
+                          </div>
+                        )}
+                      </div>
+                      {data.currentMonth.stats ? (
+                        <>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            <StatTile compact label="Caps" value={data.currentMonth.stats.captures} hint="Flag captures this month" />
+                            <StatTile compact label="Returns" value={data.currentMonth.stats.returns} hint="Flag returns this month" />
+                            <StatTile compact label="Assists" value={data.currentMonth.stats.assists} hint="Capture assists this month" />
+                            <StatTile compact label="BC" value={data.currentMonth.stats.baseCleaner} hint="Base cleaner kills — clearing defenders out of the enemy base" />
+                            <StatTile compact label="Grabs" value={data.currentMonth.stats.flagGrabs} hint="Flag grabs this month" />
+                            <StatTile compact label="Kills" value={data.currentMonth.stats.kills} hint="Total kills this month" />
+                            <StatTile compact label="Deaths" value={data.currentMonth.stats.deaths} hint="Total deaths this month" />
+                            <StatTile
+                              compact
+                              label="K/D"
+                              value={kdRatio(data.currentMonth.stats.kills, data.currentMonth.stats.deaths)}
+                              hint="Kills per death this month"
+                            />
+                            <StatTile
+                              compact
+                              label="Flag Hold"
+                              value={formatFlagHold(data.currentMonth.stats.flagHoldMs)}
+                              hint="Total time carrying the flag this month (min:sec)"
+                            />
+                          </div>
+                          <p className="text-[10px] text-[#8892a0] mt-3">
+                            Scoreboard stats recorded for {data.currentMonth.stats.statMatches} of {data.currentMonth.games}{" "}
+                            matches this month.
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-xs text-[#8892a0]">No scoreboard stats uploaded for this month yet.</p>
+                      )}
+                    </>
+                  )}
+                </div>
+
+                {fields.model && (
+                  <ProfileModelFigure
+                    modelId={fields.model}
+                    saber={fields.saber || null}
+                    skin={fields.skin || null}
+                    animation={fields.idle_animation || null}
+                    action={fields.action_animation || null}
+                    onEdit={canEdit ? () => setEditOpen(true) : undefined}
+                  />
+                )}
+
+                {/* Career, all-time — 2 columns rather than 3: six tiles read
+                    fine either way, and 2-wide is what actually fits a column
+                    this narrow without the tiles themselves getting squeezed. */}
+                <div className="lg:basis-48 lg:shrink-0 lg:grow-0">
+                  <SubHeading className="mt-0 mb-3">CAREER</SubHeading>
+                  <div className="grid grid-cols-2 gap-1.5">
                     <StatTile
                       compact
                       label="Matches"
@@ -1241,87 +1323,12 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                       hint={`All-time kills per death, across the ${data.totals.statMatches} matches with an uploaded stats CSV`}
                     />
                   </div>
-
-                  <SubHeading>THIS MONTH — {data.currentMonth.label.toUpperCase()}</SubHeading>
-
-                  {data.currentMonth.games === 0 ? (
-                    <p className="text-sm text-[#8892a0]">No matches played this month yet.</p>
-                  ) : (
-                    <>
-                      <div className="flex items-baseline gap-4 mb-3">
-                        <div className="text-3xl font-bold font-mono">
-                          <span className="text-[#27ae60]">{data.currentMonth.wins}W</span>
-                          <span className="text-[#8892a0] mx-1">–</span>
-                          <span className="text-[#ff4757]">{data.currentMonth.losses}L</span>
-                          {data.currentMonth.draws > 0 && (
-                            <>
-                              <span className="text-[#8892a0] mx-1">–</span>
-                              <span className="text-[#8892a0]">{data.currentMonth.draws}D</span>
-                            </>
-                          )}
-                        </div>
-                        <div className="text-sm text-[#8892a0]">{data.currentMonth.winRate}% win rate</div>
-                        {data.currentMonth.bestStreak >= 2 && (
-                          <div className="flex items-center gap-1 text-sm text-[#f39c12]">
-                            <Flame className="w-4 h-4" />
-                            {data.currentMonth.bestStreak} streak
-                          </div>
-                        )}
-                      </div>
-                      {data.currentMonth.stats ? (
-                        <>
-                          {/* 3 across and width-capped, matching the career grid
-                              above: nine small tiles form a block rather than
-                              stretching the full column, which is what made them
-                              look oversized next to the model. */}
-                          <div className="grid grid-cols-3 gap-2 max-w-[28rem]">
-                            <StatTile compact label="Caps" value={data.currentMonth.stats.captures} hint="Flag captures this month" />
-                            <StatTile compact label="Returns" value={data.currentMonth.stats.returns} hint="Flag returns this month" />
-                            <StatTile compact label="Assists" value={data.currentMonth.stats.assists} hint="Capture assists this month" />
-                            <StatTile compact label="BC" value={data.currentMonth.stats.baseCleaner} hint="Base cleaner kills — clearing defenders out of the enemy base" />
-                            <StatTile compact label="Grabs" value={data.currentMonth.stats.flagGrabs} hint="Flag grabs this month" />
-                            <StatTile compact label="Kills" value={data.currentMonth.stats.kills} hint="Total kills this month" />
-                            <StatTile compact label="Deaths" value={data.currentMonth.stats.deaths} hint="Total deaths this month" />
-                            <StatTile
-                              compact
-                              label="K/D"
-                              value={kdRatio(data.currentMonth.stats.kills, data.currentMonth.stats.deaths)}
-                              hint="Kills per death this month"
-                            />
-                            <StatTile
-                              compact
-                              label="Flag Hold"
-                              value={formatFlagHold(data.currentMonth.stats.flagHoldMs)}
-                              hint="Total time carrying the flag this month (min:sec)"
-                            />
-                          </div>
-                          <p className="text-[10px] text-[#8892a0] mt-3">
-                            Scoreboard stats recorded for {data.currentMonth.stats.statMatches} of {data.currentMonth.games}{" "}
-                            matches this month.
-                          </p>
-                        </>
-                      ) : (
-                        <p className="text-xs text-[#8892a0]">No scoreboard stats uploaded for this month yet.</p>
-                      )}
-                    </>
-                  )}
                 </div>
-
-                {fields.model && (
-                  <ProfileModelFigure
-                    modelId={fields.model}
-                    saber={fields.saber || null}
-                    skin={fields.skin || null}
-                    animation={fields.idle_animation || null}
-                    action={fields.action_animation || null}
-                    onEdit={canEdit ? () => setEditOpen(true) : undefined}
-                  />
-                )}
               </div>
             </SectionCard>
 
           {/* ---- Achievements + titles: two views of the same thing, so one
-               panel. Career numbers moved up into CAREER STATS. ---- */}
+               panel. Career numbers moved up into OVERVIEW. ---- */}
           <SectionCard title="ACHIEVEMENTS & TITLES">
             <AchievementsStrip achievements={data.achievements} />
             <div className="mt-5 pt-5 border-t border-[#3d4855]">
