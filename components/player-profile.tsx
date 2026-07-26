@@ -146,14 +146,14 @@ function StatTile({
       <TooltipTrigger asChild>
         <div
           className={`bg-[#0b0c10]/60 border border-[#3d4855] rounded-lg text-center cursor-default ${
-            compact ? "px-2 py-1.5" : "p-2"
+            compact ? "px-2.5 py-2" : "p-2"
           }`}
         >
-          <div className={`font-bold font-mono text-[#c5c6c7] ${compact ? "text-base leading-tight" : "text-lg"}`}>
+          <div className={`font-bold font-mono text-[#c5c6c7] ${compact ? "text-lg leading-tight" : "text-lg"}`}>
             {value}
           </div>
           <div
-            className={`uppercase tracking-wider text-[#8892a0] ${compact ? "text-[9px]" : "text-[10px] mt-0.5"}`}
+            className={`uppercase tracking-wider text-[#8892a0] ${compact ? "text-[10px] mt-0.5" : "text-[10px] mt-0.5"}`}
           >
             {label}
           </div>
@@ -746,7 +746,6 @@ function EditProfileDialog({
                 {PLAYER_MODELS.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
                     {m.label}
-                    {m.blurb && <span className="text-[#8892a0] text-xs ml-2">{m.blurb}</span>}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -1199,7 +1198,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                 {/* This month — narrower than the old shared column, since it
                     no longer has to hold both blocks' worth of height on its
                     own. */}
-                <div className="lg:basis-64 lg:shrink-0 lg:grow-0">
+                <div className="lg:basis-72 lg:shrink-0 lg:grow-0">
                   <SubHeading className="mt-0 mb-3">THIS MONTH — {data.currentMonth.label.toUpperCase()}</SubHeading>
 
                   {data.currentMonth.games === 0 ? (
@@ -1228,7 +1227,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                       </div>
                       {data.currentMonth.stats ? (
                         <>
-                          <div className="grid grid-cols-3 gap-1.5">
+                          <div className="grid grid-cols-3 gap-2">
                             <StatTile compact label="Caps" value={data.currentMonth.stats.captures} hint="Flag captures this month" />
                             <StatTile compact label="Returns" value={data.currentMonth.stats.returns} hint="Flag returns this month" />
                             <StatTile compact label="Assists" value={data.currentMonth.stats.assists} hint="Capture assists this month" />
@@ -1275,9 +1274,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                 {/* Career, all-time — 2 columns rather than 3: six tiles read
                     fine either way, and 2-wide is what actually fits a column
                     this narrow without the tiles themselves getting squeezed. */}
-                <div className="lg:basis-48 lg:shrink-0 lg:grow-0">
+                <div className="lg:basis-56 lg:shrink-0 lg:grow-0">
                   <SubHeading className="mt-0 mb-3">CAREER</SubHeading>
-                  <div className="grid grid-cols-2 gap-1.5">
+                  <div className="grid grid-cols-2 gap-2">
                     <StatTile
                       compact
                       label="Matches"
