@@ -53,8 +53,6 @@ export type PlayerModel = {
   label: string
   /** Object name inside the storage bucket. */
   file: string
-  /** Roughly how the model reads, for the picker. */
-  blurb?: string
   /** Skins this model can wear, default first. */
   skins: ModelSkin[]
 }
@@ -74,28 +72,24 @@ export const PLAYER_MODELS: PlayerModel[] = [
     id: "kyle",
     label: "Kyle Katarn",
     file: "kyle.glb",
-    blurb: "The stock JK2 protagonist",
     skins: skinsFor("kyle"),
   },
   {
     id: "reborn",
     label: "Reborn",
     file: "reborn.glb",
-    blurb: "Hooded Sith apprentice — six skins, the most on the disc",
     skins: skinsFor("reborn"),
   },
   {
     id: "shadowtrooper",
     label: "Shadowtrooper",
     file: "shadowtrooper.glb",
-    blurb: "Cortosis-armoured stormtrooper with a saber",
     skins: skinsFor("shadowtrooper"),
   },
   {
     id: "tavion",
     label: "Tavion",
     file: "tavion.glb",
-    blurb: "Desann's apprentice",
     skins: skinsFor("tavion"),
   },
   {
@@ -105,70 +99,60 @@ export const PLAYER_MODELS: PlayerModel[] = [
     // Worth knowing before anyone reports it as a bug: the viewer normalises
     // every model to the same height, so he doesn't tower here the way he does
     // in game.
-    blurb: "The fallen Jedi — huge in game, same height as everyone here",
     skins: skinsFor("desann"),
   },
   {
     id: "luke",
     label: "Luke Skywalker",
     file: "luke.glb",
-    blurb: "Cameo appearance from the original trilogy",
     skins: skinsFor("luke"),
   },
   {
     id: "jan",
     label: "Jan Ors",
     file: "jan.glb",
-    blurb: "Kyle's partner and pilot",
     skins: skinsFor("jan"),
   },
   {
     id: "lando",
     label: "Lando Calrissian",
     file: "lando.glb",
-    blurb: "Cloud City's administrator",
     skins: skinsFor("lando"),
   },
   {
     id: "jedi",
     label: "Jedi",
     file: "jedi.glb",
-    blurb: "Generic Jedi trainee — three skins, including a second face (J2)",
     skins: skinsFor("jedi"),
   },
   {
     id: "stormtrooper",
     label: "Stormtrooper",
     file: "stormtrooper.glb",
-    blurb: "Imperial rank and file",
     skins: skinsFor("stormtrooper"),
   },
   {
     id: "swamptrooper",
     label: "Swamptrooper",
     file: "swamptrooper.glb",
-    blurb: "Kejim outpost garrison",
     skins: skinsFor("swamptrooper"),
   },
   {
     id: "imperial",
     label: "Imperial Officer",
     file: "imperial.glb",
-    blurb: "Four skins, including commander and officer ranks",
     skins: skinsFor("imperial"),
   },
   {
     id: "rebel",
     label: "Rebel Trooper",
     file: "rebel.glb",
-    blurb: "Alliance infantry",
     skins: skinsFor("rebel"),
   },
   {
     id: "jeditrainer",
     label: "Jedi Trainer",
     file: "jeditrainer.glb",
-    blurb: "Luke's academy instructor",
     skins: skinsFor("jeditrainer"),
   },
 ]
