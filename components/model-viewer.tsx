@@ -182,8 +182,16 @@ export type ModelViewerProps = {
   paused?: boolean
   /** Allow drag-to-orbit / scroll-to-zoom. */
   interactive?: boolean
-  /** Bump this to play a random one-shot clip, then settle back into the idle. */
+  /**
+   * Bump this to play a one-shot clip, then settle back into the idle.
+   *
+   * Plays `action` if it names a real clip; otherwise picks a random one-shot,
+   * which is what happens with no chosen action at all (and what the lab's
+   * plain "play an action" button relies on).
+   */
   actionTrigger?: number
+  /** Specific one-shot clip to play on actionTrigger. Omit for a random pick. */
+  action?: string
   /** Blade colour id from lib/saber-colours. Omit for an unarmed model. */
   saber?: string | null
   /**
@@ -538,6 +546,7 @@ function Model({
   animation,
   paused,
   actionTrigger,
+  action,
   saber,
   mines,
   flag,
@@ -553,6 +562,7 @@ function Model({
   | "animation"
   | "paused"
   | "actionTrigger"
+  | "action"
   | "saber"
   | "mines"
   | "flag"
@@ -596,13 +606,15 @@ function Model({
 
   // Latest clip state, read by the action trigger below without making it a
   // dependency — the effect must fire on the trigger and nothing else, or
-  // reloading the clip list would replay the animation on its own.
-  const clipState = useRef({ actions, names, idleName, mixer })
-  clipState.current = { actions, names, idleName, mixer }
+  // reloading the clip list would replay the animation on its own. `action`
+  // rides along for the same reason: picking a different one shouldn't replay
+  // anything on its own, only the next button press should.
+  const clipState = useRef({ actions, names, idleName, mixer, action })
+  clipState.current = { actions, names, idleName, mixer, action }
 
   useEffect(() => {
     if (!actionTrigger) return
-    const { actions: acts, names: all, idleName: idleKey, mixer: m } = clipState.current
+    const { actions: acts, names: all, idleName: idleKey, mixer: m, action: requested } = clipState.current
     const idle = idleKey ? acts[idleKey] : undefined
     const oneShots = all.filter((name) => name !== idleKey)
 
@@ -614,21 +626,26 @@ function Model({
       return
     }
 
-    const action = acts[oneShots[Math.floor(Math.random() * oneShots.length)]]
-    if (!action) return
+    // A specific request wins if it names a real one-shot; otherwise keep the
+    // random pick, which is what the lab's plain "play an action" button (and
+    // any profile with nothing chosen yet) relies on.
+    const clipName =
+      requested && oneShots.includes(requested) ? requested : oneShots[Math.floor(Math.random() * oneShots.length)]
+    const clip = acts[clipName]
+    if (!clip) return
 
-    action.reset()
-    action.setLoop(LoopOnce, 1)
-    action.clampWhenFinished = true
-    action.setEffectiveWeight(1)
-    action.fadeIn(0.15).play()
+    clip.reset()
+    clip.setLoop(LoopOnce, 1)
+    clip.clampWhenFinished = true
+    clip.setEffectiveWeight(1)
+    clip.fadeIn(0.15).play()
     idle?.fadeOut(0.15)
 
     const onFinished = (event: { action: AnimationAction }) => {
-      if (event.action !== action) return
+      if (event.action !== clip) return
       m.removeEventListener("finished", onFinished as never)
       idle?.reset().fadeIn(0.25).play()
-      action.fadeOut(0.25)
+      clip.fadeOut(0.25)
     }
     m.addEventListener("finished", onFinished as never)
 
@@ -795,6 +812,7 @@ export function ModelViewer({
   paused = false,
   interactive = true,
   actionTrigger,
+  action,
   saber,
   mines,
   flag,
@@ -848,6 +866,7 @@ export function ModelViewer({
             animation={animation}
             paused={paused}
             actionTrigger={actionTrigger}
+            action={action}
             saber={saber}
             mines={mines}
             flag={flag}

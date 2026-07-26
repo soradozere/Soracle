@@ -95,5 +95,9 @@ export function mapDbPlayer(dbPlayer: any): Player {
     model: dbPlayer.model ?? null,
     // Present only once migration 024 has run; undefined before then.
     saber: dbPlayer.saber ?? null,
+    // Present only once migration 025 has run; undefined before then.
+    skin: dbPlayer.skin ?? null,
+    idle_animation: dbPlayer.idle_animation ?? null,
+    action_animation: dbPlayer.action_animation ?? null,
   }
 }

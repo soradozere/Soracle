@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic"
 import { useEffect, useState } from "react"
-import { RotateCw, Zap } from "lucide-react"
+import { Pencil, RotateCw, Zap } from "lucide-react"
 import { usePrefersReducedMotion } from "@/components/model-viewer"
 import { useModelUrl } from "@/hooks/use-model-url"
 import { findPlayerModel } from "@/lib/player-models"
@@ -33,6 +33,9 @@ export function ProfileModelFigure({
   modelId,
   skin,
   saber,
+  animation,
+  action,
+  onEdit,
   // Tall enough for a full-height figure, since the viewer's zoomed-out framing
   // fills the canvas exactly. Centred when it stacks underneath on narrow
   // screens. The narrow-screen cap has to be lifted at lg or it would win over
@@ -40,16 +43,22 @@ export function ProfileModelFigure({
   className = "w-full max-w-[300px] h-[420px] shrink-0 mx-auto lg:mx-0 lg:max-w-none lg:w-[380px]",
 }: {
   modelId: string | null | undefined
-  /**
-   * Skin id from the model's catalogue entry, or nothing for its default.
-   *
-   * No profile stores one yet — it belongs in the loadout column alongside the
-   * saber colour and the flag, rather than getting a column of its own on the
-   * way there. Wired through now so that lands as one line.
-   */
+  /** Skin id from the model's catalogue entry, or nothing for its default. */
   skin?: string | null
   /** Blade colour id, or null for an unarmed model. */
   saber?: string | null
+  /** Idle clip to loop, or nothing for the model's own default idle. */
+  animation?: string | null
+  /** Specific one-shot clip the action button plays, or nothing for a random pick. */
+  action?: string | null
+  /**
+   * Renders a small edit icon alongside the rotate/action buttons when set.
+   *
+   * Optional because this figure is used elsewhere without an editable
+   * loadout (nothing calls it that way today, but nothing should assume every
+   * caller wants an edit affordance either).
+   */
+  onEdit?: () => void
   className?: string
 }) {
   const model = findPlayerModel(modelId)
@@ -74,8 +83,10 @@ export function ProfileModelFigure({
             src={url}
             modelId={model.id}
             skin={skin}
+            animation={animation ?? undefined}
             autoRotate={spin}
             actionTrigger={actionTrigger}
+            action={action ?? undefined}
             saber={saber}
             className="w-full h-full"
           />
@@ -100,6 +111,11 @@ export function ProfileModelFigure({
           <ModelButton label="Play an action" onClick={() => setActionTrigger((n) => n + 1)}>
             <Zap className="w-3 h-3" />
           </ModelButton>
+          {onEdit && (
+            <ModelButton label="Edit loadout" onClick={onEdit}>
+              <Pencil className="w-3 h-3" />
+            </ModelButton>
+          )}
         </div>
       )}
     </div>

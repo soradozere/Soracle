@@ -6,8 +6,9 @@ import { computeAllPlayerAchievements } from "@/lib/achievements-server"
 import { scoreFromViews } from "@/lib/achievement-score"
 import { earnedTitles, mergeRecordedTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
 import { fetchRecordedTitles } from "@/lib/titles-server"
-import { isKnownModel } from "@/lib/player-models"
+import { findModelSkin, findPlayerModel, isKnownModel } from "@/lib/player-models"
 import { isKnownSaberColour } from "@/lib/saber-colours"
+import { isKnownActionAnimation, isKnownIdleAnimation } from "@/lib/animations"
 
 // Self-service profile save for a logged-in player (not an admin). Deliberately
 // narrower than the admin path: no tooltip (that stays an admin-only "signature"),
@@ -26,6 +27,9 @@ export async function POST(request: Request) {
     profile_theme?: string
     model?: string
     saber?: string
+    skin?: string
+    idle_animation?: string
+    action_animation?: string
   }
   try {
     body = await request.json()
@@ -39,6 +43,9 @@ export async function POST(request: Request) {
   const themeId = (body.profile_theme ?? "").trim() || null
   const modelId = (body.model ?? "").trim() || null
   const saberId = (body.saber ?? "").trim() || null
+  const skinId = (body.skin ?? "").trim() || null
+  const idleAnimationId = (body.idle_animation ?? "").trim() || null
+  const actionAnimationId = (body.action_animation ?? "").trim() || null
 
   const supabase = createServiceClient()
 
@@ -97,6 +104,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unknown saber colour" }, { status: 400 })
   }
 
+  // A skin id only means something paired with the model it belongs to — Kyle's
+  // "red" and Reborn's "boss" aren't interchangeable — so this checks the
+  // submitted skin against the submitted model's OWN list, not a flat catalogue.
+  // No model means no skin: there's nothing for it to repaint.
+  if (skinId && !findModelSkin(findPlayerModel(modelId), skinId)) {
+    return NextResponse.json({ error: "Unknown skin for this model" }, { status: 400 })
+  }
+
+  // Same reasoning as model/saber: these become clip names handed straight to
+  // <ModelViewer>, so an unrecognised one has to be rejected rather than silently
+  // parked in the column for later.
+  if (idleAnimationId && !isKnownIdleAnimation(idleAnimationId)) {
+    return NextResponse.json({ error: "Unknown idle animation" }, { status: 400 })
+  }
+  if (actionAnimationId && !isKnownActionAnimation(actionAnimationId)) {
+    return NextResponse.json({ error: "Unknown action animation" }, { status: 400 })
+  }
+
   const { error } = await supabase
     .from("players")
     .update({
@@ -106,6 +131,9 @@ export async function POST(request: Request) {
       profile_theme: themeId,
       model: modelId,
       saber: saberId,
+      skin: skinId,
+      idle_animation: idleAnimationId,
+      action_animation: actionAnimationId,
     })
     .eq("id", playerId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
