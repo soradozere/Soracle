@@ -13,8 +13,9 @@ import {
 import type { Player } from "@/lib/types"
 import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucide-react"
 import { ProfileModelFigure } from "@/components/profile-model-panel"
-import { PLAYER_MODELS } from "@/lib/player-models"
+import { PLAYER_MODELS, findPlayerModel } from "@/lib/player-models"
 import { SABER_COLOURS } from "@/lib/saber-colours"
+import { IDLE_ANIMATIONS, ACTION_ANIMATIONS } from "@/lib/animations"
 import { BADGE_META } from "@/lib/badge-meta"
 import { BadgeIcon } from "@/components/badge-icon"
 import { AchievementsStrip } from "@/components/achievements-strip"
@@ -80,6 +81,9 @@ interface EditableFields {
   profile_theme: string
   model: string
   saber: string
+  skin: string
+  idle_animation: string
+  action_animation: string
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -512,6 +516,9 @@ function EditProfileDialog({
     const profile_theme = fields.profile_theme || null
     const model = fields.model || null
     const saber = fields.saber || null
+    const skin = fields.skin || null
+    const idle_animation = fields.idle_animation || null
+    const action_animation = fields.action_animation || null
 
     if (canEditTooltip) {
       // Admin path: writes straight to the players table via the browser
@@ -520,14 +527,36 @@ function EditProfileDialog({
       const supabase = createClient()
       const { error } = await supabase
         .from("players")
-        .update({ tooltip, avatar_url, spotlight_url, title, profile_theme, model, saber })
+        .update({
+          tooltip,
+          avatar_url,
+          spotlight_url,
+          title,
+          profile_theme,
+          model,
+          saber,
+          skin,
+          idle_animation,
+          action_animation,
+        })
         .eq("id", playerId)
       setSaving(false)
       if (error) {
         setSaveError(error.message)
         return
       }
-      onSaved({ tooltip: tooltip ?? "", avatar_url: avatar_url ?? "", spotlight_url: spotlight_url ?? "", title: title ?? "", profile_theme: profile_theme ?? "", model: model ?? "", saber: saber ?? "" })
+      onSaved({
+        tooltip: tooltip ?? "",
+        avatar_url: avatar_url ?? "",
+        spotlight_url: spotlight_url ?? "",
+        title: title ?? "",
+        profile_theme: profile_theme ?? "",
+        model: model ?? "",
+        saber: saber ?? "",
+        skin: skin ?? "",
+        idle_animation: idle_animation ?? "",
+        action_animation: action_animation ?? "",
+      })
       onOpenChange(false)
       return
     }
@@ -537,7 +566,17 @@ function EditProfileDialog({
     const res = await fetch("/api/player-profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ avatar_url, spotlight_url, title, profile_theme, model, saber }),
+      body: JSON.stringify({
+        avatar_url,
+        spotlight_url,
+        title,
+        profile_theme,
+        model,
+        saber,
+        skin,
+        idle_animation,
+        action_animation,
+      }),
     })
     const data = await res.json()
     setSaving(false)
@@ -553,11 +592,18 @@ function EditProfileDialog({
       profile_theme: profile_theme ?? "",
       model: model ?? "",
       saber: saber ?? "",
+      skin: skin ?? "",
+      idle_animation: idle_animation ?? "",
+      action_animation: action_animation ?? "",
     })
     onOpenChange(false)
   }
 
   const spotlightPreview = spotlightEmbedUrl(fields.spotlight_url)
+  // Skins are per-model — Kyle's "red" means nothing on Reborn — so the picker
+  // is driven by whichever model is currently selected, not a flat catalogue.
+  const selectedModel = findPlayerModel(fields.model)
+  const skinOptions = selectedModel?.skins ?? []
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -686,7 +732,11 @@ function EditProfileDialog({
             <Label className="text-xs text-[#8892a0]">3D model</Label>
             <Select
               value={fields.model || "none"}
-              onValueChange={(v) => setFields((f) => ({ ...f, model: v === "none" ? "" : v }))}
+              onValueChange={(v) =>
+                // Changing model invalidates any skin chosen for the old one —
+                // Reborn's "boss" id means nothing once Kyle is selected.
+                setFields((f) => ({ ...f, model: v === "none" ? "" : v, skin: "" }))
+              }
             >
               <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
                 <SelectValue placeholder="No model" />
@@ -705,9 +755,36 @@ function EditProfileDialog({
               An animated JK2 player model on your profile. Not tied to crests — anyone can pick any model.
             </p>
           </div>
-          {/* Only offered once a model is set — a blade colour on its own has
-              nothing to hang off, and an enabled control that does nothing is
-              worse than one that isn't there. */}
+          {/* Skin, saber, and the two animation pickers only make sense once a
+              model is set — an enabled control that does nothing is worse than
+              one that isn't there. Skin is additionally hidden for a model that
+              only has its default look (no variants to choose between). */}
+          {fields.model && skinOptions.length > 1 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8892a0]">Skin</Label>
+              <Select
+                value={fields.skin || "none"}
+                onValueChange={(v) => setFields((f) => ({ ...f, skin: v === "none" ? "" : v }))}
+              >
+                <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                  <SelectItem value="none">Default</SelectItem>
+                  {skinOptions
+                    .filter((s) => s.textures > 0)
+                    .map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-[#8892a0]">
+                A texture variant of the model above — e.g. a team colour. Free, like the model itself.
+              </p>
+            </div>
+          )}
           {fields.model && (
             <div className="space-y-1.5">
               <Label className="text-xs text-[#8892a0]">Lightsaber</Label>
@@ -735,6 +812,52 @@ function EditProfileDialog({
               </Select>
               <p className="text-[10px] text-[#8892a0]">
                 Ignited in your model&apos;s hand. Also free — pick whichever colour you like.
+              </p>
+            </div>
+          )}
+          {fields.model && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8892a0]">Idle animation</Label>
+              <Select
+                value={fields.idle_animation || "none"}
+                onValueChange={(v) => setFields((f) => ({ ...f, idle_animation: v === "none" ? "" : v }))}
+              >
+                <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                  <SelectValue placeholder="Standard" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                  <SelectItem value="none">Standard</SelectItem>
+                  {IDLE_ANIMATIONS.map((clip) => (
+                    <SelectItem key={clip.id} value={clip.id}>
+                      {clip.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-[#8892a0]">The pose your model stands in while idle.</p>
+            </div>
+          )}
+          {fields.model && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8892a0]">Action animation</Label>
+              <Select
+                value={fields.action_animation || "none"}
+                onValueChange={(v) => setFields((f) => ({ ...f, action_animation: v === "none" ? "" : v }))}
+              >
+                <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                  <SelectValue placeholder="Random" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                  <SelectItem value="none">Random</SelectItem>
+                  {ACTION_ANIMATIONS.map((clip) => (
+                    <SelectItem key={clip.id} value={clip.id}>
+                      {clip.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-[#8892a0]">
+                Plays when someone clicks the action button under your model. Leave on Random to keep it a surprise.
               </p>
             </div>
           )}
@@ -822,6 +945,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
     profile_theme: player.profile_theme ?? "",
     model: player.model ?? "",
     saber: player.saber ?? "",
+    skin: player.skin ?? "",
+    idle_animation: player.idle_animation ?? "",
+    action_animation: player.action_animation ?? "",
   })
   useEffect(() => {
     setFields({
@@ -832,6 +958,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
       profile_theme: player.profile_theme ?? "",
       model: player.model ?? "",
       saber: player.saber ?? "",
+      skin: player.skin ?? "",
+      idle_animation: player.idle_animation ?? "",
+      action_animation: player.action_animation ?? "",
     })
   }, [player.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1178,7 +1307,16 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                   )}
                 </div>
 
-                {fields.model && <ProfileModelFigure modelId={fields.model} saber={fields.saber || null} />}
+                {fields.model && (
+                  <ProfileModelFigure
+                    modelId={fields.model}
+                    saber={fields.saber || null}
+                    skin={fields.skin || null}
+                    animation={fields.idle_animation || null}
+                    action={fields.action_animation || null}
+                    onEdit={canEdit ? () => setEditOpen(true) : undefined}
+                  />
+                )}
               </div>
             </SectionCard>
 
