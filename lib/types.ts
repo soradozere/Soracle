@@ -29,6 +29,14 @@ export interface Player {
   // Lightsaber blade colour (migration 024). A catalogue id from
   // lib/saber-colours.ts. Only visible on a model that has bolt points baked in.
   saber?: string | null
+  // Skin + animation choices (migration 025). Skin is a catalogue id from the
+  // CHOSEN model's own ModelSkin list in lib/player-models.ts — meaningless
+  // without `model`, and re-validated against it server-side. Idle/action are
+  // catalogue ids from lib/animations.ts. Null in any of the three just means
+  // "use the default" rather than an error.
+  skin?: string | null
+  idle_animation?: string | null
+  action_animation?: string | null
 }
 
 export interface BalanceResult {
