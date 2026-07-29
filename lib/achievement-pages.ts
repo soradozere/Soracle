@@ -20,7 +20,8 @@ import type { AchievementLedger, LedgerEntry } from "@/lib/achievements-server"
 export const rankListFor = (def: AchievementDef): Rank[] =>
   def.ranks?.length ? def.ranks : [{ threshold: def.threshold ?? 1, rarity: def.rarity ?? "common" }]
 
-const fmtVal = (v: number, def: AchievementDef) => (def.unit === "hours" ? `${Math.round(v)}h` : `${Math.round(v)}`)
+const fmtVal = (v: number, def: AchievementDef) =>
+  def.unit === "hours" ? `${Math.round(v)}h` : def.unit === "percent" ? `${Math.round(v)}%` : `${Math.round(v)}`
 
 export const requirementFor = (def: AchievementDef, r: Rank) => `${fmtVal(r.threshold, def)}${def.exact ? "" : "+"}`
 
@@ -89,6 +90,52 @@ export function summariesFor(ledger: AchievementLedger): AchievementSummary[] {
 // ordinary, fully-described achievements with exactly one holder.
 export const sealedSecretCount = (ledger: AchievementLedger) =>
   SECRET_ACHIEVEMENTS.length - ledger.claimedSecrets.length
+
+// One claimed one-of-one, ready to render in the vault: unlike the sealed "?"
+// tiles, a claimed crest reveals everything — condition included, since the
+// entire point of the reveal is showing what it took.
+export interface ClaimedSecret {
+  id: string
+  view: AchievementView
+  playerName: string
+  date: string
+}
+
+// Claimed secrets, newest claim first — the vault leads with the most recent
+// reveal rather than definition order.
+export function claimedSecretSummaries(ledger: AchievementLedger): ClaimedSecret[] {
+  return [...ledger.claimedSecrets]
+    .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+    .map((e) => {
+      const def = SECRET_ACHIEVEMENTS.find((d) => d.id === e.achId)!
+      return {
+        id: e.achId,
+        playerName: e.playerName,
+        date: e.date,
+        view: {
+          id: def.id,
+          title: def.title,
+          titled: true,
+          category: def.category,
+          rarity: "oneofone" as Rarity,
+          icon: def.icon,
+          condition: def.condition,
+          pending: false,
+          tiered: false,
+          rank: 1,
+          totalRanks: 1,
+          earned: true,
+          earnedDate: e.date,
+          earnedMatchId: e.matchId,
+          earnedRequirement: null,
+          earnedWith: null,
+          progressPct: null,
+          progressLabel: null,
+          value: 0,
+        },
+      }
+    })
+}
 
 // Resolve a URL id to something renderable. Unclaimed secrets return null so the
 // route 404s rather than confirming the id exists.
