@@ -14,9 +14,14 @@ import { MODEL_SKINS } from "@/lib/model-skins"
 
 export const MODEL_BUCKET = "models"
 
-/** How long a minted signed URL stays valid. Long enough to load, short enough
- *  that a scraped link is worthless within the hour. */
-export const MODEL_URL_TTL_SECONDS = 600
+/**
+ * How long a minted signed URL stays valid — and, at half this, how long the
+ * browser may reuse the /api/model-url response that carries it. An hour
+ * because the URL doubles as the browser's cache key for a ~2 MB .glb: every
+ * fresh mint is a full re-download, so short TTLs made each revisit pay the
+ * whole download again. A scraped link still dies within the hour.
+ */
+export const MODEL_URL_TTL_SECONDS = 3600
 
 /** The skin every model is exported wearing, and the one baked into its .glb. */
 export const DEFAULT_SKIN = "default"
@@ -73,6 +78,8 @@ export type PlayerModel = {
   file: string
   /** Skins this model can wear, default first. */
   skins: ModelSkin[]
+  /** Author credit for fan-made models, shown alongside the label in the picker. */
+  credit?: string
 }
 
 /** Every model has a default; the variants come from the generated catalogue. */
@@ -182,6 +189,7 @@ export const PLAYER_MODELS: PlayerModel[] = [
     label: "Andromeda",
     file: "andromeda.glb",
     skins: skinsFor("andromeda"),
+    credit: "FetchD",
   },
   {
     id: "bones",
@@ -194,6 +202,7 @@ export const PLAYER_MODELS: PlayerModel[] = [
     label: "Horseton",
     file: "horseton.glb",
     skins: skinsFor("horseton"),
+    credit: "Booti",
   },
   // Stock JK2, not fan-made — just never converted alongside the rest of the
   // base roster above. Its "Shadow" skin is a fan retexture (zzz_Crash.pk3,
