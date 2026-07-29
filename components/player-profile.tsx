@@ -13,7 +13,7 @@ import {
 import type { Player } from "@/lib/types"
 import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucide-react"
 import { ProfileModelFigure } from "@/components/profile-model-panel"
-import { PLAYER_MODELS, findPlayerModel } from "@/lib/player-models"
+import { PLAYER_MODELS, findPlayerModel, DEFAULT_SKIN } from "@/lib/player-models"
 import { SABER_COLOURS, MINES_HAND_SLOT } from "@/lib/saber-colours"
 import { IDLE_ANIMATIONS, ACTION_ANIMATIONS } from "@/lib/animations"
 import { BADGE_META } from "@/lib/badge-meta"
@@ -37,6 +37,14 @@ import {
 import { scoreFromViews } from "@/lib/achievement-score"
 import { RARITY_META } from "@/lib/achievement-meta"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { cn } from "@/lib/utils"
 import { createClient } from "@/lib/supabase/client"
 import { useToast } from "@/hooks/use-toast"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -921,6 +929,35 @@ function EditLoadoutDialog({
   // is driven by whichever model is currently selected, not a flat catalogue.
   const selectedModel = findPlayerModel(fields.model)
   const skinOptions = selectedModel?.skins ?? []
+  // The roster's grown past a flat list being scannable — split into the two
+  // categories the models themselves already fall into (see PlayerModel.custom).
+  const baseModels = PLAYER_MODELS.filter((m) => !m.custom)
+  const customModels = PLAYER_MODELS.filter((m) => m.custom)
+  // Which category's list the model picker below is currently showing. A
+  // custom Base/Custom hover panel rather than Radix's DropdownMenuSub: Sub
+  // renders its flyout through a second, independently-transformed Portal
+  // layer, and nesting that inside this Dialog's own Portal left the flyout
+  // genuinely open (correct content, opacity 1) but neither visible nor
+  // clickable — a real stacking bug reproduced and confirmed via direct DOM
+  // inspection, not a guess. A single Portal with two panes side by side
+  // sidesteps it entirely.
+  const [modelCategory, setModelCategory] = useState<"base" | "custom">(selectedModel?.custom ? "custom" : "base")
+  // Andromeda and Eternal are CTF-only likenesses — teamOnlySkinsFor in
+  // lib/player-models.ts leaves "Default" out of their skins array entirely,
+  // so there's no baked-in look worth exposing as a choice for them.
+  const hasDefaultSkin = skinOptions.some((s) => s.id === DEFAULT_SKIN)
+  const firstRealSkin = skinOptions.find((s) => s.textures > 0)?.id
+
+  // A model with no default has to resolve to an actual team colour, not an
+  // empty "use whatever's baked in" skin field — otherwise picking Andromeda
+  // and never touching the Skin dropdown would save exactly the look this
+  // model isn't supposed to have.
+  useEffect(() => {
+    if (!hasDefaultSkin && !fields.skin && firstRealSkin) {
+      setFields((f) => ({ ...f, skin: firstRealSkin }))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fields.model, hasDefaultSkin, firstRealSkin])
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -931,29 +968,76 @@ function EditLoadoutDialog({
         <div className="space-y-4 py-2">
           <div className="space-y-1.5">
             <Label className="text-xs text-[#8892a0]">3D model</Label>
-            <Select
-              // Every profile has a model — Kyle by default, see
-              // fetch-players-db.ts — so there's no "none" state to fall back
-              // to here the way the skin/right-hand pickers below have.
-              value={fields.model || "kyle"}
-              onValueChange={(v) =>
-                // Changing model invalidates any skin chosen for the old one —
-                // Reborn's "boss" id means nothing once Kyle is selected.
-                setFields((f) => ({ ...f, model: v, skin: "" }))
-              }
+            <DropdownMenu
+              onOpenChange={(open) => {
+                // Reopen on whichever side the current model actually lives —
+                // otherwise picking Andromeda then reopening the picker would
+                // land on "Base" and require an extra hover to find it again.
+                if (open) setModelCategory(selectedModel?.custom ? "custom" : "base")
+              }}
             >
-              <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
-                {PLAYER_MODELS.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.label}
-                    {m.credit ? <span className="text-[#8892a0]"> — Credits: {m.credit}</span> : null}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              {/* Same visual shell as the other pickers' SelectTrigger, since this
+                  replaces one — the roster outgrew a single flat list. */}
+              <DropdownMenuTrigger className="bg-[#1f2833] border-[#3d4855] border rounded-md w-full h-9 px-3 py-2 text-sm flex items-center justify-between gap-2">
+                <span className="flex items-center gap-1 truncate">
+                  {selectedModel?.label ?? "Kyle Katarn"}
+                  {selectedModel?.credit ? (
+                    <span className="text-[#8892a0]">— Credits: {selectedModel.credit}</span>
+                  ) : null}
+                </span>
+                <ChevronDown className="size-4 opacity-50 shrink-0" />
+              </DropdownMenuTrigger>
+              {/* Base/Custom as two hover panes in one menu, not Radix's
+                  DropdownMenuSub — Sub opens its flyout through a second,
+                  independently-transformed Portal, and nested two deep inside
+                  this Dialog's own Portal it rendered genuinely open (correct
+                  content, opacity 1 in the DOM) but neither visible nor
+                  clickable, a real stacking bug confirmed by direct inspection.
+                  One Portal with two panes side by side avoids it entirely. */}
+              <DropdownMenuContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7] p-0 z-[60] pointer-events-auto">
+                <div className="flex">
+                  <div className="w-24 shrink-0 border-r border-[#3d4855] py-1">
+                    {(["base", "custom"] as const).map((category) => (
+                      <button
+                        key={category}
+                        type="button"
+                        onMouseEnter={() => setModelCategory(category)}
+                        onClick={() => setModelCategory(category)}
+                        className={cn(
+                          "w-full text-left px-2 py-1.5 text-sm capitalize",
+                          modelCategory === category ? "bg-[#2a3541] text-[#66fcf1]" : "text-[#c5c6c7]",
+                        )}
+                      >
+                        {category}
+                      </button>
+                    ))}
+                  </div>
+                  {/* Every profile has a model — Kyle by default, see
+                      fetch-players-db.ts — so there's no "none" state to fall
+                      back to here the way the skin/right-hand pickers below have. */}
+                  <DropdownMenuRadioGroup
+                    value={fields.model || "kyle"}
+                    onValueChange={(v) =>
+                      // Changing model invalidates any skin chosen for the old one —
+                      // Reborn's "boss" id means nothing once Kyle is selected.
+                      setFields((f) => ({ ...f, model: v, skin: "" }))
+                    }
+                    className="w-64 max-h-72 overflow-y-auto p-1"
+                  >
+                    {(modelCategory === "base" ? baseModels : customModels).map((m) => (
+                      // flex-col: a credit wrapping mid-phrase ("— Credits: /
+                      // FetchD" split across two lines) read as broken, not just
+                      // narrow — putting it on its own smaller line is the same
+                      // information laid out on purpose instead of by accident.
+                      <DropdownMenuRadioItem key={m.id} value={m.id} className="flex-col items-start gap-0">
+                        <span>{m.label}</span>
+                        {m.credit ? <span className="text-[10px] text-[#8892a0]">Credits: {m.credit}</span> : null}
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </div>
+              </DropdownMenuContent>
+            </DropdownMenu>
             <p className="text-[10px] text-[#8892a0]">
               An animated JK2 player model on your profile. Not tied to crests — anyone can pick any model.
             </p>
@@ -965,14 +1049,14 @@ function EditLoadoutDialog({
             <div className="space-y-1.5">
               <Label className="text-xs text-[#8892a0]">Skin</Label>
               <Select
-                value={fields.skin || "none"}
+                value={fields.skin || (hasDefaultSkin ? "none" : firstRealSkin) || "none"}
                 onValueChange={(v) => setFields((f) => ({ ...f, skin: v === "none" ? "" : v }))}
               >
                 <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
                   <SelectValue placeholder="Default" />
                 </SelectTrigger>
                 <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
-                  <SelectItem value="none">Default</SelectItem>
+                  {hasDefaultSkin && <SelectItem value="none">Default</SelectItem>}
                   {skinOptions
                     .filter((s) => s.textures > 0)
                     .map((s) => (
