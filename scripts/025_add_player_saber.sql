@@ -1,10 +1,10 @@
--- 024_add_player_saber.sql
+-- 025_add_player_saber.sql
 --
 -- The lightsaber blade colour shown in a player's hand on their 3D model.
 -- Stores a short colour id — e.g. 'blue' — from the catalogue in
 -- lib/saber-colours.ts.
 --
--- Same reasoning as 023_add_player_model.sql: an id, never a path. The blade
+-- Same reasoning as 024_add_player_model.sql: an id, never a path. The blade
 -- textures live in the PRIVATE Supabase Storage bucket and are served through
 -- short-lived signed URLs from /api/model-url, which only signs ids it can find
 -- in a catalogue. A stored path would hand that guarantee away.

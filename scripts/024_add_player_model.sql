@@ -1,4 +1,4 @@
--- 023_add_player_model.sql
+-- 024_add_player_model.sql
 --
 -- The JK2 3D player model shown on a player's profile (and, later, the homepage
 -- panel). Stores a short model id — e.g. 'kyle' — not a URL or a file path.
