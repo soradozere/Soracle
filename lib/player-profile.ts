@@ -173,6 +173,12 @@ export interface ProfileTotals {
   winRate: number | null
   firstMatch: string | null
   peakElo: number
+  // All-time scoreboard totals. Cover only CSV-uploaded matches, so statMatches
+  // is usually lower than games — the UI says so rather than implying every
+  // match is counted.
+  statMatches: number
+  kills: number
+  deaths: number
 }
 
 export interface PlayerProfileData {
@@ -924,6 +930,9 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
       winRate: totals.games > 0 ? Math.round((totals.wins / totals.games) * 100) : null,
       firstMatch,
       peakElo: Math.round(peakElo),
+      statMatches: myStats.length,
+      kills: myStats.reduce((sum, r) => sum + r.kills, 0),
+      deaths: myStats.reduce((sum, r) => sum + r.deaths, 0),
     },
   }
 }
