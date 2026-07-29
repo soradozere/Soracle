@@ -121,6 +121,7 @@ export interface MatchStats {
   doom_kills: number
   turret_kills: number
   idle_kills: number
+  tele_kills: number
 
   // Mines
   mine_grabs_red: number
