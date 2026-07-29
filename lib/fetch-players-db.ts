@@ -91,8 +91,12 @@ export function mapDbPlayer(dbPlayer: any): Player {
     // Present only once migration 018 has run; undefined before then.
     title: dbPlayer.title ?? null,
     profile_theme: dbPlayer.profile_theme ?? null,
-    // Present only once migration 023 has run; undefined before then.
-    model: dbPlayer.model ?? null,
+    // Present only once migration 024 has run; undefined before then. Falls
+    // back to Kyle rather than null — every profile shows a model, and Kyle
+    // is the one every other conversion is grafted onto, so it's always
+    // available. A player or admin can still switch to a different model;
+    // there's no "no model" state to opt back into.
+    model: dbPlayer.model ?? "kyle",
     // Present only once migration 024 has run; undefined before then.
     saber: dbPlayer.saber ?? null,
     // Present only once migration 025 has run; undefined before then.
