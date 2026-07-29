@@ -12,6 +12,10 @@ import {
 } from "@/lib/player-profile"
 import type { Player } from "@/lib/types"
 import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucide-react"
+import { ProfileModelFigure } from "@/components/profile-model-panel"
+import { PLAYER_MODELS, findPlayerModel } from "@/lib/player-models"
+import { SABER_COLOURS, MINES_HAND_SLOT } from "@/lib/saber-colours"
+import { IDLE_ANIMATIONS, ACTION_ANIMATIONS } from "@/lib/animations"
 import { BADGE_META } from "@/lib/badge-meta"
 import { BadgeIcon } from "@/components/badge-icon"
 import { AchievementsStrip } from "@/components/achievements-strip"
@@ -75,6 +79,11 @@ interface EditableFields {
   spotlight_url: string
   title: string
   profile_theme: string
+  model: string
+  saber: string
+  skin: string
+  idle_animation: string
+  action_animation: string
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -119,19 +128,52 @@ function kdRatio(kills: number, deaths: number): string {
   return (kills / deaths).toFixed(2)
 }
 
-function StatTile({ label, value, hint }: { label: string; value: string | number; hint: string }) {
+// `compact` is for tiles that share a row with something else — currently the
+// This Month model — where full-size tiles read as oversized and airy.
+function StatTile({
+  label,
+  value,
+  hint,
+  compact,
+}: {
+  label: string
+  value: string | number
+  hint: string
+  compact?: boolean
+}) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <div className="bg-[#0b0c10]/60 border border-[#3d4855] rounded-lg p-3 text-center cursor-default">
-          <div className="text-xl font-bold font-mono text-[#c5c6c7]">{value}</div>
-          <div className="text-[10px] uppercase tracking-wider text-[#8892a0] mt-1">{label}</div>
+        <div
+          className={`bg-[#0b0c10]/60 border border-[#3d4855] rounded-lg text-center cursor-default ${
+            compact ? "px-2.5 py-2" : "p-2"
+          }`}
+        >
+          <div className={`font-bold font-mono text-[#c5c6c7] ${compact ? "text-lg leading-tight" : "text-lg"}`}>
+            {value}
+          </div>
+          <div
+            className={`uppercase tracking-wider text-[#8892a0] ${compact ? "text-[10px] mt-0.5" : "text-[10px] mt-0.5"}`}
+          >
+            {label}
+          </div>
         </div>
       </TooltipTrigger>
       <TooltipContent className="bg-[#1f2833] border border-[var(--pa30,#66fcf14d)] text-[#c5c6c7] text-xs max-w-56">
         {hint}
       </TooltipContent>
     </Tooltip>
+  )
+}
+
+// Divides one panel into labelled runs of stats — used to sit "this month"
+// underneath the career totals without giving it a card of its own.
+function SubHeading({ children, className = "mt-5 mb-3" }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={`flex items-center gap-3 ${className}`}>
+      <h3 className="text-xs font-bold font-mono tracking-wider text-[var(--pa,#66fcf1)] shrink-0">{children}</h3>
+      <div className="h-px flex-1 bg-[#3d4855]" />
+    </div>
   )
 }
 
@@ -472,6 +514,11 @@ function EditProfileDialog({
     const spotlight_url = fields.spotlight_url.trim() || null
     const title = fields.title || null
     const profile_theme = fields.profile_theme || null
+    const model = fields.model || null
+    const saber = fields.saber || null
+    const skin = fields.skin || null
+    const idle_animation = fields.idle_animation || null
+    const action_animation = fields.action_animation || null
 
     if (canEditTooltip) {
       // Admin path: writes straight to the players table via the browser
@@ -480,14 +527,36 @@ function EditProfileDialog({
       const supabase = createClient()
       const { error } = await supabase
         .from("players")
-        .update({ tooltip, avatar_url, spotlight_url, title, profile_theme })
+        .update({
+          tooltip,
+          avatar_url,
+          spotlight_url,
+          title,
+          profile_theme,
+          model,
+          saber,
+          skin,
+          idle_animation,
+          action_animation,
+        })
         .eq("id", playerId)
       setSaving(false)
       if (error) {
         setSaveError(error.message)
         return
       }
-      onSaved({ tooltip: tooltip ?? "", avatar_url: avatar_url ?? "", spotlight_url: spotlight_url ?? "", title: title ?? "", profile_theme: profile_theme ?? "" })
+      onSaved({
+        tooltip: tooltip ?? "",
+        avatar_url: avatar_url ?? "",
+        spotlight_url: spotlight_url ?? "",
+        title: title ?? "",
+        profile_theme: profile_theme ?? "",
+        model: model ?? "",
+        saber: saber ?? "",
+        skin: skin ?? "",
+        idle_animation: idle_animation ?? "",
+        action_animation: action_animation ?? "",
+      })
       onOpenChange(false)
       return
     }
@@ -497,7 +566,17 @@ function EditProfileDialog({
     const res = await fetch("/api/player-profile", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ avatar_url, spotlight_url, title, profile_theme }),
+      body: JSON.stringify({
+        avatar_url,
+        spotlight_url,
+        title,
+        profile_theme,
+        model,
+        saber,
+        skin,
+        idle_animation,
+        action_animation,
+      }),
     })
     const data = await res.json()
     setSaving(false)
@@ -511,6 +590,11 @@ function EditProfileDialog({
       spotlight_url: spotlight_url ?? "",
       title: title ?? "",
       profile_theme: profile_theme ?? "",
+      model: model ?? "",
+      saber: saber ?? "",
+      skin: skin ?? "",
+      idle_animation: idle_animation ?? "",
+      action_animation: action_animation ?? "",
     })
     onOpenChange(false)
   }
@@ -519,7 +603,7 @@ function EditProfileDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="bg-[#0b0c10]/95 backdrop-blur-md border-[var(--pa30,#66fcf14d)] text-[#c5c6c7]">
+      <DialogContent className="bg-[#0b0c10]/95 backdrop-blur-md border-[var(--pa30,#66fcf14d)] text-[#c5c6c7] max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="text-[var(--pa,#66fcf1)] font-mono">Edit profile — {playerName}</DialogTitle>
         </DialogHeader>
@@ -708,11 +792,300 @@ function EditProfileDialog({
   )
 }
 
+// Separate from EditProfileDialog so the model panel's own pencil opens a short,
+// single-purpose menu instead of the full profile editor — that dialog already
+// runs slogan/avatar/spotlight/title/theme/password and was overflowing small
+// screens with no way to scroll to Save. Still submits the complete
+// EditableFields snapshot (seeded from `initial`, same as the other dialog) so
+// saving a loadout choice can't blank out the fields this dialog doesn't show.
+function EditLoadoutDialog({
+  open,
+  onOpenChange,
+  playerId,
+  playerName,
+  initial,
+  canEditTooltip,
+  onSaved,
+}: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  playerId: string
+  playerName: string
+  initial: EditableFields
+  // Same admin-vs-owner save path split as EditProfileDialog: admin writes
+  // straight to the table, an owner goes through the validated API route.
+  canEditTooltip: boolean
+  onSaved: (fields: EditableFields) => void
+}) {
+  const [fields, setFields] = useState<EditableFields>(initial)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (open) {
+      setFields(initial)
+      setSaveError(null)
+    }
+  }, [open, initial])
+
+  const handleSave = async () => {
+    setSaving(true)
+    setSaveError(null)
+    // Empty string → null so a "no saber"/"Default" choice actually clears it.
+    const avatar_url = fields.avatar_url.trim() || null
+    const spotlight_url = fields.spotlight_url.trim() || null
+    const title = fields.title || null
+    const profile_theme = fields.profile_theme || null
+    const model = fields.model || null
+    const saber = fields.saber || null
+    const skin = fields.skin || null
+    const idle_animation = fields.idle_animation || null
+    const action_animation = fields.action_animation || null
+
+    if (canEditTooltip) {
+      const tooltip = fields.tooltip.trim() || null
+      const supabase = createClient()
+      const { error } = await supabase
+        .from("players")
+        .update({
+          tooltip,
+          avatar_url,
+          spotlight_url,
+          title,
+          profile_theme,
+          model,
+          saber,
+          skin,
+          idle_animation,
+          action_animation,
+        })
+        .eq("id", playerId)
+      setSaving(false)
+      if (error) {
+        setSaveError(error.message)
+        return
+      }
+      onSaved({
+        tooltip: tooltip ?? "",
+        avatar_url: avatar_url ?? "",
+        spotlight_url: spotlight_url ?? "",
+        title: title ?? "",
+        profile_theme: profile_theme ?? "",
+        model: model ?? "",
+        saber: saber ?? "",
+        skin: skin ?? "",
+        idle_animation: idle_animation ?? "",
+        action_animation: action_animation ?? "",
+      })
+      onOpenChange(false)
+      return
+    }
+
+    const res = await fetch("/api/player-profile", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        avatar_url,
+        spotlight_url,
+        title,
+        profile_theme,
+        model,
+        saber,
+        skin,
+        idle_animation,
+        action_animation,
+      }),
+    })
+    const data = await res.json()
+    setSaving(false)
+    if (!res.ok) {
+      setSaveError(data.error || "Failed to save")
+      return
+    }
+    onSaved({
+      tooltip: initial.tooltip,
+      avatar_url: avatar_url ?? "",
+      spotlight_url: spotlight_url ?? "",
+      title: title ?? "",
+      profile_theme: profile_theme ?? "",
+      model: model ?? "",
+      saber: saber ?? "",
+      skin: skin ?? "",
+      idle_animation: idle_animation ?? "",
+      action_animation: action_animation ?? "",
+    })
+    onOpenChange(false)
+  }
+
+  // Skins are per-model — Kyle's "red" means nothing on Reborn — so the picker
+  // is driven by whichever model is currently selected, not a flat catalogue.
+  const selectedModel = findPlayerModel(fields.model)
+  const skinOptions = selectedModel?.skins ?? []
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="bg-[#0b0c10]/95 backdrop-blur-md border-[var(--pa30,#66fcf14d)] text-[#c5c6c7] max-h-[85vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="text-[var(--pa,#66fcf1)] font-mono">Edit 3D model — {playerName}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-[#8892a0]">3D model</Label>
+            <Select
+              // Every profile has a model — Kyle by default, see
+              // fetch-players-db.ts — so there's no "none" state to fall back
+              // to here the way the skin/right-hand pickers below have.
+              value={fields.model || "kyle"}
+              onValueChange={(v) =>
+                // Changing model invalidates any skin chosen for the old one —
+                // Reborn's "boss" id means nothing once Kyle is selected.
+                setFields((f) => ({ ...f, model: v, skin: "" }))
+              }
+            >
+              <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                {PLAYER_MODELS.map((m) => (
+                  <SelectItem key={m.id} value={m.id}>
+                    {m.label}
+                    {m.credit ? <span className="text-[#8892a0]"> — Credits: {m.credit}</span> : null}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <p className="text-[10px] text-[#8892a0]">
+              An animated JK2 player model on your profile. Not tied to crests — anyone can pick any model.
+            </p>
+          </div>
+          {/* fields.model is always truthy now (Kyle by default), so this guard
+              is just defensive — the real gate below is skinOptions.length,
+              which hides Skin for a model that only has its default look. */}
+          {fields.model && skinOptions.length > 1 && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8892a0]">Skin</Label>
+              <Select
+                value={fields.skin || "none"}
+                onValueChange={(v) => setFields((f) => ({ ...f, skin: v === "none" ? "" : v }))}
+              >
+                <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                  <SelectItem value="none">Default</SelectItem>
+                  {skinOptions
+                    .filter((s) => s.textures > 0)
+                    .map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-[#8892a0]">
+                A texture variant of the model above — e.g. a team colour. Free, like the model itself.
+              </p>
+            </div>
+          )}
+          {fields.model && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8892a0]">Right hand</Label>
+              <Select
+                value={fields.saber || "none"}
+                onValueChange={(v) => setFields((f) => ({ ...f, saber: v === "none" ? "" : v }))}
+              >
+                <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                  <SelectValue placeholder="Empty hand" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                  <SelectItem value="none">Empty hand</SelectItem>
+                  {SABER_COLOURS.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      <span className="inline-flex items-center gap-2">
+                        <span
+                          className="w-2.5 h-2.5 rounded-full inline-block"
+                          style={{ background: c.glow, boxShadow: `0 0 6px ${c.glow}` }}
+                        />
+                        {c.label}
+                      </span>
+                    </SelectItem>
+                  ))}
+                  <SelectItem value={MINES_HAND_SLOT}>Trip mines</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-[#8892a0]">
+                A lit saber or a set of trip mines — the saber and mines share one hand, so it&apos;s one or the other.
+              </p>
+            </div>
+          )}
+          {fields.model && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8892a0]">Idle animation</Label>
+              <Select
+                value={fields.idle_animation || "none"}
+                onValueChange={(v) => setFields((f) => ({ ...f, idle_animation: v === "none" ? "" : v }))}
+              >
+                <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                  <SelectValue placeholder="Standard" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                  <SelectItem value="none">Standard</SelectItem>
+                  {IDLE_ANIMATIONS.map((clip) => (
+                    <SelectItem key={clip.id} value={clip.id}>
+                      {clip.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-[#8892a0]">The pose your model stands in while idle.</p>
+            </div>
+          )}
+          {fields.model && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8892a0]">Action animation</Label>
+              <Select
+                value={fields.action_animation || "none"}
+                onValueChange={(v) => setFields((f) => ({ ...f, action_animation: v === "none" ? "" : v }))}
+              >
+                <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                  <SelectValue placeholder="Random" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                  <SelectItem value="none">Random</SelectItem>
+                  {ACTION_ANIMATIONS.map((clip) => (
+                    <SelectItem key={clip.id} value={clip.id}>
+                      {clip.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-[#8892a0]">
+                Plays when someone clicks the action button under your model. Leave on Random to keep it a surprise.
+              </p>
+            </div>
+          )}
+          {saveError && <p className="text-xs text-[#ff4757]">{saveError}</p>}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+            Cancel
+          </Button>
+          <Button onClick={handleSave} disabled={saving} className="gap-2">
+            {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+            Save
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = false }: PlayerProfileProps) {
   const canEdit = isAdmin || isOwner
   const [data, setData] = useState<PlayerProfileData | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [editOpen, setEditOpen] = useState(false)
+  const [loadoutOpen, setLoadoutOpen] = useState(false)
 
   // Admin-editable fields as live local state, seeded from the player and reset
   // when navigating to a different player.
@@ -722,6 +1095,11 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
     spotlight_url: player.spotlight_url ?? "",
     title: player.title ?? "",
     profile_theme: player.profile_theme ?? "",
+    model: player.model ?? "",
+    saber: player.saber ?? "",
+    skin: player.skin ?? "",
+    idle_animation: player.idle_animation ?? "",
+    action_animation: player.action_animation ?? "",
   })
   useEffect(() => {
     setFields({
@@ -730,6 +1108,11 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
       spotlight_url: player.spotlight_url ?? "",
       title: player.title ?? "",
       profile_theme: player.profile_theme ?? "",
+      model: player.model ?? "",
+      saber: player.saber ?? "",
+      skin: player.skin ?? "",
+      idle_animation: player.idle_animation ?? "",
+      action_animation: player.action_animation ?? "",
     })
   }, [player.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -864,7 +1247,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
       {/* ---- Header: avatar, name, slogan, tier + roles ---- */}
       <div className="bg-[#1f2833]/40 border border-[#3d4855] rounded-lg backdrop-blur-lg p-5">
         <div className="flex flex-col sm:flex-row gap-5">
-          {/* Custom avatar image if set, else initials (in-game 3D models are a later phase) */}
+          {/* Custom avatar image if set, else initials. The 3D model lives in the
+              This Month panel rather than here — the avatar is the player's
+              identity across the rest of the site, so it stays put. */}
           <div
             className="w-24 h-24 shrink-0 rounded-xl border-2 border-[var(--pa40,#66fcf166)] bg-[#0b0c10] flex items-center justify-center overflow-hidden"
             style={{ boxShadow: "0 0 20px rgba(102,252,241,0.15)" }}
@@ -954,133 +1339,153 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
         </div>
       ) : (
         <>
-          {/* ---- This month ---- */}
-          <SectionCard title={`THIS MONTH — ${data.currentMonth.label.toUpperCase()}`}>
-              {data.currentMonth.games === 0 ? (
-                <p className="text-sm text-[#8892a0]">No matches played this month yet.</p>
-              ) : (
-                <>
-                  <div className="flex items-baseline gap-4 mb-4">
-                    <div className="text-3xl font-bold font-mono">
-                      <span className="text-[#27ae60]">{data.currentMonth.wins}W</span>
-                      <span className="text-[#8892a0] mx-1">–</span>
-                      <span className="text-[#ff4757]">{data.currentMonth.losses}L</span>
-                      {data.currentMonth.draws > 0 && (
-                        <>
-                          <span className="text-[#8892a0] mx-1">–</span>
-                          <span className="text-[#8892a0]">{data.currentMonth.draws}D</span>
-                        </>
-                      )}
-                    </div>
-                    <div className="text-sm text-[#8892a0]">{data.currentMonth.winRate}% win rate</div>
-                    {data.currentMonth.bestStreak >= 2 && (
-                      <div className="flex items-center gap-1 text-sm text-[#f39c12]">
-                        <Flame className="w-4 h-4" />
-                        {data.currentMonth.bestStreak} streak
-                      </div>
-                    )}
-                  </div>
-                  {data.currentMonth.stats ? (
+          {/* ---- Overview: this month, the model, and career, side by side ----
+               The model is the centrepiece; the two stat blocks flank it,
+               each squeezed into a narrower grid than they'd use on their
+               own so there's room for the figure to actually stand at a
+               reasonable size between them. lg:justify-center keeps the pair
+               centred on a profile with no model set, when there's no
+               flex-1 figure in the middle to soak up the leftover width. */}
+          <SectionCard title="OVERVIEW">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-center gap-4 lg:gap-6">
+                {/* This month — narrower than the old shared column, since it
+                    no longer has to hold both blocks' worth of height on its
+                    own. */}
+                <div className="lg:basis-72 lg:shrink-0 lg:grow-0">
+                  <SubHeading className="mt-0 mb-3">THIS MONTH — {data.currentMonth.label.toUpperCase()}</SubHeading>
+
+                  {data.currentMonth.games === 0 ? (
+                    <p className="text-sm text-[#8892a0]">No matches played this month yet.</p>
+                  ) : (
                     <>
-                      <div className="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-2">
-                        <StatTile label="Caps" value={data.currentMonth.stats.captures} hint="Flag captures this month" />
-                        <StatTile label="Returns" value={data.currentMonth.stats.returns} hint="Flag returns this month" />
-                        <StatTile label="Assists" value={data.currentMonth.stats.assists} hint="Capture assists this month" />
-                        <StatTile label="BC" value={data.currentMonth.stats.baseCleaner} hint="Base cleaner kills — clearing defenders out of the enemy base" />
-                        <StatTile label="Grabs" value={data.currentMonth.stats.flagGrabs} hint="Flag grabs this month" />
-                        <StatTile label="Kills" value={data.currentMonth.stats.kills} hint="Total kills this month" />
-                        <StatTile label="Deaths" value={data.currentMonth.stats.deaths} hint="Total deaths this month" />
-                        <StatTile
-                          label="K/D"
-                          value={kdRatio(data.currentMonth.stats.kills, data.currentMonth.stats.deaths)}
-                          hint="Kills per death this month"
-                        />
-                        <StatTile
-                          label="Flag Hold"
-                          value={formatFlagHold(data.currentMonth.stats.flagHoldMs)}
-                          hint="Total time carrying the flag this month (min:sec)"
-                        />
+                      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
+                        <div className="text-2xl font-bold font-mono">
+                          <span className="text-[#27ae60]">{data.currentMonth.wins}W</span>
+                          <span className="text-[#8892a0] mx-1">–</span>
+                          <span className="text-[#ff4757]">{data.currentMonth.losses}L</span>
+                          {data.currentMonth.draws > 0 && (
+                            <>
+                              <span className="text-[#8892a0] mx-1">–</span>
+                              <span className="text-[#8892a0]">{data.currentMonth.draws}D</span>
+                            </>
+                          )}
+                        </div>
+                        <div className="text-xs text-[#8892a0]">{data.currentMonth.winRate}% win rate</div>
+                        {data.currentMonth.bestStreak >= 2 && (
+                          <div className="flex items-center gap-1 text-xs text-[#f39c12]">
+                            <Flame className="w-3.5 h-3.5" />
+                            {data.currentMonth.bestStreak} streak
+                          </div>
+                        )}
                       </div>
-                      <p className="text-[10px] text-[#8892a0] mt-3">
-                        Scoreboard stats recorded for {data.currentMonth.stats.statMatches} of {data.currentMonth.games}{" "}
-                        matches this month.
-                      </p>
+                      {data.currentMonth.stats ? (
+                        <>
+                          <div className="grid grid-cols-3 gap-2">
+                            <StatTile compact label="Caps" value={data.currentMonth.stats.captures} hint="Flag captures this month" />
+                            <StatTile compact label="Returns" value={data.currentMonth.stats.returns} hint="Flag returns this month" />
+                            <StatTile compact label="Assists" value={data.currentMonth.stats.assists} hint="Capture assists this month" />
+                            <StatTile compact label="BC" value={data.currentMonth.stats.baseCleaner} hint="Base cleaner kills — clearing defenders out of the enemy base" />
+                            <StatTile compact label="Grabs" value={data.currentMonth.stats.flagGrabs} hint="Flag grabs this month" />
+                            <StatTile compact label="Kills" value={data.currentMonth.stats.kills} hint="Total kills this month" />
+                            <StatTile compact label="Deaths" value={data.currentMonth.stats.deaths} hint="Total deaths this month" />
+                            <StatTile
+                              compact
+                              label="K/D"
+                              value={kdRatio(data.currentMonth.stats.kills, data.currentMonth.stats.deaths)}
+                              hint="Kills per death this month"
+                            />
+                            <StatTile
+                              compact
+                              label="Flag Hold"
+                              value={formatFlagHold(data.currentMonth.stats.flagHoldMs)}
+                              hint="Total time carrying the flag this month (min:sec)"
+                            />
+                          </div>
+                          <p className="text-[10px] text-[#8892a0] mt-3">
+                            Scoreboard stats recorded for {data.currentMonth.stats.statMatches} of {data.currentMonth.games}{" "}
+                            matches this month.
+                          </p>
+                        </>
+                      ) : (
+                        <p className="text-xs text-[#8892a0]">No scoreboard stats uploaded for this month yet.</p>
+                      )}
                     </>
-                  ) : (
-                    <p className="text-xs text-[#8892a0]">No scoreboard stats uploaded for this month yet.</p>
                   )}
-                </>
-              )}
-            </SectionCard>
+                </div>
 
-          {/* ---- Career ---- */}
-            <SectionCard title="CAREER">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
-                <StatTile label="Matches" value={data.totals.games} hint="All matches on record" />
-                <StatTile
-                  label="Record"
-                  value={`${data.totals.wins}–${data.totals.losses}${data.totals.draws ? `–${data.totals.draws}` : ""}`}
-                  hint={`All-time wins–losses${data.totals.draws ? "–draws" : ""}`}
-                />
-                <StatTile
-                  label="Win Rate"
-                  value={data.totals.winRate !== null ? `${data.totals.winRate}%` : "—"}
-                  hint="All-time win percentage"
-                />
-                <StatTile
-                  label="Peak Rating"
-                  value={data.totals.peakElo}
-                  hint="Highest ELO rating ever reached (tier-seeded, replayed over every match)"
-                />
-              </div>
-              <AchievementsStrip achievements={data.achievements} />
-              <div className="mt-4">
-              <Tooltip>
-                <TooltipTrigger asChild>
-              <div className="bg-[#0b0c10]/60 border border-[#f1c40f]/40 rounded-lg p-4 flex items-center justify-between cursor-default">
-                <div>
-                  <div className="text-[10px] uppercase tracking-wider text-[#8892a0]">
-                    Highest match score
+                {fields.model && (
+                  <ProfileModelFigure
+                    modelId={fields.model}
+                    saber={fields.saber === MINES_HAND_SLOT ? null : fields.saber || null}
+                    mines={fields.saber === MINES_HAND_SLOT}
+                    skin={fields.skin || null}
+                    animation={fields.idle_animation || null}
+                    action={fields.action_animation || null}
+                    lightMode={activeTheme?.mode === "light"}
+                    onEdit={canEdit ? () => setLoadoutOpen(true) : undefined}
+                  />
+                )}
+
+                {/* Career, all-time — 2 columns rather than 3: six tiles read
+                    fine either way, and 2-wide is what actually fits a column
+                    this narrow without the tiles themselves getting squeezed. */}
+                <div className="lg:basis-56 lg:shrink-0 lg:grow-0">
+                  <SubHeading className="mt-0 mb-3">CAREER</SubHeading>
+                  <div className="grid grid-cols-2 gap-2">
+                    <StatTile
+                      compact
+                      label="Matches"
+                      value={data.totals.games}
+                      hint={
+                        data.totals.firstMatch
+                          ? `All matches on record. First played ${new Date(data.totals.firstMatch).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })}.`
+                          : "All matches on record"
+                      }
+                    />
+                    <StatTile
+                      compact
+                      label="Record"
+                      value={`${data.totals.wins}–${data.totals.losses}${data.totals.draws ? `–${data.totals.draws}` : ""}`}
+                      hint={`All-time wins–losses${data.totals.draws ? "–draws" : ""}`}
+                    />
+                    <StatTile
+                      compact
+                      label="Win Rate"
+                      value={data.totals.winRate !== null ? `${data.totals.winRate}%` : "—"}
+                      hint="All-time win percentage"
+                    />
+                    <StatTile
+                      compact
+                      label="Peak Rating"
+                      value={data.totals.peakElo}
+                      hint="Highest ELO rating ever reached (tier-seeded, replayed over every match)"
+                    />
+                    <StatTile
+                      compact
+                      label="Best Score"
+                      value={data.careerHigh ? data.careerHigh.score : "—"}
+                      hint={
+                        data.careerHigh && data.careerHigh.date
+                          ? `Best single-match scoreboard score, set ${new Date(data.careerHigh.date).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}. Only matches with an uploaded stats CSV count.`
+                          : "Best single-match scoreboard score. Only matches with an uploaded stats CSV count."
+                      }
+                    />
+                    <StatTile
+                      compact
+                      label="K/D"
+                      value={kdRatio(data.totals.kills, data.totals.deaths)}
+                      hint={`All-time kills per death, across the ${data.totals.statMatches} matches with an uploaded stats CSV`}
+                    />
                   </div>
-                  {data.careerHigh ? (
-                    <div className="text-xs text-[#8892a0] mt-1">
-                      {data.careerHigh.date
-                        ? new Date(data.careerHigh.date).toLocaleDateString("en-GB", {
-                            day: "numeric",
-                            month: "short",
-                            year: "numeric",
-                          })
-                        : ""}
-                    </div>
-                  ) : (
-                    <div className="text-xs text-[#8892a0] mt-1">No scoreboard stats recorded yet</div>
-                  )}
                 </div>
-                <div className="text-4xl font-bold font-mono text-[#f1c40f]">
-                  {data.careerHigh ? data.careerHigh.score : "—"}
-                </div>
-              </div>
-                </TooltipTrigger>
-                <TooltipContent className="bg-[#1f2833] border border-[var(--pa30,#66fcf14d)] text-[#c5c6c7] text-xs max-w-64">
-                  Best single-match scoreboard score. Only matches with an uploaded stats CSV count.
-                </TooltipContent>
-              </Tooltip>
-              {data.totals.firstMatch && (
-                <p className="text-[10px] text-[#8892a0] mt-3">
-                  First recorded match:{" "}
-                  {new Date(data.totals.firstMatch).toLocaleDateString("en-GB", {
-                    day: "numeric",
-                    month: "long",
-                    year: "numeric",
-                  })}
-                </p>
-              )}
               </div>
             </SectionCard>
 
-          {/* ---- Title progression: this month's season + all-time score ---- */}
-          {data && (
-            <SectionCard title="TITLES">
+          {/* ---- Achievements + titles: two views of the same thing, so one
+               panel. Career numbers moved up into OVERVIEW. ---- */}
+          <SectionCard title="ACHIEVEMENTS & TITLES">
+            <AchievementsStrip achievements={data.achievements} />
+            <div className="mt-5 pt-5 border-t border-[#3d4855]">
               <TitleProgression
                 seasonName={season?.name ?? null}
                 seasonLadder={season?.ladder ?? null}
@@ -1088,8 +1493,8 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                 scoreLadder={SCORE_LADDER}
                 achievementScore={achievementScore}
               />
-            </SectionCard>
-          )}
+            </div>
+          </SectionCard>
 
           {/* ---- Spotlight (player's chosen highlight clip) ---- */}
           {fields.spotlight_url ? (
@@ -1259,6 +1664,18 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
           themeOptions={editorThemeOptions}
           canEditTooltip={isAdmin}
           canChangePassword={isOwner}
+          onSaved={setFields}
+        />
+      )}
+
+      {canEdit && (
+        <EditLoadoutDialog
+          open={loadoutOpen}
+          onOpenChange={setLoadoutOpen}
+          playerId={player.id}
+          playerName={player.name}
+          initial={fields}
+          canEditTooltip={isAdmin}
           onSaved={setFields}
         />
       )}

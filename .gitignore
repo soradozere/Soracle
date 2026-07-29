@@ -18,3 +18,16 @@ node_modules
 
 # TypeScript build cache
 tsconfig.tsbuildinfo
+
+# Converted JK2 assets — models, saber hilts and blade textures. All
+# Raven/Activision material, and this repo is public with permanent history, so
+# none of it can be committed; it's served from the private Supabase bucket
+# instead. See docs/jk2-model-conversion.md and public/models/README.md. The
+# CC0/CC-BY Khronos sample model IS committed, deliberately, as a known-good
+# asset to test against.
+public/models/*.glb
+!public/models/fox.glb
+public/models/saber-hilt.glb
+public/models/saber/
+public/models/props/
+public/models/skins/

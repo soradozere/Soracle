@@ -223,8 +223,10 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ],
   },
   {
+    // The id predates the rename to "Warrior Capper" and is what any earned or
+    // claimed rows reference, so it stays put.
     id: "berserker-capper",
-    title: "Berserker Capper",
+    title: "Warrior Capper",
     category: "match",
     icon: "rebel-alliance-jedi-order",
     condition: "4+ caps with a 2:1 K/D in a 25+ min match",
