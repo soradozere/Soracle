@@ -28,6 +28,7 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs"
+import { JKA_HUMANOID_JOINT_NAMES, isJkaHumanoidBoneCount } from "./jka-humanoid.mjs"
 
 // ---------------------------------------------------------------------------
 // Vector / matrix helpers. Matrices are column-major arrays of 16, matching
@@ -149,6 +150,7 @@ function readGlm(path) {
   if (ident !== "2LGM") throw new Error(`${path}: not a Ghoul2 model (ident ${ident})`)
   if (version !== 6) throw new Error(`${path}: unsupported .glm version ${version}`)
 
+  const numBones = buf.readInt32LE(140)
   const numLODs = buf.readInt32LE(144)
   const ofsLODs = buf.readInt32LE(148)
   const numSurfaces = buf.readInt32LE(152)
@@ -189,7 +191,7 @@ function readGlm(path) {
     surfaces.push({ name: names[i], verts })
   }
 
-  return { numLODs, surfaces }
+  return { numBones, numLODs, surfaces }
 }
 
 /** Bone names from the .gla, which is the only thing that knows what an index means. */
@@ -342,7 +344,11 @@ function main() {
   }
 
   const glm = readGlm(glmPath)
-  const boneNames = readGlaBoneNames(glaPath)
+  // A JKA model's tags reference bones by an index into JKA's own 53-bone
+  // order, not whatever <skeleton.gla> (always JK2's) happens to have at that
+  // same index past the first ~11 bones, where the two skeletons diverge —
+  // see scripts/jka-humanoid.mjs.
+  const boneNames = isJkaHumanoidBoneCount(glm.numBones) ? JKA_HUMANOID_JOINT_NAMES : readGlaBoneNames(glaPath)
   const { json, chunks } = readGlb(glbPath)
   const bin = chunks.find((c) => c.type === 0x004e4942)?.data
   if (!bin) throw new Error(`${glbPath}: no binary chunk`)

@@ -30,6 +30,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { resolve, join } from "node:path"
 import { readShaderScripts, analyseShader } from "./jk2-shaders.mjs"
+import { JKA_HUMANOID_JOINT_NAMES, isJkaHumanoidBoneCount } from "./jka-humanoid.mjs"
 
 const GLM_IDENT = "2LGM"
 const GLM_VERSION = 6
@@ -488,13 +489,22 @@ function main() {
         "a model can only be grafted onto a donor with the same skeleton",
     )
   }
-  if (glm.numBones !== donorGlm.numBones) {
+  // A JKA model declares the same anim path as JK2's own but a shorter bone
+  // count — 53 against 72 — so the path check above passes and this is the
+  // only signal that its refs index into JKA_HUMANOID_JOINT_NAMES, not the
+  // .gla at that path (which is JK2's, and would resolve without error while
+  // handing back all the wrong names).
+  const isJkaHumanoid = isJkaHumanoidBoneCount(glm.numBones)
+  if (!isJkaHumanoid && glm.numBones !== donorGlm.numBones) {
     throw new Error(`${model} has ${glm.numBones} bones, ${donor} has ${donorGlm.numBones}`)
   }
 
+  // Needed either way: glm-bolts.mjs wants this path next regardless of which
+  // skeleton the source model declared, since the output is always baked
+  // against the donor's (JK2's) own bones.
   const glaPath = resolve(assets, `${glm.animName}.gla`)
   if (!existsSync(glaPath)) throw new Error(`no skeleton at ${glaPath}`)
-  const boneNames = readGlaBoneNames(glaPath)
+  const boneNames = isJkaHumanoid ? JKA_HUMANOID_JOINT_NAMES : readGlaBoneNames(glaPath)
 
   // Bone index → joint index. The two orders do NOT match — the .gla's third
   // bone is `Motion` where the .glb's is `lfemurX` — so this is by name or it
@@ -525,7 +535,11 @@ function main() {
   }
 
   console.log(`${model}: grafting onto ${donor}`)
-  console.log(`  skeleton ${glm.animName}, ${glm.numBones} bones, all matched by name`)
+  console.log(
+    isJkaHumanoid
+      ? `  skeleton ${glm.animName}, ${glm.numBones} JKA bones remapped onto ${donor}'s ${donorGlm.numBones}, all matched by name`
+      : `  skeleton ${glm.animName}, ${glm.numBones} bones, all matched by name`,
+  )
   console.log(`  scale .glm → .glb is ${scale.toFixed(6)} (agrees across all three axes)`)
 
   // --- geometry ------------------------------------------------------------
