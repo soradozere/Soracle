@@ -64,6 +64,9 @@ interface StatRow {
   deaths: number
   score: number
   dbs_returns: number
+  red_returns: number
+  yellow_returns: number
+  dfa_returns: number
   // Extra counters the achievements layer reads (lib/achievements.ts).
   yellow_kills: number
   turret_kills: number
@@ -227,7 +230,7 @@ function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[] }
     fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
     fetchAllRows<StatRow>(
       "match_stats",
-      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, blubs_returns, blubs_kills, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played, ping_mean",
+      "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, red_returns, yellow_returns, dfa_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, blubs_returns, blubs_kills, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played, ping_mean",
     ),
   ]).then(([matches, stats]) => ({ matches, stats }))
   matchDataCache = { at: Date.now(), promise }
