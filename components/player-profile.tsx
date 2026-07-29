@@ -932,18 +932,20 @@ function EditLoadoutDialog({
           <div className="space-y-1.5">
             <Label className="text-xs text-[#8892a0]">3D model</Label>
             <Select
-              value={fields.model || "none"}
+              // Every profile has a model — Kyle by default, see
+              // fetch-players-db.ts — so there's no "none" state to fall back
+              // to here the way the skin/right-hand pickers below have.
+              value={fields.model || "kyle"}
               onValueChange={(v) =>
                 // Changing model invalidates any skin chosen for the old one —
                 // Reborn's "boss" id means nothing once Kyle is selected.
-                setFields((f) => ({ ...f, model: v === "none" ? "" : v, skin: "" }))
+                setFields((f) => ({ ...f, model: v, skin: "" }))
               }
             >
               <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
-                <SelectValue placeholder="No model" />
+                <SelectValue />
               </SelectTrigger>
               <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
-                <SelectItem value="none">No model</SelectItem>
                 {PLAYER_MODELS.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
                     {m.label}
@@ -956,10 +958,9 @@ function EditLoadoutDialog({
               An animated JK2 player model on your profile. Not tied to crests — anyone can pick any model.
             </p>
           </div>
-          {/* Skin, saber, and the two animation pickers only make sense once a
-              model is set — an enabled control that does nothing is worse than
-              one that isn't there. Skin is additionally hidden for a model that
-              only has its default look (no variants to choose between). */}
+          {/* fields.model is always truthy now (Kyle by default), so this guard
+              is just defensive — the real gate below is skinOptions.length,
+              which hides Skin for a model that only has its default look. */}
           {fields.model && skinOptions.length > 1 && (
             <div className="space-y-1.5">
               <Label className="text-xs text-[#8892a0]">Skin</Label>
