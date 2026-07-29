@@ -211,7 +211,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       { threshold: 2, rarity: "rare" },
       { threshold: 3, rarity: "epic" },
       { threshold: 4, rarity: "legendary", title: "Cap God" },
-      { threshold: 5, rarity: "mythic", title: "Cap God Plus" },
+      { threshold: 5, rarity: "mythic", title: "Cap Titan" },
     ],
   },
   {
@@ -507,34 +507,6 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     },
     threshold: 1,
     rarity: "mythic",
-  },
-  {
-    // A support/camp combo, calibrated 29 Jul 2026: rets+blocks+mine grabs+K/D
-    // all rise together. get() reports the highest tier CURRENTLY met (same
-    // computed-tier trick as Nah, You're Hacking and Cap God above) since no
-    // single stat climbs on its own here — real counts: 28 matches clear
-    // Veteran, 8 clear Master, 0 have ever cleared God (individually all four
-    // God-tier gates have been hit before, just never together).
-    id: "camp",
-    title: "Camp Veteran",
-    category: "match",
-    icon: "mandalorian-mercs", // shares SWAT Support's crest — a camping feat
-    condition: "Returns, enemy blocks, enemy mine grabs and K/D in a single match",
-    metric: {
-      type: "matchMax",
-      get: (s) => {
-        const grabs = mineGrabsOf(s)
-        if (s.returns >= 20 && s.blocks_enemy >= 50 && grabs >= 3 && s.kills >= 1.5 * s.deaths) return 3
-        if (s.returns >= 16 && s.blocks_enemy >= 30 && grabs >= 2 && s.kills >= 1.2 * s.deaths) return 2
-        if (s.returns >= 14 && s.blocks_enemy >= 20 && grabs >= 1 && s.kills >= 1.0 * s.deaths) return 1
-        return 0
-      },
-    },
-    ranks: [
-      { threshold: 1, rarity: "epic", title: "Camp Veteran" },
-      { threshold: 2, rarity: "legendary", title: "Camp Master" },
-      { threshold: 3, rarity: "mythic", title: "Camp God" },
-    ],
   },
   {
     // The single hardest combo in the file by design — every individual gate
