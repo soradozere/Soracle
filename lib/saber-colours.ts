@@ -36,3 +36,15 @@ export function findSaberColour(id: string | null | undefined): SaberColour | nu
 export function isKnownSaberColour(id: string): boolean {
   return SABER_COLOURS.some((colour) => colour.id === id)
 }
+
+/**
+ * The saber and trip mines bolt to the same `*r_hand` point, so a profile can
+ * only ever equip one — stored in the same `players.saber` column as a real
+ * colour id, rather than a second field that could disagree with this one.
+ */
+export const MINES_HAND_SLOT = "mines"
+
+/** A saber colour, or the mines sentinel — everything `players.saber` may hold. */
+export function isKnownHandSlot(id: string): boolean {
+  return id === MINES_HAND_SLOT || isKnownSaberColour(id)
+}

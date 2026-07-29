@@ -7,7 +7,7 @@ import { scoreFromViews } from "@/lib/achievement-score"
 import { earnedTitles, mergeRecordedTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
 import { fetchRecordedTitles } from "@/lib/titles-server"
 import { findModelSkin, findPlayerModel, isKnownModel } from "@/lib/player-models"
-import { isKnownSaberColour } from "@/lib/saber-colours"
+import { isKnownHandSlot } from "@/lib/saber-colours"
 import { isKnownActionAnimation, isKnownIdleAnimation } from "@/lib/animations"
 
 // Self-service profile save for a logged-in player (not an admin). Deliberately
@@ -99,8 +99,9 @@ export async function POST(request: Request) {
   }
 
   // Same for the blade colour, and for the same reason — it becomes an asset id
-  // handed to /api/model-url.
-  if (saberId && !isKnownSaberColour(saberId)) {
+  // handed to /api/model-url. "mines" is the other value this column can hold —
+  // see isKnownHandSlot.
+  if (saberId && !isKnownHandSlot(saberId)) {
     return NextResponse.json({ error: "Unknown saber colour" }, { status: 400 })
   }
 
