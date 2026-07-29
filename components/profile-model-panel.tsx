@@ -3,7 +3,7 @@
 import dynamic from "next/dynamic"
 import { useEffect, useState } from "react"
 import { Pencil, RotateCw, Zap } from "lucide-react"
-import { usePrefersReducedMotion } from "@/components/model-viewer"
+import { usePrefersReducedMotion } from "@/hooks/use-prefers-reduced-motion"
 import { useModelUrl } from "@/hooks/use-model-url"
 import { findPlayerModel } from "@/lib/player-models"
 
