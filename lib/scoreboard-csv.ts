@@ -54,7 +54,7 @@ export const REQUIRED_COLUMNS = [
 // lacks them still parses (toInt yields 0 for an absent header). The exact
 // header spellings are best-effort and must be confirmed against a real
 // scoreboard that carries these columns — until then they simply accrue 0.
-export const OPTIONAL_COLUMNS = ["DFA-ATTEMPTS", "BLOCKS-ENEMY"] as const
+export const OPTIONAL_COLUMNS = ["DFA-ATTEMPTS", "BLOCKS-ENEMY", "TELE-KILLS"] as const
 
 // Numeric counter columns summed when merging reconnect rows — every required
 // column except the two identity columns (team + name), plus the optional ones.
@@ -178,6 +178,9 @@ export function buildMatchStat(
     doom_kills: toInt(row["DOOM-KILLS"]),
     turret_kills: toInt(row["TUR-KILLS"]),
     idle_kills: toInt(row["IDLE-KILLS"]),
+    // Otherworldly achievement (migration 023) — best-effort header spelling,
+    // unconfirmed against a real scoreboard build yet (see OPTIONAL_COLUMNS).
+    tele_kills: toInt(row["TELE-KILLS"]),
 
     mine_grabs_red: toInt(row["MINEGRABS-REDBASE"]),
     mine_grabs_blue: toInt(row["MINEGRABS-BLUEBASE"]),

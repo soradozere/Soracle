@@ -62,6 +62,7 @@ export interface AchStat {
   blue_kills: number
   ydfa_kills: number
   doom_kills: number
+  tele_kills: number
   mine_grabs_red: number
   mine_grabs_blue: number
   dfa_kills: number
@@ -118,6 +119,11 @@ export interface Rank {
   threshold: number
   rarity: Rarity
   title?: string // overrides the family title once this rank is reached
+  // Overrides the displayed requirement for computed-tier metrics (Triple
+  // Threat, Cap God, Nah, You're Hacking): their threshold is an internal tier
+  // number (1/2/3…), not a real stat, so "2+" means nothing to a visitor. Set
+  // this to the actual combo the rank demands instead.
+  requirementLabel?: string
 }
 
 export interface AchievementDef {
@@ -207,16 +213,16 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       },
     },
     ranks: [
-      { threshold: 1, rarity: "common" },
-      { threshold: 2, rarity: "rare" },
-      { threshold: 3, rarity: "epic" },
-      { threshold: 4, rarity: "legendary", title: "Cap God" },
-      { threshold: 5, rarity: "mythic", title: "Cap Titan" },
+      { threshold: 1, rarity: "common", title: "Cap Initiate", requirementLabel: "4+ caps" },
+      { threshold: 2, rarity: "rare", title: "Cap Adept", requirementLabel: "5+ caps" },
+      { threshold: 3, rarity: "epic", title: "Cap Veteran", requirementLabel: "6+ caps" },
+      { threshold: 4, rarity: "legendary", title: "Cap God", requirementLabel: "7+ caps" },
+      { threshold: 5, rarity: "mythic", title: "Cap Titan", requirementLabel: "7+ caps, 1.5+ K/D" },
     ],
   },
   {
-    id: "warrior-capper",
-    title: "Warrior Capper",
+    id: "berserker-capper",
+    title: "Berserker Capper",
     category: "match",
     icon: "rebel-alliance-jedi-order",
     condition: "4+ caps with a 2:1 K/D in a 25+ min match",
@@ -462,18 +468,23 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ],
   },
   {
-    // 5+:229, 10+:47, 15+:5, 20+:1 (Interlude) — the same shape as Red Rets.
+    // Raised 29 Jul 2026: the original 5/10/15/20 spread let cheese clear
+    // Legendary almost immediately — every one of their top runs (21, 18, 16,
+    // 15, 15...) already sat past 15, so 20 was barely a reach. Re-pulled the
+    // full history: 10+:47, 15+:5, 18+:2, 20+:1 (cheese's all-time record).
+    // Legendary now sits at 25 — past the record — so it stays a genuine,
+    // currently-unclaimed goal instead of a same-day gimme.
     id: "dfa-rets",
-    title: "DFA Rets",
+    title: "DFA Dabbler",
     category: "match",
     icon: "mandalorian-mysteries", // shares Cheese's Dream's crest — a DFA feat
     condition: "DFA returns in a single match",
     metric: { type: "matchMax", get: (s) => s.dfa_returns },
     ranks: [
-      { threshold: 5, rarity: "common" },
-      { threshold: 10, rarity: "rare" },
-      { threshold: 15, rarity: "epic" },
-      { threshold: 20, rarity: "legendary" },
+      { threshold: 10, rarity: "common", title: "DFA Dabbler" },
+      { threshold: 15, rarity: "rare", title: "DFA Adept" },
+      { threshold: 18, rarity: "epic", title: "DFA Savant" },
+      { threshold: 25, rarity: "legendary", title: "DFA Deity" },
     ],
   },
   {
@@ -565,34 +576,41 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       },
     },
     ranks: [
-      { threshold: 1, rarity: "epic" },
-      { threshold: 2, rarity: "legendary" },
-      { threshold: 3, rarity: "mythic" },
+      { threshold: 1, rarity: "epic", title: "Triple Threat", requirementLabel: "3 caps, 10 rets, 2 mine grabs" },
+      {
+        threshold: 2,
+        rarity: "legendary",
+        title: "Complete Package",
+        requirementLabel: "4 caps, 12 rets, 3 mine grabs",
+      },
+      { threshold: 3, rarity: "mythic", title: "One-Man Army", requirementLabel: "5 caps, 15 rets, 4 mine grabs" },
     ],
   },
   {
-    // Capture efficiency: captures per flag grab, gated at 10+ grabs so a lucky
-    // single conversion can't read as 100%. Calibrated against the 493
-    // qualifying matches on record: 17%+:94, 20%+:59, 25%+:32, 30%+:7, 40%+:1 —
-    // maps almost exactly onto the suggested common-through-mythic spread.
+    // Capture efficiency: captures per flag grab, gated at 10+ grabs (so a lucky
+    // single conversion can't read as 100%) AND 25+ minutes played — without a
+    // duration floor this was clearing for most active cappers on short/lopsided
+    // matches alone. Re-calibrated 29 Jul 2026 against the 478 matches that clear
+    // both gates: 17%+:89, 20%+:54, 25%+:27, 30%+:5, 40%+:0.
     // get() reports whole percentage points (not a 0-1 ratio) so thresholds are
     // plain integers like everywhere else in the file — see the "percent" unit.
     id: "efficient-capper",
-    title: "Efficient Capper",
+    title: "Handy Capper",
     category: "match",
     icon: "rogue-one", // shares Pro Rusher's crest — another capture-efficiency feat
-    condition: "Captures per flag grab (min 10 grabs)",
+    condition: "Captures per flag grab, 10+ grabs and 25+ min played",
     unit: "percent",
     metric: {
       type: "matchMax",
-      get: (s) => (s.flag_grabs >= 10 ? Math.round((s.captures / s.flag_grabs) * 100) : 0),
+      get: (s) =>
+        s.flag_grabs >= 10 && (s.time_played ?? 0) >= 25 ? Math.round((s.captures / s.flag_grabs) * 100) : 0,
     },
     ranks: [
-      { threshold: 17, rarity: "common" },
-      { threshold: 20, rarity: "rare" },
-      { threshold: 25, rarity: "epic" },
-      { threshold: 30, rarity: "legendary" },
-      { threshold: 40, rarity: "mythic" },
+      { threshold: 17, rarity: "common", title: "Handy Capper" },
+      { threshold: 20, rarity: "rare", title: "Sharp Capper" },
+      { threshold: 25, rarity: "epic", title: "Precision Capper" },
+      { threshold: 30, rarity: "legendary", title: "Surgical Capper" },
+      { threshold: 40, rarity: "mythic", title: "Flawless Capper" },
     ],
   },
   {
@@ -691,6 +709,21 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ],
   },
   {
+    // TELE-KILLS (migration 023) is unconfirmed against a real scoreboard build
+    // yet, same caveat DFA-ATTEMPTS/BLOCKS-ENEMY carried at launch — it just
+    // accrues 0 until a CSV that carries the header gets uploaded.
+    id: "otherworldly",
+    title: "Otherworldly",
+    category: "career",
+    icon: "confederancy-of-independent-system", // the network/portal crest
+    condition: "Career teleport kills",
+    metric: { type: "careerSum", get: (s) => s.tele_kills },
+    ranks: [
+      { threshold: 1, rarity: "rare" },
+      { threshold: 5, rarity: "epic" },
+    ],
+  },
+  {
     // Mine KILLS — the offensive counterpart to Demoman, which counts mine returns.
     id: "sapper",
     title: "Sapper",
@@ -783,9 +816,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       },
     },
     ranks: [
-      { threshold: 10, rarity: "common" },
-      { threshold: 25, rarity: "rare" },
-      { threshold: 50, rarity: "epic" },
+      { threshold: 20, rarity: "common" },
+      { threshold: 50, rarity: "rare" },
+      { threshold: 100, rarity: "epic" },
     ],
   },
   {

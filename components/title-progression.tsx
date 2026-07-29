@@ -12,7 +12,13 @@ const fmt = (n: number) => n.toLocaleString()
 
 function Ladder({ ladder, value, caption }: { ladder: TitleLadder; value: number; caption: string }) {
   const p = progressFor(ladder, value)
-  const top = ladder.tiers[ladder.tiers.length - 1].threshold
+  // Mirrors progressFor's own "top": scales to the highest tier that's either
+  // visible or already cleared, so a hidden tier (The GOAT) doesn't shrink
+  // everyone else's bar down to a sliver before anyone's actually reached it.
+  const top = [...ladder.tiers].reverse().find((t) => !t.hidden || value >= t.threshold)!.threshold
+  // Same rule for which tiers actually get a node/label: a hidden one only
+  // renders once it's been cleared.
+  const visibleTiers = ladder.tiers.filter((t) => !t.hidden || value >= t.threshold)
   const accent = p.current ? RARITY_META[p.current.rarity].color : "#3d4855"
 
   return (
@@ -38,7 +44,7 @@ function Ladder({ ladder, value, caption }: { ladder: TitleLadder; value: number
         <div className="tp-fill" style={{ width: `${p.pct * 100}%`, background: accent, boxShadow: `0 0 10px ${accent}80` }} />
         {/* Tier markers sit at their true position on the track, so the spacing
             shows how the thresholds actually escalate rather than evenly. */}
-        {ladder.tiers.map((t) => {
+        {visibleTiers.map((t) => {
           const got = value >= t.threshold
           const c = RARITY_META[t.rarity].color
           return (
@@ -53,7 +59,7 @@ function Ladder({ ladder, value, caption }: { ladder: TitleLadder; value: number
       </div>
 
       <div className="tp-ticks">
-        {ladder.tiers.map((t) => {
+        {visibleTiers.map((t) => {
           const got = value >= t.threshold
           return (
             <span

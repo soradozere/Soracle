@@ -23,7 +23,8 @@ export const rankListFor = (def: AchievementDef): Rank[] =>
 const fmtVal = (v: number, def: AchievementDef) =>
   def.unit === "hours" ? `${Math.round(v)}h` : def.unit === "percent" ? `${Math.round(v)}%` : `${Math.round(v)}`
 
-export const requirementFor = (def: AchievementDef, r: Rank) => `${fmtVal(r.threshold, def)}${def.exact ? "" : "+"}`
+export const requirementFor = (def: AchievementDef, r: Rank) =>
+  r.requirementLabel ?? `${fmtVal(r.threshold, def)}${def.exact ? "" : "+"}`
 
 // A crest drawn at the highest rank ANY player has reached — so the grid shows
 // each family at its current community peak, and stays locked until someone
