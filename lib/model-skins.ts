@@ -20,6 +20,10 @@
 //     --model imperial \
 //     --model rebel \
 //     --model jeditrainer \
+//     --model andromeda \
+//     --model bones \
+//     --model horseton \
+//     --model rodian \
 //     --write lib/model-skins.ts
 
 import type { ModelSkin } from "@/lib/player-models"
@@ -275,6 +279,77 @@ export const MODEL_SKINS: Record<string, ModelSkin[]> = {
       label: "Red team",
       textures: 4,
       surfaces: { hips: 0, hips_torso: 1, torso: 1, torso_l_shoulder: 1, torso_r_shoulder: 1, r_arm: 1, r_hand_wrist: 1, l_arm: 1, l_hand_wrist: 1, head_eyes_mouth: 2, torso_shoulder_pad: 3, torso_collar: 3, l_leg: 0, r_leg: 0, hips_belt: 3 },
+    },
+  ],
+  andromeda: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 3,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 1, head_feathers: 2, l_arm: 1, r_arm: 2, r_hand: 2 },
+      additive: [2],
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 3,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 1, head_feathers: 2, l_arm: 1, r_arm: 2, r_hand: 2 },
+      additive: [2],
+    },
+  ],
+  bones: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 1,
+      surfaces: { hips: 0, r_leg: 0, l_leg: 0, torso: 0, r_arm: 0, r_hand: 0, l_arm: 0, l_hand: 0, head: 0 },
+      formats: ["png"],
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 1,
+      surfaces: { hips: 0, r_leg: 0, l_leg: 0, torso: 0, r_arm: 0, r_hand: 0, l_arm: 0, l_hand: 0, head: 0 },
+      formats: ["png"],
+    },
+  ],
+  horseton: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 1,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 0, l_arm: 0, l_hand: 0, r_arm: 0, r_hand: 0, head: 0 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 1,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 0, l_arm: 0, l_hand: 0, r_arm: 0, r_hand: 0, head: 0 },
+    },
+  ],
+  rodian: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 4,
+      surfaces: { hips: 0, hips_torso: 1, torso: 1, torso_l_shoulder: 1, torso_r_shoulder: 1, r_arm: 1, r_hand_wrist: 1, l_arm: 1, l_hand_wrist: 1, torso_vest: 2, torso_collar: 2, hips_belt: 2, l_leg: 3, r_leg: 2 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 4,
+      surfaces: { hips: 0, hips_torso: 1, torso: 1, torso_l_shoulder: 1, torso_r_shoulder: 1, r_arm: 1, r_hand_wrist: 1, l_arm: 1, l_hand_wrist: 1, torso_vest: 2, torso_collar: 2, hips_belt: 2, l_leg: 3, r_leg: 2 },
+    },
+    {
+      id: "shadow",
+      label: "Shadow",
+      textures: 8,
+      surfaces: { hips: 0, hips_torso: 1, hips_belt: 2, l_leg: 3, r_leg: 4, torso: 1, head: 5, head_fins: 6, l_arm: 1, l_hand: 7, l_hand_wrist: 1, r_arm: 1, r_hand: 7, r_hand_wrist: 1, torso_collar: 4, torso_l_shoulder: 1, torso_r_shoulder: 1, torso_vest: 4 },
+      formats: ["jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "png", "jpg"],
     },
   ],
 }
