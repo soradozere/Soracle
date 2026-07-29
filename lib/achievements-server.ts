@@ -44,7 +44,7 @@ interface ServerStat extends AchStat {
 }
 
 const STAT_COLUMNS =
-  "match_id, player_id, score, captures, returns, base_cleaner, assists, kills, deaths, flag_hold_ms, dbs_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, blubs_returns, blubs_kills, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played, ping_mean"
+  "match_id, player_id, score, captures, returns, base_cleaner, assists, kills, deaths, flag_hold_ms, flag_grabs, dbs_returns, red_returns, yellow_returns, dfa_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, blubs_returns, blubs_kills, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played, ping_mean"
 
 const PAGE_SIZE = 1000
 
@@ -139,7 +139,11 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
           kills: s.kills,
           deaths: s.deaths,
           flag_hold_ms: s.flag_hold_ms,
+          flag_grabs: s.flag_grabs,
           dbs_returns: s.dbs_returns,
+          red_returns: s.red_returns,
+          yellow_returns: s.yellow_returns,
+          dfa_returns: s.dfa_returns,
           yellow_kills: s.yellow_kills,
           turret_kills: s.turret_kills,
           mine_returns: s.mine_returns,

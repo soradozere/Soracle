@@ -20,7 +20,8 @@ import type { AchievementLedger, LedgerEntry } from "@/lib/achievements-server"
 export const rankListFor = (def: AchievementDef): Rank[] =>
   def.ranks?.length ? def.ranks : [{ threshold: def.threshold ?? 1, rarity: def.rarity ?? "common" }]
 
-const fmtVal = (v: number, def: AchievementDef) => (def.unit === "hours" ? `${Math.round(v)}h` : `${Math.round(v)}`)
+const fmtVal = (v: number, def: AchievementDef) =>
+  def.unit === "hours" ? `${Math.round(v)}h` : def.unit === "percent" ? `${Math.round(v)}%` : `${Math.round(v)}`
 
 export const requirementFor = (def: AchievementDef, r: Rank) => `${fmtVal(r.threshold, def)}${def.exact ? "" : "+"}`
 
