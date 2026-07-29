@@ -20,13 +20,19 @@ import { createClient } from "@supabase/supabase-js"
 
 const BUCKET = "models"
 
-/** Every `.jpg` under a directory, as paths relative to it. */
-function walkJpegs(root, prefix = "") {
+/**
+ * Every skin texture under a directory, as paths relative to it.
+ *
+ * Almost always `.jpg` — PNG only shows up for a slot that has to keep an
+ * alpha channel a JPEG can't hold (see lib/player-models.ts's `ModelSkin.
+ * formats`; Bones' red/blue skins are the first ones that need it).
+ */
+function walkSkinTextures(root, prefix = "") {
   if (!existsSync(root)) return []
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const path = join(root, entry.name)
-    if (entry.isDirectory()) return walkJpegs(path, join(prefix, entry.name))
-    return entry.name.endsWith(".jpg") ? [join(prefix, entry.name)] : []
+    if (entry.isDirectory()) return walkSkinTextures(path, join(prefix, entry.name))
+    return entry.name.endsWith(".jpg") || entry.name.endsWith(".png") ? [join(prefix, entry.name)] : []
   })
 }
 
@@ -53,6 +59,12 @@ const ASSETS = [
   ["imperial.glb", "public/models/imperial.glb"],
   ["rebel.glb", "public/models/rebel.glb"],
   ["jeditrainer.glb", "public/models/jeditrainer.glb"],
+  // Fan-made additions — same grafting pipeline, see lib/player-models.ts.
+  ["andromeda.glb", "public/models/andromeda.glb"],
+  ["bones.glb", "public/models/bones.glb"],
+  ["horseton.glb", "public/models/horseton.glb"],
+  // Stock JK2, converted later than the rest of the base roster above.
+  ["rodian.glb", "public/models/rodian.glb"],
   ["saber-hilt.glb", "public/models/saber-hilt.glb"],
   ...["blue", "green", "red", "purple", "orange", "yellow"].flatMap((colour) => [
     [`saber/${colour}_line.jpg`, `public/models/saber/${colour}_line.jpg`],
@@ -72,7 +84,7 @@ const ASSETS = [
   // is added. Uploading one that isn't in the catalogue costs a few KB and
   // nothing else: /api/model-url only ever signs ids it can find in
   // lib/player-models.ts, so the read side stays the boundary it was.
-  ...walkJpegs(resolve(process.cwd(), "public/models/skins")).map((relative) => [
+  ...walkSkinTextures(resolve(process.cwd(), "public/models/skins")).map((relative) => [
     `skins/${relative}`,
     `public/models/skins/${relative}`,
   ]),
