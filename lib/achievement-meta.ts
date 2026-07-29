@@ -448,15 +448,15 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   },
   {
     id: "bser",
-    title: "BSer",
+    title: "Tornado",
     category: "career",
     icon: "dark-lord-of-the-sith",
     condition: "Career backslash kills",
     metric: { type: "careerSum", get: (s) => s.bs_kills },
     ranks: [
-      { threshold: 100, rarity: "common" },
-      { threshold: 250, rarity: "rare", title: "BS Artist" },
-      { threshold: 500, rarity: "epic", title: "Backslash Merchant" },
+      { threshold: 100, rarity: "common", title: "Tornado Enthusiast" },
+      { threshold: 250, rarity: "rare", title: "Tornado Spammer" },
+      { threshold: 500, rarity: "epic", title: "Tornado King" },
     ],
   },
   {
@@ -528,8 +528,10 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   },
   {
     // Counted per opponent, not per match: if a whole enemy six has a 3+ run over
-    // you and you finally beat them, that ends several streaks at once. A running
-    // tally, so it's "best 4 / 6" style progress rather than a personal best.
+    // you and you finally beat them, that ends several streaks at once — and each
+    // ended streak is worth its FULL length in points, not just one, so grinding
+    // down a long-standing 8-match losing run is worth as much as it feels. A
+    // running tally, so it's "12 / 15" style progress rather than a personal best.
     // Icon deliberately reused (no spare crest SVGs).
     id: "revenge",
     title: "Revenge",
@@ -548,8 +550,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
           if (!countsForPair(m)) continue
           if (m.won) {
             for (const opp of m.opponents) {
-              if ((losingTo.get(opp) ?? 0) >= 3) {
-                n++
+              const streak = losingTo.get(opp) ?? 0
+              if (streak >= 3) {
+                n += streak
                 out.push({ v: n, date: m.date, matchId: m.matchId, who: opp })
               }
               losingTo.set(opp, 0)
@@ -562,9 +565,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       },
     },
     ranks: [
-      { threshold: 3, rarity: "common" },
-      { threshold: 6, rarity: "rare" },
-      { threshold: 10, rarity: "epic" },
+      { threshold: 10, rarity: "common" },
+      { threshold: 25, rarity: "rare" },
+      { threshold: 50, rarity: "epic" },
     ],
   },
   {
@@ -644,6 +647,11 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     rarity: "rare",
   },
   {
+    // Re-calibrated 29 Jul 2026: at the old 500-threshold, 11 of 49 blockers
+    // (22%) already held Brick Wall — far too common for a rare-tier crest.
+    // Raised to sit past all but the two highest career totals on record
+    // (Interlude 986, yuki 823); epic follows suit so it stays a real reach
+    // rather than nearly-claimed at the old 1000.
     id: "blocked",
     title: "Blocked!",
     category: "career",
@@ -652,8 +660,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: { type: "careerSum", get: (s) => s.blocks_enemy },
     ranks: [
       { threshold: 250, rarity: "common" },
-      { threshold: 500, rarity: "rare", title: "Brick Wall" },
-      { threshold: 1000, rarity: "epic", title: "Immovable Object" },
+      { threshold: 750, rarity: "rare", title: "Brick Wall" },
+      { threshold: 1250, rarity: "epic", title: "Immovable Object" },
     ],
     pending: true,
   },
@@ -847,7 +855,7 @@ export interface SecretDef {
   claim: (s: AchStat, m: ClaimContext) => boolean
   // Forward-only cutoff: matches before this ISO timestamp can never claim the
   // crest. Used when the back catalogue already contains a qualifying match that
-  // should NOT silently take it on deploy (see agent-zero).
+  // should NOT silently take it on deploy (see protector-of-yavin below).
   from?: string
 }
 
@@ -882,18 +890,6 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
     claim: (s, m) => m.won && s.kills === 0 && (s.time_played ?? 0) >= PACIFIST_MIN_MINUTES,
   },
   {
-    // shax already did this on 27 Jun 2026 (25 flag grabs, zero conversions of any
-    // kind, 45 minutes) — forward-only so it has to be re-earned live rather than
-    // handed out silently on deploy.
-    id: "agent-zero",
-    title: "Agent Zero",
-    category: "match",
-    icon: "black-sun", // the crime-syndicate crest — the invisible man
-    condition: "Finish a 25+ min match with 0 caps, 0 returns, 0 base cleans",
-    from: "2026-07-09T00:00:00.000Z",
-    claim: (s) => s.captures === 0 && s.returns === 0 && s.base_cleaner === 0 && (s.time_played ?? 0) >= 25,
-  },
-  {
     id: "prime-vo",
     title: "HE'S SCRIPTING!!!!",
     category: "match",
@@ -920,7 +916,7 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
   {
     // Interlude already did this on 8 Jun 2026 (2 caps, 20 returns, 119 kills) —
     // forward-only so it has to be re-earned live rather than handed out silently
-    // on deploy (see agent-zero).
+    // on deploy.
     id: "protector-of-yavin",
     title: "Protector of Yavin",
     category: "match",
@@ -936,15 +932,6 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
     icon: "sith-era", // shares DOOM's crest — it's a doom feat
     condition: "3+ dooms, 15+ DBS kills and a cap in one match",
     claim: (s) => s.doom_kills >= 3 && s.dbs_kills >= 15 && s.captures >= 1,
-  },
-  {
-    id: "amor-special",
-    title: "Amor Special",
-    category: "match",
-    icon: "confederancy-of-independent-system", // the network crest — the connection joke
-    condition: "Average ping higher than your score in a 30+ min match",
-    claim: (s) =>
-      s.score > 0 && s.ping_mean != null && s.ping_mean > s.score && (s.time_played ?? 0) >= 30,
   },
   {
     id: "queue-killer-3000",
