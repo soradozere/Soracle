@@ -3,6 +3,7 @@
 import { useLayoutEffect } from "react"
 import { useLoader } from "@react-three/fiber"
 import {
+  AdditiveBlending,
   MeshStandardMaterial,
   RepeatWrapping,
   SRGBColorSpace,
@@ -95,8 +96,32 @@ export function ModelSkinOverride({ scene, skin, urls }: { scene: Group; skin: M
       if (!replacement) {
         replacement = mesh.material.clone()
         if (replacement instanceof MeshStandardMaterial) {
-          matchGltfTexture(texture, replacement.map)
-          replacement.map = texture
+          matchGltfTexture(texture, replacement.map ?? replacement.emissiveMap)
+          if (skin.additive?.includes(slot)) {
+            // JK2 draws this surface as pure additive energy — framebuffer plus
+            // texture, no opaque base (see ModelSkin.additive). The three.js
+            // shape of that: black diffuse so scene lights contribute nothing,
+            // the texture on emissive so it's self-lit, additive blending with
+            // no depth write so whatever is behind stays visible through the
+            // dark parts. This is what makes Andromeda's team-skin arm read as
+            // a translucent glowing limb rather than a dark painted sleeve.
+            replacement.map = null
+            replacement.color.set(0x000000)
+            replacement.emissive.set(0xffffff)
+            replacement.emissiveMap = texture
+            replacement.emissiveIntensity = 4
+            replacement.blending = AdditiveBlending
+            replacement.transparent = true
+            replacement.depthWrite = false
+            // The clone may have inherited the viewer's env-map shimmer from
+            // the material it came from (the default hand's, say — see
+            // applyReflectiveEnvMap). This treatment replaces that outright
+            // rather than stacking on top of it.
+            replacement.envMap = null
+            delete replacement.userData.reflective
+          } else {
+            replacement.map = texture
+          }
         }
         // The model's own pass may not have reached this clone: React runs a
         // child's layout effects before a parent's effects, so on a first load

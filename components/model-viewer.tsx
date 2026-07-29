@@ -31,7 +31,7 @@ import { ModelSkinOverride } from "@/components/model-skin"
 import { useAssetUrls } from "@/hooks/use-asset-urls"
 import { findSaberColour } from "@/lib/saber-colours"
 import { findModelSkin, findPlayerModel, skinAssetIds } from "@/lib/player-models"
-import { flattenMeshMaterials } from "@/lib/three-materials"
+import { applyReflectiveEnvMaps, flattenMeshMaterials } from "@/lib/three-materials"
 import { MINES_ASSET, SABER_HILT_ASSET, findFlagAsset, saberTextureAsset } from "@/lib/prop-assets"
 
 /** Every model is rescaled to this height in world units, so one camera fits all. */
@@ -219,6 +219,15 @@ export type ModelViewerProps = {
   onClipsLoaded?: (names: string[]) => void
   /** Reports measured frames-per-second, roughly once a second. */
   onFps?: (fps: number) => void
+  /**
+   * True when the equipped profile theme has `mode: "light"` (see
+   * lib/titles.ts's ProfileTheme). The JK2 models' own textures run dark
+   * (armour, cloth), which reads as moody against that theme's near-black
+   * default ground but underlit and muddy against a light one — same for the
+   * ContactShadows blob, which blends into a dark card but shows up as a hard
+   * black smudge on a light one. Both get retuned when this is set.
+   */
+  lightMode?: boolean
   className?: string
 }
 
@@ -677,6 +686,7 @@ function Model({
       mesh.frustumCulled = false
 
       flattenMeshMaterials(mesh.material)
+      applyReflectiveEnvMaps(mesh.material)
     })
   }, [scene])
 
@@ -820,6 +830,7 @@ export function ModelViewer({
   flagYaw,
   onClipsLoaded,
   onFps,
+  lightMode = false,
   className,
 }: ModelViewerProps) {
   const wrapper = useRef<HTMLDivElement>(null)
@@ -853,10 +864,18 @@ export function ModelViewer({
         gl={{ antialias: true, powerPreference: "high-performance" }}
       >
         {/* Weighted towards ambient: JK2 lights players fairly evenly, so a
-            strong key light reads as "rendered CGI" rather than "in-game". */}
-        <ambientLight intensity={1.1} />
+            strong key light reads as "rendered CGI" rather than "in-game".
+            lightMode gets more ambient fill — the models' own dark JK2 textures
+            need it to avoid looking underlit against a bright profile theme —
+            and a warm rim instead of the default cyan, which reads as a cold
+            mismatch against a light, warm-toned background. */}
+        <ambientLight intensity={lightMode ? 1.5 : 1.1} />
         <directionalLight position={[3, 6, 4]} intensity={1.3} />
-        <directionalLight position={[-4, 2, -3]} intensity={0.45} color="#66fcf1" />
+        <directionalLight
+          position={[-4, 2, -3]}
+          intensity={lightMode ? 0.55 : 0.45}
+          color={lightMode ? "#e8a463" : "#66fcf1"}
+        />
 
         <Suspense fallback={null}>
           <Model
@@ -875,7 +894,17 @@ export function ModelViewer({
             onClipsLoaded={onClipsLoaded}
             onFit={handleFit}
           />
-          <ContactShadows position={[0, -0.01, 0]} opacity={0.5} scale={TARGET_HEIGHT * 3} blur={2.4} far={4} />
+          {/* Lower opacity and a warm brown instead of flat black: the same
+              shadow that melts into a near-black card reads as a hard smudge
+              on parchment, so the light theme gets a softer, tinted one. */}
+          <ContactShadows
+            position={[0, -0.01, 0]}
+            opacity={lightMode ? 0.3 : 0.5}
+            color={lightMode ? "#4a3520" : "#000000"}
+            scale={TARGET_HEIGHT * 3}
+            blur={lightMode ? 3 : 2.4}
+            far={4}
+          />
         </Suspense>
 
         {/* Horizontal spin + zoom only — min/max polar are pinned together to
