@@ -43,7 +43,11 @@ export interface AchStat {
   kills: number
   deaths: number
   flag_hold_ms: number
+  flag_grabs: number
   dbs_returns: number
+  red_returns: number
+  yellow_returns: number
+  dfa_returns: number
   yellow_kills: number
   turret_kills: number
   mine_returns: number
@@ -128,7 +132,7 @@ export interface AchievementDef {
   threshold?: number
   rarity?: Rarity
   pending?: boolean // forward-only: needs a column populated only by new uploads
-  unit?: "hours" // display hint for value/threshold formatting
+  unit?: "hours" | "percent" // display hint for value/threshold formatting
   exact?: boolean // threshold is a fixed count, not a minimum — drops the "+" suffix
   // For pair crests (seqDerived with a `who`): the preposition the tooltip uses
   // before the partner's name — "with" a team-mate, "against" an opponent.
@@ -149,6 +153,11 @@ const countsForPair = (m: AchMatch) => m.played && Date.parse(m.date) >= PAIR_FR
 const TWO_MINUTES_MS = 120_000
 // total flag-hold in one match, ms → the 40:00 gate for Marathon Runner.
 const FORTY_MINUTES_MS = 2_400_000
+
+// Enemy mines grabbed has always been two columns (red side / blue side) since
+// nobody cares which colour, only that it was the other team's — every combo
+// achievement below sums them the same way SWAT Support's careerSum does.
+const mineGrabsOf = (s: AchStat) => s.mine_grabs_red + s.mine_grabs_blue
 
 export const ACHIEVEMENTS: AchievementDef[] = [
   // ---------------------------------------------------------------- Match feats
@@ -173,13 +182,49 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     rarity: "epic",
   },
   {
+    // Absorbs the old untiered 7-cap "Cap God" into a full ladder: 4/5/6 fill in
+    // the gap below it (93/37/8 matches on record respectively), and a 5th rank
+    // adds a K/D gate on top of the same 7-cap ceiling for "Cap God Plus" — no
+    // match has ever combined the two, so it stays a real reach even though the
+    // raw capture count is already claimed. get() returns a tier number rather
+    // than the raw capture count so the KD-gated top rank can sit above the
+    // plain-capture one without a second, disconnected metric (same trick as
+    // Nah, You're Hacking below).
     id: "cap-god",
     title: "Cap God",
     category: "match",
     icon: "galactic-empire",
-    condition: "7+ captures in a single match",
-    metric: { type: "matchMax", get: (s) => s.captures },
-    threshold: 7,
+    condition: "Captures in a single match",
+    metric: {
+      type: "matchMax",
+      get: (s) => {
+        if (s.captures >= 7 && s.kills >= 1.5 * s.deaths) return 5
+        if (s.captures >= 7) return 4
+        if (s.captures >= 6) return 3
+        if (s.captures >= 5) return 2
+        if (s.captures >= 4) return 1
+        return 0
+      },
+    },
+    ranks: [
+      { threshold: 1, rarity: "common" },
+      { threshold: 2, rarity: "rare" },
+      { threshold: 3, rarity: "epic" },
+      { threshold: 4, rarity: "legendary", title: "Cap God" },
+      { threshold: 5, rarity: "mythic", title: "Cap God Plus" },
+    ],
+  },
+  {
+    id: "warrior-capper",
+    title: "Warrior Capper",
+    category: "match",
+    icon: "rebel-alliance-jedi-order",
+    condition: "4+ caps with a 2:1 K/D in a 25+ min match",
+    metric: {
+      type: "matchPredicate",
+      test: (s) => s.captures >= 4 && s.kills >= 2 * s.deaths && (s.time_played ?? 0) >= 25,
+    },
+    threshold: 1,
     rarity: "legendary",
   },
   {
@@ -368,14 +413,215 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     rarity: "epic",
   },
   {
+    // Mythic rank added 29 Jul 2026: nobody has ever hit 10+ DBS returns twice
+    // over (the record is 11), so 15 stays a real reach rather than a gimme.
     id: "press-a-bind",
     title: "Press a Bind",
     category: "match",
     icon: "revanchist-sith",
-    condition: "10+ DBS returns in a single match",
+    condition: "DBS returns in a single match",
     metric: { type: "matchMax", get: (s) => s.dbs_returns },
-    threshold: 10,
+    ranks: [
+      { threshold: 10, rarity: "legendary" },
+      { threshold: 15, rarity: "mythic" },
+    ],
+  },
+  {
+    // Calibrated 29 Jul 2026 against the full match_stats history: 5+:256,
+    // 10+:43, 15+:7, 20+:0 rows. The suggested 25 tier never happens, so the
+    // ladder stops at 20 rather than carrying a permanently-unreachable Mythic.
+    id: "red-rets",
+    title: "Red Rets",
+    category: "match",
+    icon: "new-republic", // shares RET SERVICES!!'s crest — a returns feat
+    condition: "Red-stance returns in a single match",
+    metric: { type: "matchMax", get: (s) => s.red_returns },
+    ranks: [
+      { threshold: 5, rarity: "common" },
+      { threshold: 10, rarity: "rare" },
+      { threshold: 15, rarity: "epic" },
+      { threshold: 20, rarity: "legendary" },
+    ],
+  },
+  {
+    // Yellow returns run far lower than red or DFA (nobody has ever broken 9),
+    // so this ladder is deliberately tighter than the suggested 5/10/15/20/25 —
+    // 5+:29, 7+:7, 12+/20+:0. 12 and 20 stay unclaimed for now, same as any
+    // other aspirational top rank elsewhere in the file.
+    id: "yellow-rets",
+    title: "Yellow Rets",
+    category: "match",
+    icon: "black-sun", // shares Yellow Spammer's crest — same stance
+    condition: "Yellow-stance returns in a single match",
+    metric: { type: "matchMax", get: (s) => s.yellow_returns },
+    ranks: [
+      { threshold: 5, rarity: "common" },
+      { threshold: 7, rarity: "rare" },
+      { threshold: 12, rarity: "epic" },
+      { threshold: 20, rarity: "legendary" },
+    ],
+  },
+  {
+    // 5+:229, 10+:47, 15+:5, 20+:1 (Interlude) — the same shape as Red Rets.
+    id: "dfa-rets",
+    title: "DFA Rets",
+    category: "match",
+    icon: "mandalorian-mysteries", // shares Cheese's Dream's crest — a DFA feat
+    condition: "DFA returns in a single match",
+    metric: { type: "matchMax", get: (s) => s.dfa_returns },
+    ranks: [
+      { threshold: 5, rarity: "common" },
+      { threshold: 10, rarity: "rare" },
+      { threshold: 15, rarity: "epic" },
+      { threshold: 20, rarity: "legendary" },
+    ],
+  },
+  {
+    // Only one match on record has ever combined all four (arhont) — the crest
+    // unlocks for them retroactively on deploy, which is fine here: unlike the
+    // one-of-one/pair families, an ordinary multi-holder crest is always
+    // evaluated over the full history, the same as Cap God or 2000 Club are.
+    id: "jack-of-all-trades",
+    title: "Jack of All Trades",
+    category: "match",
+    icon: "rebel-alliance", // no single stance owns this — a generalist's crest
+    condition: "7+ red, 7+ yellow, 5+ DFA and 5+ DBS returns in one match",
+    metric: {
+      type: "matchPredicate",
+      test: (s) => s.red_returns >= 7 && s.yellow_returns >= 7 && s.dfa_returns >= 5 && s.dbs_returns >= 5,
+    },
+    threshold: 1,
     rarity: "legendary",
+  },
+  {
+    // 20+ rets alone has happened plenty (126 matches); paired with a 1.5+ K/D
+    // it's never once co-occurred, which is what earns the Mythic tier.
+    id: "ret-god",
+    title: "Ret God",
+    category: "match",
+    icon: "sith-eternal", // shares Rambo's crest — an unstoppable-stats feat
+    condition: "30+ returns with a 1.5+ K/D in a single match",
+    metric: {
+      type: "matchPredicate",
+      test: (s) => s.returns >= 30 && s.kills >= 1.5 * s.deaths,
+    },
+    threshold: 1,
+    rarity: "mythic",
+  },
+  {
+    // A support/camp combo, calibrated 29 Jul 2026: rets+blocks+mine grabs+K/D
+    // all rise together. get() reports the highest tier CURRENTLY met (same
+    // computed-tier trick as Nah, You're Hacking and Cap God above) since no
+    // single stat climbs on its own here — real counts: 28 matches clear
+    // Veteran, 8 clear Master, 0 have ever cleared God (individually all four
+    // God-tier gates have been hit before, just never together).
+    id: "camp",
+    title: "Camp Veteran",
+    category: "match",
+    icon: "mandalorian-mercs", // shares SWAT Support's crest — a camping feat
+    condition: "Returns, enemy blocks, enemy mine grabs and K/D in a single match",
+    metric: {
+      type: "matchMax",
+      get: (s) => {
+        const grabs = mineGrabsOf(s)
+        if (s.returns >= 20 && s.blocks_enemy >= 50 && grabs >= 3 && s.kills >= 1.5 * s.deaths) return 3
+        if (s.returns >= 16 && s.blocks_enemy >= 30 && grabs >= 2 && s.kills >= 1.2 * s.deaths) return 2
+        if (s.returns >= 14 && s.blocks_enemy >= 20 && grabs >= 1 && s.kills >= 1.0 * s.deaths) return 1
+        return 0
+      },
+    },
+    ranks: [
+      { threshold: 1, rarity: "epic", title: "Camp Veteran" },
+      { threshold: 2, rarity: "legendary", title: "Camp Master" },
+      { threshold: 3, rarity: "mythic", title: "Camp God" },
+    ],
+  },
+  {
+    // The single hardest combo in the file by design — every individual gate
+    // has been cleared before (8 sentry kills, 45 mine kills, 6 mine returns,
+    // etc.) but never all six at once in the 1305 scoreboard rows on record.
+    // Kept exactly as requested rather than loosened.
+    id: "support-god",
+    title: "Support God",
+    category: "match",
+    icon: "clone-trooper", // shares Apache Gunner's crest — support-role feat
+    condition: "15+ rets, 20+ enemy mine grabs, 3+ sentry kills, 10+ mine kills, 3+ mine rets in one match",
+    metric: {
+      type: "matchPredicate",
+      test: (s) =>
+        s.score >= 1 &&
+        s.returns >= 15 &&
+        mineGrabsOf(s) >= 20 &&
+        s.turret_kills >= 3 &&
+        s.mine_kills >= 10 &&
+        s.mine_returns >= 3,
+    },
+    threshold: 1,
+    rarity: "mythic",
+  },
+  {
+    // 5 matches on record land all four 20+ kill-style counts in one sitting.
+    id: "versatile-killer",
+    title: "Versatile Killer",
+    category: "match",
+    icon: "sith-order", // shares DBS Enjoyer's crest — a style-mastery feat
+    condition: "20+ DFA, yellow, red and mine kills in one match",
+    metric: {
+      type: "matchPredicate",
+      test: (s) => s.dfa_kills >= 20 && s.yellow_kills >= 20 && s.red_kills >= 20 && s.mine_kills >= 20,
+    },
+    threshold: 1,
+    rarity: "epic",
+  },
+  {
+    // Same computed-tier trick as Camp above: captures + returns + enemy mine
+    // grabs all rise together, so get() reports the highest tier currently met.
+    // The entry tier has happened 4 times; Legendary and Mythic are aspirational.
+    id: "triple-threat",
+    title: "Triple Threat",
+    category: "match",
+    icon: "galactic-republic", // shares Cap Enjoyer's crest — a captures feat
+    condition: "Captures, returns and enemy mine grabs in a single match",
+    metric: {
+      type: "matchMax",
+      get: (s) => {
+        const grabs = mineGrabsOf(s)
+        if (s.captures >= 5 && s.returns >= 15 && grabs >= 4) return 3
+        if (s.captures >= 4 && s.returns >= 12 && grabs >= 3) return 2
+        if (s.captures >= 3 && s.returns >= 10 && grabs >= 2) return 1
+        return 0
+      },
+    },
+    ranks: [
+      { threshold: 1, rarity: "epic" },
+      { threshold: 2, rarity: "legendary" },
+      { threshold: 3, rarity: "mythic" },
+    ],
+  },
+  {
+    // Capture efficiency: captures per flag grab, gated at 10+ grabs so a lucky
+    // single conversion can't read as 100%. Calibrated against the 493
+    // qualifying matches on record: 17%+:94, 20%+:59, 25%+:32, 30%+:7, 40%+:1 —
+    // maps almost exactly onto the suggested common-through-mythic spread.
+    // get() reports whole percentage points (not a 0-1 ratio) so thresholds are
+    // plain integers like everywhere else in the file — see the "percent" unit.
+    id: "efficient-capper",
+    title: "Efficient Capper",
+    category: "match",
+    icon: "rogue-one", // shares Pro Rusher's crest — another capture-efficiency feat
+    condition: "Captures per flag grab (min 10 grabs)",
+    unit: "percent",
+    metric: {
+      type: "matchMax",
+      get: (s) => (s.flag_grabs >= 10 ? Math.round((s.captures / s.flag_grabs) * 100) : 0),
+    },
+    ranks: [
+      { threshold: 17, rarity: "common" },
+      { threshold: 20, rarity: "rare" },
+      { threshold: 25, rarity: "epic" },
+      { threshold: 30, rarity: "legendary" },
+      { threshold: 40, rarity: "mythic" },
+    ],
   },
   {
     // The scoreboard has no DOOM-RETURNS column, only DOOM-KILLS — so this counts
@@ -898,12 +1144,14 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
     claim: (s) => s.dbs_kills >= 20,
   },
   {
+    // 3-cap floor added 29 Jul 2026: without it, a pure turtle who never once
+    // brought the flag home could still claim a crest named after a runner.
     id: "wesleys-prodigy",
     title: "Wesley's Prodigy",
     category: "match",
     icon: "rogue-one", // shares Pro Rusher's crest — the runner's crest
-    condition: "Hold the flag 45+ minutes with under 30 deaths",
-    claim: (s) => s.flag_hold_ms >= 2_700_000 && s.deaths < 30,
+    condition: "Hold the flag 45+ minutes with 3+ caps and under 30 deaths",
+    claim: (s) => s.flag_hold_ms >= 2_700_000 && s.captures >= 3 && s.deaths < 30,
   },
   {
     id: "cheese-is-hacking",
