@@ -32,6 +32,7 @@
 
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from "node:fs"
 import { resolve, join, extname, basename } from "node:path"
+import { readShaderScripts, analyseShader } from "./jk2-shaders.mjs"
 
 const DEFAULT_SKIN = "default"
 const DEFAULT_OUT = "public/models/skins"
@@ -129,6 +130,11 @@ function parseArgs() {
 /** Extracts one model's variants, writing its textures and returning its entries. */
 function extractModel(assets, assetsFallback, model, out) {
   const textureRoots = [assets, ...assetsFallback]
+  // A skin can point a surface at a custom shader rather than a plain image
+  // (Andromeda's team skins put her whole right arm on a pure-additive one).
+  // Consulting the same shader scripts the graft reads is how those slots get
+  // flagged for the viewer instead of silently flattened to a diffuse repaint.
+  const shaderScripts = readShaderScripts(textureRoots)
   const modelDir = resolve(assets, "models/players", model)
   if (!existsSync(modelDir)) throw new Error(`no such model: ${modelDir}`)
 
@@ -173,9 +179,14 @@ function extractModel(assets, assetsFallback, model, out) {
     // for a given pair of files and a re-run doesn't reshuffle a live catalogue.
     const slots = new Map()
     const assignment = {}
+    const additiveSlots = []
     for (const [surface, shader] of surfaces) {
       if (!base.has(surface) || base.get(surface) === shader) continue
-      if (!slots.has(shader)) slots.set(shader, slots.size)
+      if (!slots.has(shader)) {
+        slots.set(shader, slots.size)
+        const block = shaderScripts.get(shader.replace(/\.[^./]+$/, "").toLowerCase())
+        if (block && analyseShader(block).additive) additiveSlots.push(slots.get(shader))
+      }
       assignment[surface] = slots.get(shader)
     }
 
@@ -188,6 +199,7 @@ function extractModel(assets, assetsFallback, model, out) {
     mkdirSync(dir, { recursive: true })
 
     let bytes = 0
+    const formats = []
     for (const [shader, slot] of slots) {
       const source = resolveTexture(textureRoots, shader)
       if (!source) throw new Error(`${model}/${skin}: no image found for "${shader}"`)
@@ -195,20 +207,31 @@ function extractModel(assets, assetsFallback, model, out) {
       // Copied byte for byte, not re-encoded. A TGA would need converting first
       // and there's no point guessing at quality settings on someone's behalf —
       // failing here is better than silently shipping a recompressed texture.
-      if (extname(source).toLowerCase() !== ".jpg" && extname(source).toLowerCase() !== ".jpeg") {
-        throw new Error(`${model}/${skin}: ${basename(source)} is not a JPEG — convert it first`)
+      //
+      // PNG is allowed alongside JPEG (not just JPEG) because a surface this
+      // model's default skin marked alpha-tested (see glm-graft.mjs's
+      // analyseShader) needs its swapped texture to carry the same alpha
+      // channel a JPEG can't hold — Bones' red/blue variants are why this
+      // exists: without it, swapping to them would silently undo the
+      // see-through cutout the default skin gets right.
+      const ext = extname(source).toLowerCase()
+      if (ext !== ".jpg" && ext !== ".jpeg" && ext !== ".png") {
+        throw new Error(`${model}/${skin}: ${basename(source)} is not a JPEG or PNG — convert it first`)
       }
+      const outExt = ext === ".png" ? "png" : "jpg"
+      formats[slot] = outExt
 
       const data = readFileSync(source)
-      writeFileSync(join(dir, `${slot}.jpg`), data)
+      writeFileSync(join(dir, `${slot}.${outExt}`), data)
       bytes += data.length
     }
 
     const surfaceCount = Object.keys(assignment).length
     console.log(
-      `  ok    ${skin.padEnd(12)} ${slots.size} texture(s), ${surfaceCount} surface(s), ${(bytes / 1024).toFixed(1)} KB`,
+      `  ok    ${skin.padEnd(12)} ${slots.size} texture(s), ${surfaceCount} surface(s), ${(bytes / 1024).toFixed(1)} KB` +
+        (additiveSlots.length > 0 ? ` — slot(s) ${additiveSlots.join(", ")} additive` : ""),
     )
-    entries.push({ skin, slots: slots.size, assignment })
+    entries.push({ skin, slots: slots.size, assignment, formats, additive: additiveSlots })
   }
 
   if (entries.length > 0) console.log(`\n→ ${resolve(out, model)}/<skin>/<n>.jpg\n`)
@@ -237,15 +260,25 @@ function renderCatalogue(byModel) {
   for (const [model, entries] of byModel) {
     lines.push(`  ${model}: [`)
     lines.push(`    { id: "${DEFAULT_SKIN}", label: "Default", textures: 0, surfaces: {} },`)
-    for (const { skin, slots, assignment } of entries) {
+    for (const { skin, slots, assignment, formats, additive } of entries) {
       const pairs = Object.entries(assignment)
         .map(([surface, slot]) => `${surface}: ${slot}`)
         .join(", ")
+      // Every slot is a JPEG except the rare alpha-tested one, so this is
+      // omitted entirely — same as every skin converted before PNG support
+      // existed — unless at least one slot actually needs it.
+      const needsFormats = formats.some((f) => f && f !== "jpg")
       lines.push(`    {`)
       lines.push(`      id: "${skin}",`)
       lines.push(`      label: "${labelFor(skin)}",`)
       lines.push(`      textures: ${slots},`)
       lines.push(`      surfaces: { ${pairs} },`)
+      if (needsFormats) {
+        lines.push(`      formats: [${formats.map((f) => `"${f ?? "jpg"}"`).join(", ")}],`)
+      }
+      if (additive.length > 0) {
+        lines.push(`      additive: [${additive.join(", ")}],`)
+      }
       lines.push(`    },`)
     }
     lines.push(`  ],`)
