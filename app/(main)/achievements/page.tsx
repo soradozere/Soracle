@@ -1,7 +1,7 @@
 import type { Metadata } from "next"
 import { AchievementsIndex, type FeedItem } from "@/components/achievements-index"
 import { computeAchievementLedger } from "@/lib/achievements-server"
-import { ordinalAt, sealedSecretCount, summariesFor } from "@/lib/achievement-pages"
+import { claimedSecretSummaries, ordinalAt, sealedSecretCount, summariesFor } from "@/lib/achievement-pages"
 import { ACHIEVEMENTS, SECRET_ACHIEVEMENTS } from "@/lib/achievement-meta"
 
 export const metadata: Metadata = {
@@ -50,6 +50,7 @@ export default async function AchievementsPage() {
       <AchievementsIndex
         summaries={summaries}
         feed={feed}
+        claimedSecrets={claimedSecretSummaries(ledger)}
         sealedSecrets={sealedSecretCount(ledger)}
         playerCount={ledger.playerCount}
         totalUnlocks={totalUnlocks}
