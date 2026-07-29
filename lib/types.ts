@@ -23,6 +23,20 @@ export interface Player {
   // recomputed on render, so these are only the player's CHOICE.
   title?: string | null
   profile_theme?: string | null
+  // Chosen JK2 3D model (migration 023). A catalogue id from lib/player-models.ts,
+  // never a path — the asset itself is resolved through /api/model-url.
+  model?: string | null
+  // Lightsaber blade colour (migration 024). A catalogue id from
+  // lib/saber-colours.ts. Only visible on a model that has bolt points baked in.
+  saber?: string | null
+  // Skin + animation choices (migration 025). Skin is a catalogue id from the
+  // CHOSEN model's own ModelSkin list in lib/player-models.ts — meaningless
+  // without `model`, and re-validated against it server-side. Idle/action are
+  // catalogue ids from lib/animations.ts. Null in any of the three just means
+  // "use the default" rather than an error.
+  skin?: string | null
+  idle_animation?: string | null
+  action_animation?: string | null
 }
 
 export interface BalanceResult {
