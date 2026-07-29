@@ -80,6 +80,13 @@ export type PlayerModel = {
   skins: ModelSkin[]
   /** Author credit for fan-made models, shown alongside the label in the picker. */
   credit?: string
+  /**
+   * Fan-made rather than shipped with the base game — splits the picker into
+   * Base/Custom. Rodian is stock despite sitting at the end of the array
+   * (converted later than the rest of the base roster), so this can't be
+   * derived from array position.
+   */
+  custom?: boolean
 }
 
 /** Every model has a default; the variants come from the generated catalogue. */
@@ -87,6 +94,17 @@ const PLAIN_SKINS: ModelSkin[] = [{ id: DEFAULT_SKIN, label: "Default", textures
 
 function skinsFor(id: string): ModelSkin[] {
   return MODEL_SKINS[id] ?? PLAIN_SKINS
+}
+
+/**
+ * `skinsFor`, minus the "Default" entry — for a model whose likeness only
+ * makes sense in CTF team colours (Andromeda, Eternal). The default skin is
+ * still generated and still sits in the .glb as the model's baked-in look —
+ * this just keeps it off the picker, so a player can only ever choose red or
+ * blue for these two.
+ */
+function teamOnlySkinsFor(id: string): ModelSkin[] {
+  return skinsFor(id).filter((skin) => skin.id !== DEFAULT_SKIN)
 }
 
 // Kyle came through Blender; the rest were grafted onto his skeleton by
@@ -180,22 +198,27 @@ export const PLAYER_MODELS: PlayerModel[] = [
     file: "jeditrainer.glb",
     skins: skinsFor("jeditrainer"),
   },
-  // Fan-made models, grafted the same way as the roster above. Only added once
-  // their .glm actually declares the shared 72-bone _humanoid skeleton — several
-  // others Sam sent (rayman, x_Eternal, cal_kestis) use a different, incompatible
-  // bone layout and were left out; see docs/jk2-model-conversion.md §7.8.
+  // Fan-made models, grafted the same way as the roster above. Most declare
+  // the same 72-bone JK2 _humanoid skeleton as the base roster; rayman,
+  // eternal and cal-kestis instead declare JKA's 53-bone _humanoid — a
+  // genuinely different skeleton, reconciled by name via
+  // scripts/jka-humanoid.mjs rather than left out. See
+  // docs/jk2-model-conversion.md §7.8.
   {
     id: "andromeda",
     label: "Andromeda",
     file: "andromeda.glb",
-    skins: skinsFor("andromeda"),
+    // CTF-only likeness — no "Default" in the picker, see teamOnlySkinsFor.
+    skins: teamOnlySkinsFor("andromeda"),
     credit: "FetchD",
+    custom: true,
   },
   {
     id: "bones",
     label: "Bones",
     file: "bones.glb",
     skins: skinsFor("bones"),
+    custom: true,
   },
   {
     id: "horseton",
@@ -203,6 +226,63 @@ export const PLAYER_MODELS: PlayerModel[] = [
     file: "horseton.glb",
     skins: skinsFor("horseton"),
     credit: "Booti",
+    custom: true,
+  },
+  {
+    id: "zarah",
+    label: "Zarah",
+    file: "zarah.glb",
+    skins: skinsFor("zarah"),
+    credit: "vezonia",
+    custom: true,
+  },
+  {
+    id: "zarah-winged",
+    label: "Zarah (Winged)",
+    file: "zarah-winged.glb",
+    skins: skinsFor("zarah-winged"),
+    credit: "vezonia",
+    custom: true,
+  },
+  // First model converted off JKA's 53-bone _humanoid rather than JK2's own
+  // 72-bone one — see scripts/jka-humanoid.mjs for how the two skeletons
+  // reconcile by bone name.
+  {
+    id: "otso",
+    label: "Otso",
+    file: "otso.glb",
+    skins: skinsFor("otso"),
+    custom: true,
+  },
+  {
+    id: "rayman",
+    label: "Rayman",
+    file: "rayman.glb",
+    skins: skinsFor("rayman"),
+    custom: true,
+  },
+  {
+    id: "eternal",
+    label: "Eternal",
+    file: "eternal.glb",
+    // CTF-only likeness — no "Default" in the picker, see teamOnlySkinsFor.
+    skins: teamOnlySkinsFor("eternal"),
+    custom: true,
+  },
+  {
+    id: "cal-kestis",
+    label: "Cal Kestis",
+    file: "cal-kestis.glb",
+    skins: skinsFor("cal-kestis"),
+    custom: true,
+  },
+  {
+    id: "jedi-zf",
+    label: "Jedi ZF",
+    file: "jedi-zf.glb",
+    skins: skinsFor("jedi-zf"),
+    credit: "FetchD",
+    custom: true,
   },
   // Stock JK2, not fan-made — just never converted alongside the rest of the
   // base roster above. Its "Shadow" skin is a fan retexture (zzz_Crash.pk3,
