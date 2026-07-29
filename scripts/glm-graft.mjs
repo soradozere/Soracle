@@ -29,6 +29,7 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { resolve, join } from "node:path"
+import { readShaderScripts, analyseShader } from "./jk2-shaders.mjs"
 
 const GLM_IDENT = "2LGM"
 const GLM_VERSION = 6
@@ -38,6 +39,15 @@ const GLM_VERTEX_SIZE = 32
 
 const JSON_CHUNK = 0x4e4f534a
 const BIN_CHUNK = 0x004e4942
+
+/**
+ * Multiplier for a `glow`-equivalent stage's emissive contribution, via
+ * `KHR_materials_emissive_strength` — glTF's base `emissiveFactor` is capped
+ * at 1.0 per channel, which reads as a faint tint rather than something that
+ * glows. Picked by eye against a real gameplay screenshot of Andromeda's arm
+ * (Sam: "the glowing, translucent arm is really the sell for this skin").
+ */
+const EMISSIVE_STRENGTH = 4
 
 const COMPONENT_SIZES = { 5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4 }
 const TYPE_COUNTS = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4, MAT2: 4, MAT3: 9, MAT4: 16 }
@@ -188,6 +198,12 @@ function readGlaBoneNames(path) {
  * and a `*` surface is a bolt tag rather than geometry. Applying it to Kyle
  * leaves 19 surfaces, which is exactly the 19 meshes in his export — that
  * agreement is the check that this rule is the right one.
+ *
+ * A shader value of literally `*off` is a third, distinct way a `.skin` can
+ * hide a surface — not a naming convention on the surface itself but the
+ * shader assignment saying "don't draw this". Bones' six hat surfaces are
+ * `*off` in every skin he ships, which is why none of them should render by
+ * default.
  */
 function readSkin(path) {
   const surfaces = new Map()
@@ -197,7 +213,7 @@ function readSkin(path) {
     if (!line || comma < 0) continue
     const surface = line.slice(0, comma).trim()
     const shader = line.slice(comma + 1).trim()
-    if (!shader || surface.startsWith("*") || surface.endsWith("_off")) continue
+    if (!shader || surface.startsWith("*") || surface.endsWith("_off") || shader === "*off") continue
     surfaces.set(surface, shader)
   }
   return surfaces
@@ -216,10 +232,15 @@ function readSkin(path) {
  * game never made — do that once, by hand, into a throwaway root that mirrors
  * the real tree, the same way docs/jk2-model-conversion.md §7.5 does for props.
  */
-function resolveTexture(assetsRoots, shader) {
+function resolveTexture(assetsRoots, shader, { preferAlpha = false } = {}) {
   const stem = shader.replace(/\.[^./]+$/, "")
+  // JPEG has no alpha channel, so a surface that's alpha-tested (see
+  // analyseShader's alphaCutout) has to be sourced from a PNG or its cutout
+  // regions render fully opaque instead of vanishing — this is exactly what
+  // silently broke Bones the first time this model was converted.
+  const order = preferAlpha ? [".png", ".jpg", ".jpeg"] : [".jpg", ".jpeg", ".png"]
   for (const root of assetsRoots) {
-    for (const ext of [".jpg", ".jpeg", ".png"]) {
+    for (const ext of order) {
       const candidate = resolve(root, stem + ext)
       if (existsSync(candidate)) return { path: candidate, mimeType: ext === ".png" ? "image/png" : "image/jpeg" }
     }
@@ -382,12 +403,26 @@ function glbBounds(json) {
  *
  * Each triangle already carries the answer. Its vertices have normals, and a
  * face wound counter-clockwise about those normals has cross(v1-v0, v2-v0)
- * pointing the same way. Count the agreements and take the verdict.
+ * pointing the same way. Count the agreements PER SURFACE and take each
+ * surface's own verdict.
+ *
+ * Per surface, not whole-model, and the story is horseton: 505 forward vs
+ * 1731 reversed globally, well under the old whole-model 90% bar. The messy
+ * votes turned out not to be mixed winding at all — every one of its ten
+ * surfaces still votes the same way — but smoothed vertex normals on rounded
+ * organic shapes leaning away from their faces' planes, which makes the dot
+ * test misfire triangle by triangle (62–83% agreement within a surface, all
+ * agreeing on the answer). Base-game models sit at 94–100% per surface, so
+ * the per-surface majority reproduces every previous verdict exactly; the
+ * hard refusal now only fires when a surface is a near coin flip, which is
+ * what actually-misread geometry looks like.
  */
 function decideWinding(surfaces) {
-  let forward = 0
-  let reversed = 0
+  let flipped = 0
+  let lowest = { agreement: 1, name: null }
   for (const surface of surfaces) {
+    let forward = 0
+    let reversed = 0
     for (const [a, b, c] of surface.triangles) {
       const p0 = surface.positions[a]
       const e1 = [surface.positions[b][0] - p0[0], surface.positions[b][1] - p0[1], surface.positions[b][2] - p0[2]]
@@ -402,22 +437,26 @@ function decideWinding(surfaces) {
       if (dot > 0) forward++
       else if (dot < 0) reversed++
     }
-  }
 
-  const total = forward + reversed
-  const agreement = Math.max(forward, reversed) / (total || 1)
-  if (agreement < 0.9) {
-    throw new Error(
-      `triangle winding is inconsistent (${forward} forward, ${reversed} reversed) — ` +
-        "the normals or the vertex order have been read wrong",
-    )
+    const total = forward + reversed
+    const agreement = Math.max(forward, reversed) / (total || 1)
+    if (agreement < 0.55) {
+      throw new Error(
+        `"${surface.name}" triangle winding is a coin flip (${forward} forward, ${reversed} reversed) — ` +
+          "the normals or the vertex order have been read wrong",
+      )
+    }
+    surface.reversed = reversed > forward
+    if (surface.reversed) flipped++
+    if (agreement < lowest.agreement) lowest = { agreement, name: surface.name }
   }
-  return { reversed: reversed > forward, agreement, total }
+  return { flipped, total: surfaces.length, lowest }
 }
 
 function main() {
   const { assets, assetsFallback, model, donor, donorGlb, out } = parseArgs()
   const textureRoots = [assets, ...assetsFallback]
+  const shaderScripts = readShaderScripts(textureRoots)
 
   const playersDir = resolve(assets, "models/players")
   const glmPath = join(playersDir, model, "model.glm")
@@ -536,24 +575,47 @@ function main() {
 
   const winding = decideWinding(surfaces)
   console.log(
-    `  winding: ${winding.reversed ? "reversed" : "as stored"} ` +
-      `(${(winding.agreement * 100).toFixed(1)}% of ${winding.total} triangles agree)`,
+    `  winding: ${winding.flipped}/${winding.total} surfaces reversed ` +
+      `(lowest agreement ${(winding.lowest.agreement * 100).toFixed(1)}% on "${winding.lowest.name}")`,
   )
 
   // --- textures ------------------------------------------------------------
 
   const images = []
   const imageOfShader = new Map()
+  const glowImageOfShader = new Map()
+  const effectsOfShader = new Map()
   for (const surface of surfaces) {
     if (imageOfShader.has(surface.shader)) continue
-    const texture = resolveTexture(textureRoots, surface.shader)
+
+    const stem = surface.shader.replace(/\.[^./]+$/, "").toLowerCase()
+    const block = shaderScripts.get(stem)
+    const effects = block
+      ? analyseShader(block)
+      : { alphaCutout: false, translucent: false, reflective: false, additive: false, glow: null }
+    effectsOfShader.set(surface.shader, effects)
+
+    const texture = resolveTexture(textureRoots, surface.shader, {
+      preferAlpha: effects.alphaCutout || effects.translucent,
+    })
     if (!texture) {
       console.warn(`  ! no image for "${surface.name}" (shader "${surface.shader}") — it'll render untextured`)
       imageOfShader.set(surface.shader, null)
-      continue
+    } else {
+      imageOfShader.set(surface.shader, images.length)
+      images.push({ shader: surface.shader, ...texture, data: readFileSync(texture.path) })
     }
-    imageOfShader.set(surface.shader, images.length)
-    images.push({ shader: surface.shader, ...texture, data: readFileSync(texture.path) })
+
+    if (effects.glow) {
+      const glowTexture = resolveTexture(textureRoots, effects.glow)
+      if (!glowTexture) {
+        console.warn(`  ! no glow image for "${surface.name}" (shader "${effects.glow}") — glow will be skipped`)
+        glowImageOfShader.set(surface.shader, null)
+      } else {
+        glowImageOfShader.set(surface.shader, images.length)
+        images.push({ shader: effects.glow, ...glowTexture, data: readFileSync(glowTexture.path) })
+      }
+    }
   }
   console.log(`  ${surfaces.length} surfaces, ${images.length} textures`)
 
@@ -636,13 +698,16 @@ function main() {
     if (count > 65535) throw new Error(`surface "${surface.name}" has ${count} vertices, too many for 16-bit indices`)
     const indices = Buffer.alloc(surface.triangles.length * 6)
     surface.triangles.forEach((tri, t) => {
-      const order = winding.reversed ? [tri[0], tri[2], tri[1]] : tri
+      const order = surface.reversed ? [tri[0], tri[2], tri[1]] : tri
       for (let k = 0; k < 3; k++) indices.writeUInt16LE(order[k], t * 6 + k * 2)
     })
 
     let material = materialOfShader.get(surface.shader)
     if (material === undefined) {
       const image = imageOfShader.get(surface.shader)
+      const effects = effectsOfShader.get(surface.shader)
+      const glowImage = glowImageOfShader.get(surface.shader)
+
       materials.push({
         // Named with the JK2 shader path, the same as Blender writes it. The
         // skin system in components/model-skin.tsx keys off mesh names rather
@@ -652,11 +717,39 @@ function main() {
         doubleSided: true,
         pbrMetallicRoughness: {
           ...(image === null ? {} : { baseColorTexture: { index: image } }),
-          metallicFactor: 0,
-          // Flattened to 1 at load by lib/three-materials.ts either way; written
-          // here so the file looks right on its own in any other viewer.
-          roughnessFactor: 1,
+          // A `tcGen environment` surface (chrome, water) gets a modest fixed
+          // shine instead of full flat-diffuse — not a real scrolling
+          // reflection, just enough that it doesn't read as chalk-flat next to
+          // everything else. lib/three-materials.ts skips flattening it away.
+          metallicFactor: effects?.reflective ? 0.4 : 0,
+          // Flattened to 1 at load by lib/three-materials.ts either way (unless
+          // reflective); written here so the file looks right on its own in
+          // any other viewer.
+          roughnessFactor: effects?.reflective ? 0.35 : 1,
         },
+        ...(effects?.translucent
+          ? { alphaMode: "BLEND" }
+          : effects?.alphaCutout
+            ? { alphaMode: "MASK", alphaCutoff: 0.5 }
+            : {}),
+        ...(glowImage !== undefined && glowImage !== null
+          ? {
+              emissiveFactor: [1, 1, 1],
+              emissiveTexture: { index: glowImage },
+              // glTF's base emissiveFactor is clamped to [0,1] per channel —
+              // nowhere near bright enough to read as "glowing" rather than
+              // "lightly tinted". This extension is a real multiplier three.js
+              // (and any other compliant loader) applies on top, which is what
+              // actually pushes JK2's additive shimmer into looking like the
+              // in-game effect under the renderer's ACES tone mapping.
+              extensions: { KHR_materials_emissive_strength: { emissiveStrength: EMISSIVE_STRENGTH } },
+            }
+          : {}),
+        // GLTFLoader copies `extras` onto the resulting THREE.Material's
+        // userData, and Material.copy() (what .clone() calls) deep-copies
+        // userData too — so this survives into the skin system's per-skin
+        // material clones with no changes needed there.
+        ...(effects?.reflective ? { extras: { reflective: true } } : {}),
       })
       material = materials.length - 1
       materialOfShader.set(surface.shader, material)
@@ -755,8 +848,11 @@ function main() {
 
   const inverseBindMatrices = copyAccessor(skin.inverseBindMatrices)
 
+  const usesEmissiveStrength = materials.some((m) => m.extensions?.KHR_materials_emissive_strength)
+
   const json = {
     asset: { version: "2.0", generator: `glm-graft.mjs (${model} on ${donor})` },
+    ...(usesEmissiveStrength ? { extensionsUsed: ["KHR_materials_emissive_strength"] } : {}),
     scene: 0,
     scenes: [{ nodes: donorJson.scenes[donorJson.scene ?? 0].nodes.map((i) => remap.get(i)) }],
     nodes,
