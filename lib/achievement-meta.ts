@@ -159,6 +159,8 @@ const countsForPair = (m: AchMatch) => m.played && Date.parse(m.date) >= PAIR_FR
 const TWO_MINUTES_MS = 120_000
 // total flag-hold in one match, ms → the 40:00 gate for Marathon Runner.
 const FORTY_MINUTES_MS = 2_400_000
+// flag-hold floor for Efficient Capper's ratio gate — see that family below.
+const FIFTEEN_MINUTES_MS = 900_000
 
 // Enemy mines grabbed has always been two columns (red side / blue side) since
 // nobody cares which colour, only that it was the other team's — every combo
@@ -588,29 +590,33 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   },
   {
     // Capture efficiency: captures per flag grab, gated at 10+ grabs (so a lucky
-    // single conversion can't read as 100%) AND 25+ minutes played — without a
-    // duration floor this was clearing for most active cappers on short/lopsided
-    // matches alone. Re-calibrated 29 Jul 2026 against the 478 matches that clear
-    // both gates: 17%+:89, 20%+:54, 25%+:27, 30%+:5, 40%+:0.
+    // single conversion can't read as 100%) AND 15+ minutes of actual flag hold —
+    // swapped from a 25+ min PLAYED floor on 30 Jul 2026, because match duration
+    // let a lopsided/stacked stomp qualify without the player ever doing much
+    // real capping. Flag hold is a direct measure of capping time instead, and
+    // the swap visibly tightens things: of the 478 matches that cleared the old
+    // gate, 209 don't hold up under this one (only 1 new match qualifies that
+    // hadn't before). Ratios hold the same shape at the new gate (270 matches):
+    // 17%+:58, 20%+:39, 25%+:19, 30%+:4, 40%+:1 — thresholds unchanged.
     // get() reports whole percentage points (not a 0-1 ratio) so thresholds are
     // plain integers like everywhere else in the file — see the "percent" unit.
     id: "efficient-capper",
     title: "Handy Capper",
     category: "match",
     icon: "rogue-one", // shares Pro Rusher's crest — another capture-efficiency feat
-    condition: "Captures per flag grab, 10+ grabs and 25+ min played",
+    condition: "Captures per flag grab, 10+ grabs and 15+ min flag hold",
     unit: "percent",
     metric: {
       type: "matchMax",
       get: (s) =>
-        s.flag_grabs >= 10 && (s.time_played ?? 0) >= 25 ? Math.round((s.captures / s.flag_grabs) * 100) : 0,
+        s.flag_grabs >= 10 && s.flag_hold_ms >= FIFTEEN_MINUTES_MS ? Math.round((s.captures / s.flag_grabs) * 100) : 0,
     },
     ranks: [
       { threshold: 17, rarity: "common", title: "Handy Capper" },
       { threshold: 20, rarity: "rare", title: "Sharp Capper" },
       { threshold: 25, rarity: "epic", title: "Precision Capper" },
       { threshold: 30, rarity: "legendary", title: "Surgical Capper" },
-      { threshold: 40, rarity: "mythic", title: "Flawless Capper" },
+      { threshold: 40, rarity: "mythic", title: "Prime Capper" },
     ],
   },
   {
@@ -670,6 +676,8 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ],
   },
   {
+    // Top rank renamed 30 Jul 2026: "RET GOD" collided with the new match-feat
+    // Ret God (30+ rets, 1.5+ K/D) — same words, unrelated achievement.
     id: "ret-services",
     title: "RET SERVICES!!",
     category: "career",
@@ -679,7 +687,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ranks: [
       { threshold: 500, rarity: "common" },
       { threshold: 1000, rarity: "epic" },
-      { threshold: 2500, rarity: "legendary", title: "RET GOD" },
+      { threshold: 2500, rarity: "legendary", title: "RET POWER!!" },
     ],
   },
   {
