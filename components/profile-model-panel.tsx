@@ -33,8 +33,10 @@ export function ProfileModelFigure({
   modelId,
   skin,
   saber,
+  mines,
   animation,
   action,
+  lightMode,
   onEdit,
   // Tall enough for a full-height figure, since the viewer's zoomed-out framing
   // fills the canvas exactly. Centred when it stacks underneath on narrow
@@ -54,12 +56,19 @@ export function ProfileModelFigure({
   modelId: string | null | undefined
   /** Skin id from the model's catalogue entry, or nothing for its default. */
   skin?: string | null
-  /** Blade colour id, or null for an unarmed model. */
+  /** Blade colour id, or null for an unarmed model. Ignored when `mines` is set —
+   *  the saber and trip mines share one hand bolt, so only one can render. */
   saber?: string | null
+  /** Carry a set of trip mines instead of a saber. */
+  mines?: boolean
   /** Idle clip to loop, or nothing for the model's own default idle. */
   animation?: string | null
   /** Specific one-shot clip the action button plays, or nothing for a random pick. */
   action?: string | null
+  /** True when the equipped profile theme has mode: "light" — retunes the
+   *  canvas lighting/shadow so a dark JK2 model doesn't look underlit against
+   *  a bright ground. See ModelViewerProps.lightMode. */
+  lightMode?: boolean
   /**
    * Renders a small edit icon alongside the rotate/action buttons when set.
    *
@@ -97,6 +106,8 @@ export function ProfileModelFigure({
             actionTrigger={actionTrigger}
             action={action ?? undefined}
             saber={saber}
+            mines={mines}
+            lightMode={lightMode}
             className="w-full h-full"
           />
         ) : error ? (

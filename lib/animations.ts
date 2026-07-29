@@ -27,7 +27,7 @@ export const IDLE_ANIMATIONS: AnimationClip[] = [
 
 export const ACTION_ANIMATIONS: AnimationClip[] = [
   { id: "dfa", label: "Yellow DFA" },
-  { id: "backstab", label: "Backstab" },
+  { id: "backstab", label: "DBS" },
   { id: "taunt", label: "Taunt" },
   { id: "hand-chop", label: "Hand chop" },
 ]
