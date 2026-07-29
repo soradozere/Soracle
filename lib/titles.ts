@@ -20,6 +20,11 @@ export interface TitleTier {
   title: string
   threshold: number
   rarity: Rarity
+  // Kept off the visible ladder (progress bar, "N to <title>" label) until
+  // actually crossed — same secrecy the achievement one-of-ones use. Earning
+  // logic doesn't care: progressFor still crosses it the moment the score
+  // clears the threshold, same as any other tier.
+  hidden?: boolean
 }
 
 export interface TitleLadder {
@@ -29,18 +34,29 @@ export interface TitleLadder {
   tiers: TitleTier[]
 }
 
-// Ranked by lifetime Achievement Score. Aspirational on purpose: the highest
-// score in the game is currently 170, so the top two are unclaimed and will stay
-// that way for a while.
+// Ranked by lifetime Achievement Score. Re-calibrated 29 Jul 2026: the crest
+// catalogue roughly quadrupled (new Rets families, Cap God's full ladder, Triple
+// Threat, Efficient Capper, etc.), which was quietly inflating everyone's score —
+// the top real total went from 170 at launch to 300 within weeks, on pace to
+// blow through the old 350 JK2 God threshold almost immediately. Every tier
+// below is raised to match; JK2 God stays the top VISIBLE tier and a genuine
+// stretch goal again.
+//
+// The GOAT is a hidden Mythic ABOVE JK2 God — not shown on the progress bar, not
+// named in the "N to go" label, until someone actually crosses it (see
+// progressFor/title-progression.tsx). 1337 is deliberately a long way past
+// anything achievable soon; it's there for whoever eventually clears the entire
+// board, not for this season.
 export const SCORE_LADDER: TitleLadder = {
   id: "score",
   label: "Achievement Score",
   metric: "achievement_score",
   tiers: [
-    { id: "decorated", title: "Decorated", threshold: 50, rarity: "common" },
-    { id: "distinguished", title: "Distinguished", threshold: 100, rarity: "rare" },
-    { id: "illustrious", title: "Illustrious", threshold: 200, rarity: "epic" },
-    { id: "jk2-god", title: "JK2 God", threshold: 350, rarity: "legendary" },
+    { id: "decorated", title: "Decorated", threshold: 75, rarity: "common" },
+    { id: "distinguished", title: "Distinguished", threshold: 150, rarity: "rare" },
+    { id: "illustrious", title: "Illustrious", threshold: 300, rarity: "epic" },
+    { id: "jk2-god", title: "JK2 God", threshold: 550, rarity: "legendary" },
+    { id: "the-goat", title: "The GOAT", threshold: 1337, rarity: "mythic", hidden: true },
   ],
 }
 
@@ -413,7 +429,11 @@ export function catalogueTitleById(id: string): { title: string; rarity: Rarity;
 export function progressFor(ladder: TitleLadder, value: number): LadderProgress {
   const earned = ladder.tiers.filter((t) => value >= t.threshold)
   const current = earned.length ? earned[earned.length - 1] : null
-  const next = ladder.tiers.find((t) => value < t.threshold) ?? null
-  const top = ladder.tiers[ladder.tiers.length - 1].threshold
+  // A hidden tier is never the advertised "next" target — crossing it should
+  // feel like a discovery, not something the bar was counting down to.
+  const next = ladder.tiers.find((t) => value < t.threshold && !t.hidden) ?? null
+  // The bar scales to the highest VISIBLE tier, unless a hidden one has actually
+  // been cleared — only then does the scale (and the tier itself) reveal.
+  const top = [...ladder.tiers].reverse().find((t) => !t.hidden || value >= t.threshold)!.threshold
   return { earned, current, next, value, pct: Math.max(0, Math.min(1, value / top)) }
 }
