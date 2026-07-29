@@ -44,6 +44,24 @@ export type ModelSkin = {
   textures: number
   /** Surface name → texture slot. Empty for the default: it's already in the .glb. */
   surfaces: Record<string, number>
+  /**
+   * File extension per texture slot, when it isn't "jpg". Only set for a slot
+   * whose surface is alpha-tested in the model's default material (see
+   * scripts/glm-graft.mjs's analyseShader) — a JPEG has no alpha channel, so
+   * swapping to one would silently undo the cutout. Absent entirely for every
+   * skin that doesn't need it, which is all of them except Bones' red/blue.
+   */
+  formats?: string[]
+  /**
+   * Slots drawn additively instead of as a diffuse repaint. A JK2 skin can
+   * point a surface at a pure `blendFunc GL_ONE GL_ONE` shader — no opaque
+   * base at all, invisible where the texture is dark and glowing where it's
+   * bright. Andromeda's team skins do this to her entire right arm, and that
+   * translucent energy limb is the model's signature look. A texture swap on
+   * the existing opaque material can't express it, so the viewer rebuilds
+   * these slots as additive emissive materials — see components/model-skin.tsx.
+   */
+  additive?: number[]
 }
 
 export type PlayerModel = {
@@ -155,6 +173,38 @@ export const PLAYER_MODELS: PlayerModel[] = [
     file: "jeditrainer.glb",
     skins: skinsFor("jeditrainer"),
   },
+  // Fan-made models, grafted the same way as the roster above. Only added once
+  // their .glm actually declares the shared 72-bone _humanoid skeleton — several
+  // others Sam sent (rayman, x_Eternal, cal_kestis) use a different, incompatible
+  // bone layout and were left out; see docs/jk2-model-conversion.md §7.8.
+  {
+    id: "andromeda",
+    label: "Andromeda",
+    file: "andromeda.glb",
+    skins: skinsFor("andromeda"),
+  },
+  {
+    id: "bones",
+    label: "Bones",
+    file: "bones.glb",
+    skins: skinsFor("bones"),
+  },
+  {
+    id: "horseton",
+    label: "Horseton",
+    file: "horseton.glb",
+    skins: skinsFor("horseton"),
+  },
+  // Stock JK2, not fan-made — just never converted alongside the rest of the
+  // base roster above. Its "Shadow" skin is a fan retexture (zzz_Crash.pk3,
+  // internally named ShadowRodian) that turned out to share Rodian's exact
+  // surface layout, so it's a skin variant rather than a second model.
+  {
+    id: "rodian",
+    label: "Rodian",
+    file: "rodian.glb",
+    skins: skinsFor("rodian"),
+  },
 ]
 
 /**
@@ -171,7 +221,7 @@ export const SKIN_ASSETS: Record<string, string> = Object.fromEntries(
     model.skins.flatMap((skin) =>
       Array.from({ length: skin.textures }, (_, slot) => [
         skinTextureAsset(model.id, skin.id, slot),
-        `skins/${model.id}/${skin.id}/${slot}.jpg`,
+        `skins/${model.id}/${skin.id}/${slot}.${skin.formats?.[slot] ?? "jpg"}`,
       ]),
     ),
   ),
