@@ -24,7 +24,36 @@
 //     --model bones \
 //     --model horseton \
 //     --model rodian \
+//     --model Zarah \
+//     --model Zarah_Winged \
+//     --model otso \
+//     --model rayman \
+//     --model ^1Eternal \
+//     --model cal_kestis \
+//     --model jedi_zf \
 //     --write lib/model-skins.ts
+//
+// Zarah's, Eternal's, Cal Kestis's and jedi_zf's ids are lowercased/hyphenated
+// below (zarah, zarah-winged, eternal, cal-kestis, jedi-zf) to match this catalogue's
+// convention (see PLAYER_MODELS in lib/player-models.ts) — the --model
+// argument above has to match the folder name on disk, which is Raven- or
+// modder-cased (Eternal's even carries a literal JK2 colour-code prefix), so
+// those don't agree verbatim the way every other entry's does.
+//
+// rodian's shadow/shadowblue/shadowred aren't in that command above — they
+// come from a second, separate mod (zzz_Crash.pk3, "ShadowRodian") that
+// happens to share Rodian's exact .glm byte-for-byte, so its default/blue/red
+// skin files were copied as-is into rodian's own folder as model_shadow.skin,
+// model_shadowblue.skin and model_shadowred.skin (paths inside untouched —
+// still "models/players/ShadowRodian/..."), with ShadowRodian's own texture
+// folder staged alongside rodian's rather than merged into it. One texture it
+// references, models/players/blank/boots_belt_vest(_red|_blue).tga, isn't
+// shipped by either mod; regenerating needs a --assets-fallback root
+// supplying that path — reusing ShadowRodian's own boots_belt_vest as a stand-
+// in reproduces the currently-shipped shadow skin's textures byte-for-byte,
+// which is how this was verified. ShadowRodian's fins.tga also needs its own
+// shader block for translucency (models/players/ShadowRodian/fins, identical
+// to stock Rodian's own) since it isn't shipped with one.
 
 import type { ModelSkin } from "@/lib/player-models"
 
@@ -350,6 +379,154 @@ export const MODEL_SKINS: Record<string, ModelSkin[]> = {
       textures: 8,
       surfaces: { hips: 0, hips_torso: 1, hips_belt: 2, l_leg: 3, r_leg: 4, torso: 1, head: 5, head_fins: 6, l_arm: 1, l_hand: 7, l_hand_wrist: 1, r_arm: 1, r_hand: 7, r_hand_wrist: 1, torso_collar: 4, torso_l_shoulder: 1, torso_r_shoulder: 1, torso_vest: 4 },
       formats: ["jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "png", "jpg"],
+    },
+    {
+      id: "shadowblue",
+      label: "Shadow Blue",
+      textures: 8,
+      surfaces: { hips: 0, hips_torso: 1, hips_belt: 2, l_leg: 3, r_leg: 4, torso: 1, head: 5, head_fins: 6, l_arm: 1, l_hand: 7, l_hand_wrist: 1, r_arm: 1, r_hand: 7, r_hand_wrist: 1, torso_collar: 4, torso_l_shoulder: 1, torso_r_shoulder: 1, torso_vest: 4 },
+      formats: ["jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "png", "jpg"],
+    },
+    {
+      id: "shadowred",
+      label: "Shadow Red",
+      textures: 8,
+      surfaces: { hips: 0, hips_torso: 1, hips_belt: 2, l_leg: 3, r_leg: 4, torso: 1, head: 5, head_fins: 6, l_arm: 1, l_hand: 7, l_hand_wrist: 1, r_arm: 1, r_hand: 7, r_hand_wrist: 1, torso_collar: 4, torso_l_shoulder: 1, torso_r_shoulder: 1, torso_vest: 4 },
+      formats: ["jpg", "jpg", "jpg", "jpg", "jpg", "jpg", "png", "jpg"],
+    },
+  ],
+  zarah: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 3,
+      surfaces: { hips: 0, r_leg: 0, l_leg: 0, torso: 0, head: 1, belts: 2 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 2,
+      surfaces: { hips: 0, r_leg: 0, l_leg: 0, torso: 0, belts: 1 },
+    },
+  ],
+  "zarah-winged": [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 4,
+      surfaces: { hips: 0, r_leg: 0, l_leg: 0, torso: 0, head: 1, belts: 2, wings: 3 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 5,
+      surfaces: { hips: 0, r_leg: 0, l_leg: 0, torso: 0, head: 1, r_arm: 2, r_hand: 2, l_arm: 2, l_hand: 2, hair: 3, belts: 4 },
+    },
+  ],
+  otso: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 1,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 0, l_arm: 0, l_hand: 0, r_arm: 0, r_hand: 0, head: 0 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 1,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 0, l_arm: 0, l_hand: 0, r_arm: 0, r_hand: 0, head: 0 },
+    },
+  ],
+  rayman: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 1,
+      surfaces: { raybod: 0, rayhead: 0, raylfoot: 0, raylhand: 0, rayrfoot: 0, rayrhand: 0 },
+    },
+  ],
+  eternal: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 5,
+      surfaces: {
+        torso: 0,
+        hips_torso: 0,
+        torso_l_shoulder: 0,
+        torso_r_shoulder: 1,
+        r_arm: 1,
+        r_hand: 2,
+        r_hand_wrist: 2,
+        l_arm: 1,
+        l_hand: 3,
+        l_hand_wrist: 1,
+        torso_add3: 2,
+        torso_r_hose: 4,
+      },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 5,
+      surfaces: {
+        torso: 0,
+        hips_torso: 0,
+        torso_l_shoulder: 0,
+        torso_r_shoulder: 1,
+        r_arm: 1,
+        r_hand: 2,
+        r_hand_wrist: 2,
+        l_arm: 1,
+        l_hand: 3,
+        l_hand_wrist: 1,
+        torso_add3: 2,
+        torso_r_hose: 4,
+      },
+    },
+  ],
+  "cal-kestis": [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 5,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 1, l_arm: 2, l_arm_cuff: 2, r_arm: 3, torso_codes1: 4 },
+      formats: ["jpg", "png", "jpg", "png", "jpg"],
+    },
+  ],
+  "jedi-zf": [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 3,
+      surfaces: { torsoe_skin: 0, l_hande: 1, r_hande: 1, hipsd: 2, hipsd_skin: 2, l_legd: 2, r_legd: 2 },
+      additive: [1],
+    },
+    {
+      id: "blue1",
+      label: "Blue1",
+      textures: 2,
+      surfaces: { torsoe_skin: 0, hipsd: 1, hipsd_skin: 1, l_legd: 1, r_legd: 1 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 3,
+      surfaces: { torsoe_skin: 0, l_hande: 1, r_hande: 1, hipsd: 2, hipsd_skin: 2, l_legd: 2, r_legd: 2 },
+      additive: [1],
+    },
+    {
+      id: "red1",
+      label: "Red1",
+      textures: 2,
+      surfaces: { torsoe_skin: 0, hipsd: 1, hipsd_skin: 1, l_legd: 1, r_legd: 1 },
     },
   ],
 }

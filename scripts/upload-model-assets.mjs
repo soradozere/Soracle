@@ -63,6 +63,13 @@ const ASSETS = [
   ["andromeda.glb", "public/models/andromeda.glb"],
   ["bones.glb", "public/models/bones.glb"],
   ["horseton.glb", "public/models/horseton.glb"],
+  ["zarah.glb", "public/models/zarah.glb"],
+  ["zarah-winged.glb", "public/models/zarah-winged.glb"],
+  ["otso.glb", "public/models/otso.glb"],
+  ["rayman.glb", "public/models/rayman.glb"],
+  ["eternal.glb", "public/models/eternal.glb"],
+  ["cal-kestis.glb", "public/models/cal-kestis.glb"],
+  ["jedi-zf.glb", "public/models/jedi-zf.glb"],
   // Stock JK2, converted later than the rest of the base roster above.
   ["rodian.glb", "public/models/rodian.glb"],
   ["saber-hilt.glb", "public/models/saber-hilt.glb"],
