@@ -1,9 +1,9 @@
--- 025_add_player_loadout_fields.sql
+-- 026_add_player_loadout_fields.sql
 --
 -- Rounds out the 3D model loadout started in 023/024: which skin the chosen
 -- model wears, and which idle/action animation clips it plays.
 --
--- Same reasoning as 023_add_player_model.sql and 024_add_player_saber.sql: an
+-- Same reasoning as 024_add_player_model.sql and 025_add_player_saber.sql: an
 -- id, never a path or a raw clip name. Skins resolve through
 -- lib/player-models.ts (findModelSkin, checked against the player's CHOSEN
 -- model — a skin id only means something paired with the model it belongs to),
