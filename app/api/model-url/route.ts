@@ -19,11 +19,27 @@ import { findPropAsset } from "@/lib/prop-assets"
 // route can only ever sign objects we ship — no traversal, no enumeration. It
 // serves three catalogues: player models, the skin textures that repaint them,
 // and the shared props (saber hilt, blade textures) that hang off them.
+//
+// Two shapes: `?id=` resolves one asset (the model .glb), `?ids=a,b,c`
+// resolves a set in ONE storage round trip via createSignedUrls. The batch
+// shape exists because a dressed profile wants up to a dozen small assets at
+// once — skin textures, hilt, blade pair, mines, flag — and minting them one
+// serverless invocation at a time was most of the profile's request count.
+
+/** More than any legitimate loadout can ask for, small enough to stay bounded. */
+const MAX_BATCH = 64
+
+function resolveFile(id: string | null) {
+  return findPlayerModel(id)?.file ?? findSkinAsset(id) ?? findPropAsset(id)
+}
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
+  const batchParam = searchParams.get("ids")
+  if (batchParam !== null) return resolveBatch(batchParam)
+
   const id = searchParams.get("id")
-  const file = findPlayerModel(id)?.file ?? findSkinAsset(id) ?? findPropAsset(id)
+  const file = resolveFile(id)
 
   if (!file) {
     return NextResponse.json({ error: "Unknown model" }, { status: 404 })
@@ -48,6 +64,61 @@ export async function GET(request: Request) {
   } catch (err) {
     return fallback(file, err instanceof Error ? err.message : "Storage unavailable")
   }
+}
+
+async function resolveBatch(param: string) {
+  const ids = param.split(",").filter(Boolean)
+  if (ids.length === 0 || ids.length > MAX_BATCH) {
+    return NextResponse.json({ error: "Bad batch" }, { status: 400 })
+  }
+
+  // All-or-nothing, mirroring useAssetUrls: one unknown id fails the request
+  // rather than handing back a partial set someone then renders half-dressed.
+  const files = ids.map((id) => ({ id, file: resolveFile(id) }))
+  const unknown = files.find((f) => !f.file)
+  if (unknown) {
+    return NextResponse.json({ error: `Unknown asset: ${unknown.id}` }, { status: 404 })
+  }
+
+  try {
+    const supabase = createServiceClient()
+    const { data, error } = await supabase.storage
+      .from(MODEL_BUCKET)
+      .createSignedUrls(
+        files.map((f) => f.file as string),
+        MODEL_URL_TTL_SECONDS,
+      )
+
+    if (error || !data) {
+      return batchFallback(files, error?.message ?? "No signed URLs returned")
+    }
+
+    // createSignedUrls answers in input order; any entry can fail individually.
+    const urls: Record<string, string> = {}
+    for (let i = 0; i < files.length; i++) {
+      const signed = data[i]?.signedUrl
+      if (!signed) return batchFallback(files, data[i]?.error ?? "No signed URL returned")
+      urls[files[i].id] = signed
+    }
+
+    return NextResponse.json(
+      { urls, source: "storage" },
+      { headers: { "Cache-Control": `private, max-age=${Math.floor(MODEL_URL_TTL_SECONDS / 2)}` } },
+    )
+  } catch (err) {
+    return batchFallback(files, err instanceof Error ? err.message : "Storage unavailable")
+  }
+}
+
+function batchFallback(files: { id: string; file: string | undefined | null }[], reason: string) {
+  return NextResponse.json(
+    {
+      urls: Object.fromEntries(files.map((f) => [f.id, `/models/${f.file}`])),
+      source: "local",
+      reason,
+    },
+    { headers: { "Cache-Control": "no-store" } },
+  )
 }
 
 // Before the bucket exists, fall back to the local file under /public so
