@@ -160,7 +160,7 @@ const TWO_MINUTES_MS = 120_000
 // total flag-hold in one match, ms → the 40:00 gate for Marathon Runner.
 const FORTY_MINUTES_MS = 2_400_000
 // flag-hold floor for Efficient Capper's ratio gate — see that family below.
-const FIFTEEN_MINUTES_MS = 900_000
+const TEN_MINUTES_MS = 600_000
 
 // Enemy mines grabbed has always been two columns (red side / blue side) since
 // nobody cares which colour, only that it was the other team's — every combo
@@ -590,29 +590,32 @@ export const ACHIEVEMENTS: AchievementDef[] = [
   },
   {
     // Capture efficiency: captures per flag grab, gated at 10+ grabs (so a lucky
-    // single conversion can't read as 100%) AND 15+ minutes of actual flag hold —
-    // swapped from a 25+ min PLAYED floor on 30 Jul 2026, because match duration
-    // let a lopsided/stacked stomp qualify without the player ever doing much
-    // real capping. Flag hold is a direct measure of capping time instead, and
-    // the swap visibly tightens things: of the 478 matches that cleared the old
-    // gate, 209 don't hold up under this one (only 1 new match qualifies that
-    // hadn't before). Ratios hold the same shape at the new gate (270 matches):
-    // 17%+:58, 20%+:39, 25%+:19, 30%+:4, 40%+:1 — thresholds unchanged.
+    // single conversion can't read as 100%), 25+ minutes PLAYED, and 10+ minutes
+    // of actual flag hold — belt and braces against two different ways a match
+    // could inflate the ratio without real sustained capping: a short/stacked
+    // stomp (caught by the 25-min played floor) or a long match where this
+    // player barely touched the flag (caught by the 10-min hold floor).
+    // Calibrated 30 Jul 2026 against the 379 matches clearing all three gates:
+    // 15%+:21, 20%+:14, 25%+:12, 30%+:2, 40%+:0 — Prime Capper currently
+    // unclaimed (Interlude's 46% match is 24 min played, just short of the
+    // 25-min floor).
     // get() reports whole percentage points (not a 0-1 ratio) so thresholds are
     // plain integers like everywhere else in the file — see the "percent" unit.
     id: "efficient-capper",
     title: "Handy Capper",
     category: "match",
     icon: "rogue-one", // shares Pro Rusher's crest — another capture-efficiency feat
-    condition: "Captures per flag grab, 10+ grabs and 15+ min flag hold",
+    condition: "Captures per flag grab, 10+ grabs, 25+ min played and 10+ min flag hold",
     unit: "percent",
     metric: {
       type: "matchMax",
       get: (s) =>
-        s.flag_grabs >= 10 && s.flag_hold_ms >= FIFTEEN_MINUTES_MS ? Math.round((s.captures / s.flag_grabs) * 100) : 0,
+        s.flag_grabs >= 10 && (s.time_played ?? 0) >= 25 && s.flag_hold_ms >= TEN_MINUTES_MS
+          ? Math.round((s.captures / s.flag_grabs) * 100)
+          : 0,
     },
     ranks: [
-      { threshold: 17, rarity: "common", title: "Handy Capper" },
+      { threshold: 15, rarity: "common", title: "Handy Capper" },
       { threshold: 20, rarity: "rare", title: "Sharp Capper" },
       { threshold: 25, rarity: "epic", title: "Precision Capper" },
       { threshold: 30, rarity: "legendary", title: "Surgical Capper" },
