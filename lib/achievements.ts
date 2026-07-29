@@ -224,10 +224,14 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
     def.metric.type === "matchPredicate" ||
     (def.metric.type === "seqDerived" && !!def.metric.best)
 
-  // Progress label toward `t`; `next` = the roman numeral being worked toward.
-  const label = (t: number, next: string | null) => {
-    const bar = `${fmtVal(value, def)} / ${fmtVal(t, def)}`
+  // Progress label toward `rank`; `next` = the roman numeral being worked toward.
+  // A computed-tier metric's value/threshold are internal tier numbers (Triple
+  // Threat, Cap God's KD-gated top rank), not real stats, so requirementLabel
+  // stands in for the whole "X / Y" bar rather than just the target side of it.
+  const label = (rank: Rank, next: string | null) => {
     const arrow = next ? ` → ${next}` : ""
+    if (rank.requirementLabel) return `${rank.requirementLabel}${arrow}`
+    const bar = `${fmtVal(value, def)} / ${fmtVal(rank.threshold, def)}`
     return `${best ? "best " : ""}${bar}${arrow}`
   }
 
@@ -241,17 +245,16 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
     let progressPct: number | null
     let progressLabel: string | null
     if (!earned) {
-      const t = ranks[0].threshold
-      progressPct = clampPct(value / t)
-      progressLabel = label(t, romanFor(1))
+      progressPct = clampPct(value / ranks[0].threshold)
+      progressLabel = label(ranks[0], romanFor(1))
     } else if (next) {
       progressPct = clampPct(value / next.threshold)
-      progressLabel = label(next.threshold, romanFor(unlocked + 1))
+      progressLabel = label(next, romanFor(unlocked + 1))
     } else {
       // Top rank reached — no "next", so surface the achieved threshold instead
       // of a bare "MAXED" (which would hide the number the other states show).
       progressPct = 1
-      progressLabel = `MAXED · ${fmtVal(cur.threshold, def)}${def.exact ? "" : "+"}`
+      progressLabel = `MAXED · ${cur.requirementLabel ?? `${fmtVal(cur.threshold, def)}${def.exact ? "" : "+"}`}`
     }
     return {
       id: def.id,
@@ -270,7 +273,9 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
       earnedMatchId: earned ? crossingMatchId(cur.threshold) : null,
       // The current rank's own threshold — the number the tile's next/MAXED label
       // doesn't show once you've climbed past a rank (e.g. Batcher II = 80+).
-      earnedRequirement: earned ? `${fmtVal(cur.threshold, def)}${def.exact ? "" : "+"}` : null,
+      earnedRequirement: earned
+        ? (cur.requirementLabel ?? `${fmtVal(cur.threshold, def)}${def.exact ? "" : "+"}`)
+        : null,
       earnedWith: earned ? crossingWith(cur.threshold) : null,
       progressPct,
       progressLabel,
@@ -304,7 +309,7 @@ function viewFor(def: AchievementDef, seq: AchMatch[]): AchievementView {
     earnedWith: earned ? crossingWith(threshold) : null,
     // Boolean feats have no meaningful partial progress; scalar ones do.
     progressPct: earned ? 1 : predicate ? null : clampPct(value / threshold),
-    progressLabel: earned || predicate ? null : label(threshold, null),
+    progressLabel: earned || predicate ? null : label({ threshold, rarity }, null),
     value,
   }
 }
