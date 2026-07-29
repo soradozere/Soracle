@@ -4,7 +4,7 @@ import { useState } from "react"
 import Link from "next/link"
 import { Crest, CrestStyles } from "@/components/achievement-crest"
 import { fmtDate, roman } from "@/lib/achievement-format"
-import { rarityColor, rarityLabel, type AchievementSummary } from "@/lib/achievement-pages"
+import { rarityColor, rarityLabel, type AchievementSummary, type ClaimedSecret } from "@/lib/achievement-pages"
 import type { AchievementCategory, Rarity } from "@/lib/achievement-meta"
 
 // The /achievements index: what's recently been earned, then every crest in the
@@ -79,12 +79,14 @@ function FeedRow({ item }: { item: FeedItem }) {
 export function AchievementsIndex({
   summaries,
   feed,
+  claimedSecrets,
   sealedSecrets,
   playerCount,
   totalUnlocks,
 }: {
   summaries: AchievementSummary[]
   feed: FeedItem[]
+  claimedSecrets: ClaimedSecret[]
   sealedSecrets: number
   playerCount: number
   totalUnlocks: number
@@ -158,6 +160,26 @@ export function AchievementsIndex({
           </Link>
         ))}
       </div>
+
+      {claimedSecrets.length > 0 && (
+        <>
+          <h2 className="ach-h2">The vault · Claimed</h2>
+          <p className="text-[#8892a0] text-sm max-w-[70ch] mb-3">
+            {claimedSecrets.length === 1 ? "One secret crest has" : `${claimedSecrets.length} secret crests have`} been
+            claimed. Once someone holds a one-of-one, its condition is revealed — nobody else can ever earn it.
+          </p>
+          <div className="ach-grid mb-2">
+            {claimedSecrets.map((s) => (
+              <Link key={s.id} href={`/achievements/${s.id}`} className="ach-card">
+                <Crest a={s.view} showProgress={false} />
+                <span className="ach-card-meta" data-held="y">
+                  Held by {s.playerName}
+                </span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
 
       {sealedSecrets > 0 && (
         <>
