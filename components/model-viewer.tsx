@@ -929,18 +929,6 @@ export function ModelViewer({
   )
 }
 
-/** Respects the OS "reduce motion" setting — we don't auto-animate if it's on. */
-export function usePrefersReducedMotion() {
-  const [reduced, setReduced] = useState(false)
-
-  useEffect(() => {
-    if (typeof window === "undefined" || !window.matchMedia) return
-    const query = window.matchMedia("(prefers-reduced-motion: reduce)")
-    const update = () => setReduced(query.matches)
-    update()
-    query.addEventListener("change", update)
-    return () => query.removeEventListener("change", update)
-  }, [])
-
-  return reduced
-}
+// usePrefersReducedMotion used to live here; it moved to
+// hooks/use-prefers-reduced-motion.ts so importing it doesn't pull this whole
+// module — and three.js with it — into the caller's bundle.

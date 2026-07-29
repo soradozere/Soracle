@@ -3,7 +3,7 @@
 import { useCallback, useState } from "react"
 import dynamic from "next/dynamic"
 import { Bomb, Boxes, Flag, Monitor, Palette, Pause, Play, RotateCw, Smartphone } from "lucide-react"
-import { usePrefersReducedMotion } from "@/components/model-viewer"
+import { usePrefersReducedMotion } from "@/hooks/use-prefers-reduced-motion"
 import { useModelUrl } from "@/hooks/use-model-url"
 import { DEFAULT_SKIN, PLAYER_MODELS, findPlayerModel } from "@/lib/player-models"
 import { SABER_COLOURS } from "@/lib/saber-colours"
