@@ -947,6 +947,7 @@ function EditLoadoutDialog({
                 {PLAYER_MODELS.map((m) => (
                   <SelectItem key={m.id} value={m.id}>
                     {m.label}
+                    {m.credit ? <span className="text-[#8892a0]"> — Credits: {m.credit}</span> : null}
                   </SelectItem>
                 ))}
               </SelectContent>
