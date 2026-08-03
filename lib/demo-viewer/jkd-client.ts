@@ -142,7 +142,7 @@ export class JkdEngine {
       this.opts.onKill?.({ target, attacker, mod, viewed })
     }
     window.JKD_onCenterPrint = (text: string) => {
-      const clean = (text || "").replace(/\^./g, "").replace(/\s+/g, " ").trim()
+      const clean = stripColourCodes(text || "").replace(/\s+/g, " ").trim()
       if (clean) this.opts.onAnnouncement?.(clean)
     }
     window.JKD_playbackStopped = (realDuration: number) => {
@@ -375,10 +375,34 @@ export class JkdEngine {
   }
 }
 
-/** Strip JK2's `^1`-style colour codes; they are markup, not part of the name. */
+/**
+ * Strip colour markup from a name.
+ *
+ * Stock JK2 has one form, `^1`. The community's clients add three more, and all
+ * of them carry a run of hex digits that a naive `^` + one character strip
+ * leaves stranded in the middle of the name -- which is how "Prismatic" was
+ * appearing as "a00Pa00rism0b2a19ct70cid0bc" and "rezenate" as
+ * "a644468arezenate".
+ *
+ *   ^x + 3 hex   12-bit RGB
+ *   ^X + 6 hex   24-bit RGB
+ *   ^Y + 8 hex   32-bit RGBA
+ *
+ * Longest first, and case matters: `^x` and `^X` take different digit counts,
+ * so a case-insensitive match would eat the wrong number of characters.
+ */
+function stripColourCodes(s: string): string {
+  return s
+    .replace(/\^Y[0-9a-fA-F]{8}/g, "")
+    .replace(/\^X[0-9a-fA-F]{6}/g, "")
+    .replace(/\^x[0-9a-fA-F]{3}/g, "")
+    .replace(/\^./g, "")
+}
+
 function playerNameFromConfigString(info: string, clientNum: number): string {
   const raw = /^n\\([^\\]*)/.exec(info)?.[1]
-  return raw ? raw.replace(/\^./g, "") : `client ${clientNum}`
+  const name = raw ? stripColourCodes(raw).trim() : ""
+  return name || `client ${clientNum}`
 }
 
 function loadScript(src: string): Promise<void> {
