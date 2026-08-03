@@ -41,6 +41,11 @@ export interface JkdEngineOptions {
   onStatus?: (status: string) => void
   onReady?: () => void
   onKill?: (kill: KillEvent) => void
+  /**
+   * Flag and scoring announcements, already stripped of colour codes. These are
+   * the engine's centre prints, forwarded because it can no longer draw them.
+   */
+  onAnnouncement?: (text: string) => void
   onPlaybackEnded?: (realDurationMs: number) => void
 }
 
@@ -58,6 +63,7 @@ declare global {
     Module?: EmscriptenModule
     JKD_ready?: () => void
     JKD_onKill?: (target: number, attacker: number, mod: number, viewed: number) => void
+    JKD_onCenterPrint?: (text: string) => void
     JKD_playbackStopped?: (realDuration: number) => void
     JKD_seekDone?: () => void
   }
@@ -134,6 +140,10 @@ export class JkdEngine {
 
     window.JKD_onKill = (target, attacker, mod, viewed) => {
       this.opts.onKill?.({ target, attacker, mod, viewed })
+    }
+    window.JKD_onCenterPrint = (text: string) => {
+      const clean = (text || "").replace(/\^./g, "").replace(/\s+/g, " ").trim()
+      if (clean) this.opts.onAnnouncement?.(clean)
     }
     window.JKD_playbackStopped = (realDuration: number) => {
       this.opts.onPlaybackEnded?.(realDuration)
