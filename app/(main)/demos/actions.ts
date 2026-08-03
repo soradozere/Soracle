@@ -6,6 +6,7 @@ import { createServiceClient } from "@/lib/supabase/admin"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
 import { titleIssue } from "@/lib/demo-title"
 import { normaliseTags } from "@/lib/demo-tags"
+import { maskSlurs } from "@/lib/profanity"
 import { createDemoUploadUrl, deleteDemoFile, headDemoFile } from "@/lib/r2"
 
 const GAMETYPES = ["CTF", "FFA", "TeamFFA"] as const
@@ -186,12 +187,43 @@ async function requireAdmin(): Promise<{ ok: true } | { ok: false; error: string
   return isAdmin ? { ok: true } : { ok: false, error: "Not authorized." }
 }
 
-// Admin-only: correct a title, retag players, fix the map/gametype, credit a
-// different uploader, or add a description -- all the metadata that gets
-// entered once at upload time and occasionally needs a fix afterwards.
-export async function updateDemo(demoId: string, formData: FormData): Promise<ActionResult> {
+/**
+ * Who may edit a demo's details: an admin, or the player who uploaded it.
+ *
+ * Uploaders get it because the alternative is asking an admin to fix every
+ * typo in a title. They are deliberately not given everything an admin has --
+ * see updateDemo, where the fields that decide what a demo *is* to the rest of
+ * the site stay admin-only.
+ */
+async function resolveEditor(
+  demoId: string,
+): Promise<{ ok: true; isAdmin: boolean } | { ok: false; error: string }> {
   const admin = await requireAdmin()
-  if (!admin.ok) return { success: false, error: admin.error }
+  if (admin.ok) return { ok: true, isAdmin: true }
+
+  const cookieStore = await cookies()
+  const playerId = verifySessionValue(cookieStore.get(PLAYER_SESSION_COOKIE)?.value)
+  if (!playerId) return { ok: false, error: "Not authorized." }
+
+  const supabase = createServiceClient()
+  const { data: demo } = await supabase
+    .from("demos")
+    .select("uploader_player_id")
+    .eq("id", demoId)
+    .maybeSingle()
+  if (!demo || demo.uploader_player_id !== playerId) {
+    return { ok: false, error: "You can only edit demos you uploaded." }
+  }
+  return { ok: true, isAdmin: false }
+}
+
+// Correct a title, retag players, fix the map/gametype, credit a different
+// uploader, or add a description -- the metadata entered once at upload time
+// that occasionally needs a fix afterwards. Open to the uploader as well as to
+// admins, minus the two fields below that decide what a demo is to everyone else.
+export async function updateDemo(demoId: string, formData: FormData): Promise<ActionResult> {
+  const editor = await resolveEditor(demoId)
+  if (!editor.ok) return { success: false, error: editor.error }
 
   const title = String(formData.get("title") ?? "").trim()
   const map = String(formData.get("map") ?? "").trim()
@@ -213,6 +245,12 @@ export async function updateDemo(demoId: string, formData: FormData): Promise<Ac
   }
 
   const supabase = createServiceClient()
+  // Who uploaded it and who it is about are the two fields that decide how a
+  // demo is credited and where it surfaces, so they stay with admins -- an
+  // uploader editing their own clip has no business reassigning either.
+  const adminOnly = editor.isAdmin
+    ? { uploader_player_id: uploaderPlayerId, protagonist_player_id: protagonistPlayerId }
+    : {}
   const { error: updateError } = await supabase
     .from("demos")
     .update({
@@ -221,9 +259,8 @@ export async function updateDemo(demoId: string, formData: FormData): Promise<Ac
       gametype,
       recorded_at: recordedAt,
       description,
-      uploader_player_id: uploaderPlayerId,
-      protagonist_player_id: protagonistPlayerId,
       tags,
+      ...adminOnly,
     })
     .eq("id", demoId)
   if (updateError) return { success: false, error: updateError.message }
@@ -433,7 +470,7 @@ export async function addComment(demoId: string, body: string): Promise<ActionRe
   const supabase = createServiceClient()
   const { data, error } = await supabase
     .from("demo_comments")
-    .insert({ demo_id: demoId, player_id: playerId, body: text })
+    .insert({ demo_id: demoId, player_id: playerId, body: maskSlurs(text) })
     .select("id")
     .single()
   if (error || !data) return { success: false, error: error?.message ?? "Could not post that comment." }

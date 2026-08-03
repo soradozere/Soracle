@@ -16,6 +16,7 @@ import {
 } from "lucide-react"
 import {
   JkdEngine,
+  getEngineCanvas,
   FIXED_FOV,
   RANGE_DEFAULT,
   RANGE_MAX,
@@ -38,6 +39,15 @@ const CAMERAS: Array<{ id: CameraMode; label: string; icon: typeof Eye }> = [
 ]
 
 const DEFAULT_VOLUME = 0.8
+
+/**
+ * Free-camera look speed. The engine's own default of 5 is set for playing
+ * with a mouse in hand all match; flying a camera around to look at something
+ * wants to cover ground, so the whole range sits higher.
+ */
+const SENSITIVITY_MIN = 20
+const SENSITIVITY_MAX = 40
+const SENSITIVITY_DEFAULT = 20
 
 // Kept out of the engine because the engine cannot act on it after boot -- the
 // choice has to survive a page load to be applied at all.
@@ -69,7 +79,10 @@ interface DemoViewerProps {
 }
 
 export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName, onPlaybackStarted }: DemoViewerProps) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  // Where the engine's canvas gets parked. React owns this div; it does not
+  // own the canvas inside it (see getEngineCanvas).
+  const holderRef = useRef<HTMLDivElement>(null)
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<JkdEngine | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
@@ -91,7 +104,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
   // Engine settings the viewer can reach, mirrored here only so the controls
   // can render their current position -- the engine remains the owner.
   const [range, setRange] = useState(RANGE_DEFAULT)
-  const [sensitivity, setSensitivity] = useState(5)
+  const [sensitivity, setSensitivity] = useState(SENSITIVITY_DEFAULT)
   const [invertLook, setInvertLook] = useState(false)
   const [smoothMouse, setSmoothMouse] = useState(true)
   const [highDetail, setHighDetail] = useState(true)
@@ -145,6 +158,12 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
   // Which recording the engine currently holds, so a route change to a
   // different demo can be told apart from a re-render of the same one.
   const loadedUrlRef = useRef<string | null>(null)
+  // The chosen speed, readable from callbacks that must not be rebuilt every
+  // time it changes -- a seek has to put it back (see requestSeek).
+  const speedRef = useRef(1)
+  // Where the scrubber currently sits, so the release handler knows the target
+  // even though it fires on the window rather than on the input.
+  const scrubValueRef = useRef(0)
   // Held in a ref so the polling effect never has to restart just because the
   // parent re-rendered and handed us a new closure.
   const onStartedRef = useRef(onPlaybackStarted)
@@ -230,8 +249,15 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
   // ---- boot ---------------------------------------------------------------
 
   useEffect(() => {
-    if (!canvasRef.current) return
+    if (!holderRef.current) return
     let cancelled = false
+
+    // Reclaim the page's one canvas. On a first visit this creates it; on a
+    // move from one demo to another it takes the live one -- context and all --
+    // out of the unmounted viewer and puts it in this one.
+    const canvas = getEngineCanvas()
+    holderRef.current.appendChild(canvas)
+    canvasRef.current = canvas
 
     // Read here rather than in a state initialiser: this only exists in the
     // browser, and the engine needs it before its first frame.
@@ -240,7 +266,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
 
     const engine = new JkdEngine({
       baseUrl: base,
-      canvas: canvasRef.current,
+      canvas,
       highDetail: detail,
       onStatus: (s) => {
         if (cancelled) return
@@ -308,6 +334,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
         engine.setPaused(false)
         engine.setVolume(DEFAULT_VOLUME)
         engine.setFov(FIXED_FOV)
+        engine.setSensitivity(SENSITIVITY_DEFAULT)
         return applyLinkState(engine).then(() => applyDefaultFollow(engine))
       })
       .catch((err: Error) => {
@@ -374,6 +401,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
         engine.setPaused(false)
         engine.setFov(FIXED_FOV)
         setCamera("follow")
+        speedRef.current = 1
         setSpeed(1)
         setPaused(false)
         return applyDefaultFollow(engine)
@@ -449,6 +477,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
 
   const chooseSpeed = useCallback((s: number) => {
     engineRef.current?.setSpeed(s)
+    speedRef.current = s
     setSpeed(s)
   }, [])
 
@@ -497,6 +526,11 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
       return
     }
     void engine.seekTo(targetMs).then(() => {
+      // Going backwards reopens the demo, and the engine treats that as a
+      // disconnect -- which resets timescale to 1 "in case we dropped from a
+      // timescaled demo". Watching in slow motion is not dropping out of it,
+      // so the chosen speed goes back on afterwards.
+      engine.setSpeed(speedRef.current)
       const queued = pendingTargetRef.current
       pendingTargetRef.current = null
       if (queued !== null) {
@@ -515,6 +549,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
     // Scrubbing back into the demo is its own way of un-ending it.
     setEnded(false)
     draggingRef.current = true
+    scrubValueRef.current = engine.getElapsed()
     resumeAfterSeekRef.current = !paused
     engine.setPaused(true)
     setPaused(true)
@@ -522,6 +557,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
 
   const onScrubMove = useCallback(
     (value: number) => {
+      scrubValueRef.current = value
       setElapsed(value)
       if (draggingRef.current) requestSeek(value, false)
     },
@@ -536,6 +572,27 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
     },
     [requestSeek],
   )
+
+  /**
+   * End the drag wherever the pointer happens to be let go.
+   *
+   * Safari does not reliably deliver pointerup to the range input the gesture
+   * started on, so a handler bound there can simply never run: the drag stays
+   * open, the scrubber keeps following the mouse with no button held, and the
+   * next click is what finally commits it. The window always sees the release.
+   */
+  useEffect(() => {
+    const end = () => {
+      if (!draggingRef.current) return
+      onScrubEnd(scrubValueRef.current)
+    }
+    window.addEventListener("pointerup", end)
+    window.addEventListener("pointercancel", end)
+    return () => {
+      window.removeEventListener("pointerup", end)
+      window.removeEventListener("pointercancel", end)
+    }
+  }, [onScrubEnd])
 
   const changeRange = useCallback((next: number) => {
     const v = clamp(next, RANGE_MIN, RANGE_MAX)
@@ -728,19 +785,13 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
         fullscreen ? "rounded-none" : "rounded-xl",
       )}
     >
-      <canvas
-        ref={canvasRef}
-        // The engine looks its render target up by this exact id.
-        id="canvas"
-        onContextMenu={(e) => e.preventDefault()}
-        // The engine owns the drawing buffer -- it picks its own resolution from
-        // r_customwidth and sizes the canvas to match. Setting width/height here
-        // would leave its viewport rendering into one corner of a larger buffer,
-        // so this only ever scales the result: object-contain keeps the aspect
-        // ratio the engine chose rather than stretching the picture.
-        className="absolute inset-0 h-full w-full object-contain"
-        tabIndex={-1}
-      />
+      {/* The canvas lives inside here but is not rendered by React -- it is a
+          per-page singleton that survives moving between demos, because the
+          WebGL context on it cannot be moved to a replacement element. The
+          engine owns the drawing buffer too: it picks its own resolution and
+          sizes the canvas to match, so nothing here sets width/height, and
+          object-contain (on the canvas itself) only scales the result. */}
+      <div ref={holderRef} className="absolute inset-0" />
 
       {/* Match clock. Always up, not tied to the auto-hiding chrome: on a full
           match this is what tells you whether you're watching the first minute
@@ -877,10 +928,10 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
             <SettingSlider
               label="Mouse sensitivity"
               value={sensitivity}
-              display={sensitivity.toFixed(1)}
-              min={1}
-              max={15}
-              step={0.5}
+              display={sensitivity.toFixed(0)}
+              min={SENSITIVITY_MIN}
+              max={SENSITIVITY_MAX}
+              step={1}
               onChange={changeSensitivity}
             />
             <SettingToggle label="Invert look" on={invertLook} onChange={toggleInvert} />
@@ -903,9 +954,12 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
             disabled={!ready || span <= 1000}
             onPointerDown={onScrubStart}
             onChange={(e) => onScrubMove((Number(e.target.value) / 1000) * span)}
-            onPointerUp={(e) =>
+            // The release is handled on the window, not here -- see the effect
+            // by onScrubEnd for why.
+            onKeyUp={(e) => {
+              if (draggingRef.current) return
               onScrubEnd((Number((e.target as HTMLInputElement).value) / 1000) * span)
-            }
+            }}
             className="h-1 flex-1 cursor-pointer accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
           />
           <span className="tabular-nums">{formatTime(span)}</span>
