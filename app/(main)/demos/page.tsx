@@ -1,51 +1,61 @@
-"use client"
+import type { Metadata } from "next"
+import { cookies } from "next/headers"
+import { createClient } from "@/lib/supabase/server"
+import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
+import Link from "next/link"
+import { ListVideo } from "lucide-react"
+import { listDemos, listPlaylists } from "@/lib/demos-server"
+import { DemoLibrary } from "@/components/demo-library"
 
-import { useSearchParams } from "next/navigation"
-import { Suspense } from "react"
-import { DemoViewer } from "@/components/demo-viewer"
+export const metadata: Metadata = {
+  title: "Demos — JK2 Capture the Flag",
+  description: "Watch recorded matches in the browser. Switch POV, or detach the camera and fly around.",
+}
 
-/**
- * Demo viewer.
- *
- * Takes the demo to play from the URL for now -- `?demo=<url>&duration=<seconds>`
- * -- so it can be pointed at anything while the library and its ingest are still
- * being built. Deep links into a moment and a camera come next; the viewer
- * already exposes everything they need.
- */
-function DemosPage() {
-  const params = useSearchParams()
-  const demo = params.get("demo")
-  const duration = Number(params.get("duration") || 0) * 1000
+async function uploaderContext() {
+  const cookieStore = await cookies()
+  const playerId = verifySessionValue(cookieStore.get(PLAYER_SESSION_COOKIE)?.value)
+
+  const supabase = await createClient()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  const isAdmin = user ? (await supabase.rpc("is_admin")).data === true : false
+
+  const { data: players } = await supabase.from("players").select("id, name").order("name")
+  return { canUpload: !!playerId || isAdmin, isAdmin, players: players ?? [] }
+}
+
+export default async function DemosPage() {
+  const [demos, playlists, { canUpload, isAdmin, players }] = await Promise.all([
+    listDemos(),
+    listPlaylists(),
+    uploaderContext(),
+  ])
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
       <header className="mb-6">
-        <h1 className="text-2xl font-semibold tracking-tight">Demos</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Watch a recorded match in the browser. Switch between any player&apos;s point of view, or
-          detach the camera and fly around.
-        </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Demos</h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Watch a recorded match in the browser. Switch between any player&apos;s point of view, or
+              detach the camera and fly around.
+            </p>
+          </div>
+          <Link
+            href="/demos/playlists"
+            className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+          >
+            <ListVideo className="h-4 w-4" />
+            Playlists
+            {playlists.length > 0 && <span className="text-muted-foreground">({playlists.length})</span>}
+          </Link>
+        </div>
       </header>
 
-      {demo ? (
-        <div className="aspect-video w-full">
-          <DemoViewer demoUrl={demo} durationMs={duration} />
-        </div>
-      ) : (
-        <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
-          No demo selected. Add <code className="font-mono">?demo=</code> with the URL of a{" "}
-          <code className="font-mono">.dm_15</code> file.
-        </div>
-      )}
+      <DemoLibrary demos={demos} players={players} canUpload={canUpload} isAdmin={isAdmin} />
     </main>
-  )
-}
-
-export default function Page() {
-  // useSearchParams needs a Suspense boundary to keep the route static-friendly.
-  return (
-    <Suspense fallback={null}>
-      <DemosPage />
-    </Suspense>
   )
 }
