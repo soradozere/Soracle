@@ -290,7 +290,10 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
       if (!engine) return
       e.preventDefault()
       const step = e.deltaY > 0 ? 1 : -1
-      if (camera === "chase" || follow >= 0) {
+      // Distance only means something in chase. Following a player now puts you
+      // in their eyes, where there is no distance to change -- so the wheel goes
+      // back to field of view there, as it does for the free camera.
+      if (camera === "chase") {
         const next = clamp(engine.getCvarNumber("cg_thirdPersonRange") + step * 15, 20, 400)
         engine.setChaseRange(next)
       } else {
@@ -298,7 +301,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
         engine.setFov(next)
       }
     },
-    [camera, follow],
+    [camera],
   )
 
   // Nothing is being watched until a snapshot has arrived; asking before that
