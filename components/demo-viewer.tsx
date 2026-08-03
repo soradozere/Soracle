@@ -48,6 +48,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
   const [span, setSpan] = useState(Math.max(durationMs, 1000))
   const [seeking, setSeeking] = useState(false)
   const [killMessage, setKillMessage] = useState<{ lead: string; who: string } | null>(null)
+  const [announcement, setAnnouncement] = useState<string | null>(null)
 
   // Scrub state lives in refs: the drag handlers run far more often than React
   // should re-render, and the gesture has to survive a re-render mid-drag.
@@ -55,6 +56,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
   const resumeAfterSeekRef = useRef(false)
   const pendingTargetRef = useRef<number | null>(null)
   const killShownAtRef = useRef(-1)
+  const announceShownAtRef = useRef(-1)
 
   const base =
     engineBaseUrl ?? process.env.NEXT_PUBLIC_DEMO_ENGINE_URL ?? "http://127.0.0.1:8090"
@@ -96,6 +98,11 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
           return
         }
         killShownAtRef.current = engine.getElapsed()
+      },
+      onAnnouncement: (text) => {
+        if (cancelled) return
+        setAnnouncement(text)
+        announceShownAtRef.current = engine.getElapsed()
       },
       onPlaybackEnded: (real) => {
         if (cancelled) return
@@ -162,6 +169,13 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
         if (age < 0 || age > 3000) {
           killShownAtRef.current = -1
           setKillMessage(null)
+        }
+      }
+      if (announceShownAtRef.current >= 0 && now >= 0) {
+        const age = now - announceShownAtRef.current
+        if (age < 0 || age > 4000) {
+          announceShownAtRef.current = -1
+          setAnnouncement(null)
         }
       }
     }, 200)
@@ -327,6 +341,15 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
       {ready && !failed && camera === "free" && (
         <div className="pointer-events-none absolute inset-x-0 top-5 text-center text-xl font-semibold text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.85)]">
           Free camera
+        </div>
+      )}
+
+      {/* Flag and scoring announcements, forwarded from the engine's centre
+          prints. Sits above the kill message, since the two often land together
+          -- someone scoring and someone dying tend to be the same moment. */}
+      {announcement && (
+        <div className="pointer-events-none absolute inset-x-0 top-[18%] text-center text-lg font-semibold uppercase tracking-wide text-cyan-300 drop-shadow-[0_2px_14px_rgba(0,0,0,0.9)]">
+          {announcement}
         </div>
       )}
 
