@@ -314,9 +314,16 @@ export class JkdEngine {
     }
   }
 
-  /** -1 watches whoever the demo recorded; otherwise a client number. */
+  /**
+   * -1 watches whoever the demo recorded; otherwise a client number.
+   *
+   * Watching someone else is always third person. Their own recorded view is
+   * available (cg_demoFollowEyes) but is not what you want by default -- a demo
+   * reads better from behind the player than from inside their head.
+   */
   setFollow(clientNum: number) {
     this.setCvar("cg_demoFollow", clientNum)
+    if (clientNum >= 0) this.setCvar("cg_thirdPerson", 1)
   }
 
   setFov(degrees: number) {
