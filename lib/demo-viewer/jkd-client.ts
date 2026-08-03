@@ -10,7 +10,23 @@
  * the engine, so the UI cannot drift out of sync with what is actually on screen.
  */
 
-export type CameraMode = "follow" | "chase" | "free"
+export type CameraMode = "follow" | "free"
+
+/**
+ * Field of view, fixed.
+ *
+ * Stock JK2 ships 110 and the wheel used to drive this, but a demo is watched,
+ * not played -- there is no reason for the framing to move between clips, and
+ * one wide setting reads better than whatever the last viewer left it on.
+ */
+export const FIXED_FOV = 120
+
+/** Camera distances, in the engine's units. 80 is JK2's own default. */
+export const RANGE_MIN = 0
+export const RANGE_MAX = 400
+export const RANGE_DEFAULT = 80
+/** Below this the camera would be inside the player, so it becomes first person. */
+const FIRST_PERSON_BELOW = 16
 
 export interface DemoPlayerInfo {
   clientNum: number
@@ -38,6 +54,15 @@ export interface JkdEngineOptions {
    */
   baseUrl: string
   canvas: HTMLCanvasElement
+  /**
+   * Render at the display's real pixel density (the default), or at CSS
+   * pixels, which is a quarter of the pixels on a 2x screen.
+   *
+   * Only settable here, not later: the engine reads r_highdpi when it creates
+   * its window, and changing it afterwards needs a vid_restart -- which this
+   * build survives with a black world, so it is not an option.
+   */
+  highDetail?: boolean
   onStatus?: (status: string) => void
   onReady?: () => void
   onKill?: (kill: KillEvent) => void
@@ -55,6 +80,11 @@ interface EmscriptenModule {
   setStatus: (text: string) => void
   cwrap: (name: string, ret: string | null, args: string[]) => (...a: unknown[]) => never
   FS: { writeFile: (path: string, data: Uint8Array) => void }
+  /** Emscripten's own rAF loop controls, exported by the engine's build. */
+  pauseMainLoop?: () => void
+  resumeMainLoop?: () => void
+  /** SDL's Emscripten audio backend, whose context is the real sound switch. */
+  SDL2?: { audioContext?: AudioContext }
   [key: string]: unknown
 }
 
@@ -70,6 +100,58 @@ declare global {
 }
 
 /**
+ * Keep the engine's keyboard handlers out of the page's own text fields.
+ *
+ * SDL's Emscripten backend binds keydown, keypress and keyup to `window` and
+ * calls preventDefault() on them while text input is active -- which JK2MV
+ * switches on at startup and never switches off (IN_Init calls
+ * SDL_StartTextInput unconditionally). The keypress half is what actually
+ * swallows characters: a cancelled keypress means the browser never inserts
+ * anything into the focused field, so every dialog on a page running the
+ * engine silently refuses to accept typing. The keydown half separately drives
+ * the camera, so editing a title used to pan the view as you typed.
+ *
+ * This listener sits on the same node in the same phase as SDL's, but is
+ * registered before the engine boots, so it runs first and can take the event
+ * away with stopImmediatePropagation. Bubbling at `window` is the very end of
+ * the propagation path -- React, Radix and every other listener have already
+ * had their turn by then, so nothing but the engine loses out.
+ */
+function pageOwnsKeyboard(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false
+  if (target.isContentEditable) return true
+  if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.tagName === "SELECT") return true
+  // Radix puts dialogs, menus and select popups in portals at the end of
+  // <body>, so they are never inside the player's own subtree. Match on the
+  // role they announce themselves with instead of on where they sit.
+  return !!target.closest('[role="dialog"],[role="menu"],[role="listbox"],[role="textbox"]')
+}
+
+let keyboardGuardInstalled = false
+
+/**
+ * Resolves when the page's engine is up, whoever started it.
+ *
+ * Set by the first mount and never cleared: a wasm module cannot be unloaded,
+ * so this doubles as the record that an engine exists and is (or will be)
+ * usable, which is what lets a later mount attach rather than fail.
+ */
+let bootPromise: Promise<void> | null = null
+
+function installKeyboardGuard() {
+  if (keyboardGuardInstalled) return
+  keyboardGuardInstalled = true
+  const guard = (e: Event) => {
+    if (pageOwnsKeyboard(e.target)) e.stopImmediatePropagation()
+  }
+  // keypress is deprecated in the DOM, but it is the event SDL reads text
+  // from, so it is the one that has to be intercepted.
+  for (const type of ["keydown", "keypress", "keyup"]) {
+    window.addEventListener(type, guard)
+  }
+}
+
+/**
  * A running demo engine.
  *
  * One per page: the engine is a singleton inside the wasm module, and loading
@@ -79,10 +161,13 @@ export class JkdEngine {
   private opts: JkdEngineOptions
   private exec!: (cmd: string) => void
   private ready = false
+  /** Name of the demo in the engine's filesystem, for replays and restarts. */
+  private demoName: string | null = null
 
   private fnGetCvar!: (name: string) => number
   private fnDemoTime!: () => number
   private fnElapsed!: () => number
+  private fnMatchTime!: () => number
   private fnFurthest!: () => number
   private fnEstimate!: () => number
   private fnSeekTo!: (t: number) => number
@@ -108,9 +193,23 @@ export class JkdEngine {
   async start(): Promise<void> {
     const { baseUrl, canvas, onStatus } = this.opts
 
+    // A second mount -- the back button onto a page whose viewer was suspended,
+    // say -- gets the engine that is already here. There is no way to unload a
+    // wasm module, so the alternative is refusing to show anything at all.
     if (window.Module) {
-      throw new Error("A demo engine is already running on this page")
+      if (!bootPromise) throw new Error("A demo engine is already running on this page")
+      this.installHooks()
+      await bootPromise
+      this.bind()
+      this.ready = true
+      this.applyViewerBinds()
+      this.resume()
+      this.opts.onReady?.()
+      return
     }
+
+    // Before the script loads, so this listener beats SDL's to the window.
+    installKeyboardGuard()
 
     // The engine sizes its framebuffer to the canvas, but it finds the canvas by
     // a hard-coded `#canvas` selector rather than through Module.canvas. Without
@@ -120,6 +219,9 @@ export class JkdEngine {
 
     window.Module = {
       canvas,
+      // Read by Com_Init as if they were command-line arguments, which is the
+      // only way to land a cvar before the renderer starts.
+      arguments: ["+set", "r_highdpi", this.opts.highDetail === false ? "0" : "1"],
       setStatus: (text: string) => onStatus?.(text),
       // Its .wasm and .data sit next to its .js, which is not this origin.
       locateFile: (path: string) => `${baseUrl}/${path}`,
@@ -133,11 +235,26 @@ export class JkdEngine {
       window.JKD_ready = () => {
         this.bind()
         this.ready = true
+        this.applyViewerBinds()
         this.opts.onReady?.()
         resolve()
       }
     })
 
+    this.installHooks()
+
+    bootPromise = loadScript(`${baseUrl}/jk2mv_wasm.js`).then(() => readyPromise)
+    await bootPromise
+  }
+
+  /**
+   * Point the engine's global callbacks at this instance.
+   *
+   * They live on `window` because the engine calls them by name, so the second
+   * instance to mount has to claim them -- otherwise kill messages and seek
+   * completions keep arriving at a component that has already unmounted.
+   */
+  private installHooks() {
     window.JKD_onKill = (target, attacker, mod, viewed) => {
       this.opts.onKill?.({ target, attacker, mod, viewed })
     }
@@ -154,9 +271,6 @@ export class JkdEngine {
       this.seekWaiters = []
       waiters.forEach((w) => w())
     }
-
-    await loadScript(`${baseUrl}/jk2mv_wasm.js`)
-    await readyPromise
   }
 
   private bind() {
@@ -165,6 +279,7 @@ export class JkdEngine {
     this.fnGetCvar = M.cwrap("JKD_GetCvar", "number", ["string"]) as unknown as (n: string) => number
     this.fnDemoTime = M.cwrap("JKD_GetDemoTime", "number", []) as unknown as () => number
     this.fnElapsed = M.cwrap("JKD_GetElapsedTime", "number", []) as unknown as () => number
+    this.fnMatchTime = M.cwrap("JKD_GetMatchTime", "number", []) as unknown as () => number
     this.fnFurthest = M.cwrap("JKD_GetFurthestTime", "number", []) as unknown as () => number
     this.fnEstimate = M.cwrap("JKD_GetEstimatedDuration", "number", []) as unknown as () => number
     this.fnSeekTo = M.cwrap("JKD_SeekTo", "number", ["number"]) as unknown as (t: number) => number
@@ -180,10 +295,55 @@ export class JkdEngine {
     return this.ready
   }
 
+  /**
+   * Put the engine to sleep, for when the viewer is no longer on screen.
+   *
+   * There is no way to unload the wasm module, so a page that navigates away
+   * from the player client-side leaves the engine resident: still holding a
+   * frame loop, and still playing the demo's sound out loud from a page that
+   * no longer shows it. Suspending the audio context is what actually silences
+   * it -- SDL's Emscripten backend mixes from a Web Audio callback that runs
+   * whether or not the engine's own loop does, so stopping the loop alone
+   * leaves the last buffer looping.
+   */
+  suspend() {
+    const M = window.Module
+    if (!M) return
+    // Frame loop first, since that is the thing still advancing playback --
+    // going the other way round leaves it free-running through a few seconds
+    // of demo while the canvas is being torn down. Freezing via cl_freezeDemo
+    // would be too late either way: console commands only run on a frame.
+    M.pauseMainLoop?.()
+    void M.SDL2?.audioContext?.suspend()
+  }
+
+  /** Wake an engine left sleeping by a previous mount. */
+  resume() {
+    const M = window.Module
+    if (!M) return
+    M.resumeMainLoop?.()
+    void M.SDL2?.audioContext?.resume()
+  }
+
   /** Run a console command. JKD_Exec terminates it engine-side. */
   private command(cmd: string) {
     if (!this.ready) return
     this.exec(cmd)
+  }
+
+  /**
+   * Rearrange the game's default keys for watching rather than playing.
+   *
+   * Space and M are taken away from the engine and given to the page (pause
+   * and mute -- see the viewer's own keydown handler), because they are the
+   * only controls that still need to work while the pointer is locked for
+   * free-fly and there is no cursor to click anything with. Jump moves to the
+   * right mouse button, which free-fly look leaves otherwise idle.
+   */
+  private applyViewerBinds() {
+    this.command("bind MOUSE2 +moveup")
+    this.command("unbind SPACE")
+    this.command("unbind m")
   }
 
   private setCvar(name: string, value: string | number) {
@@ -239,8 +399,20 @@ export class JkdEngine {
 
     // The `demo` command appends the extension itself, so it has to be stripped
     // here -- passing the full filename sends it looking for `....dm_15.dm_15`.
-    this.command(`demo "${file.replace(/\.dm_\d+$/i, "")}"`)
+    this.demoName = file.replace(/\.dm_\d+$/i, "")
+    this.command(`demo "${this.demoName}"`)
   }
+
+  /**
+   * Start the current demo again from the top.
+   *
+   * Costs nothing over the network: the file is still sitting in the engine's
+   * in-memory filesystem from the original load.
+   */
+  replay() {
+    if (this.demoName) this.command(`demo "${this.demoName}"`)
+  }
+
 
   // ---- playback ------------------------------------------------------------
 
@@ -255,6 +427,17 @@ export class JkdEngine {
   /** Elapsed milliseconds from the demo's first frame, or -1 before it starts. */
   getElapsed(): number {
     return this.ready ? this.fnElapsed() : -1
+  }
+
+  /**
+   * Milliseconds on the match clock, or -1 if the demo hasn't said.
+   *
+   * Not the same as getElapsed: that is a position in the file, this is the
+   * time on the scoreboard. A recording that joins eight minutes into a match
+   * is at elapsed 0 and match time 8:00.
+   */
+  getMatchTime(): number {
+    return this.ready ? this.fnMatchTime() : -1
   }
 
   /**
@@ -303,10 +486,6 @@ export class JkdEngine {
         this.setCvar("cg_demoCam", 0)
         this.setCvar("cg_thirdPerson", 0)
         break
-      case "chase":
-        this.setCvar("cg_demoCam", 0)
-        this.setCvar("cg_thirdPerson", 1)
-        break
       case "free":
         this.setCvar("cg_thirdPerson", 0)
         this.setCvar("cg_demoCam", 1)
@@ -330,8 +509,41 @@ export class JkdEngine {
     this.setCvar("cg_fov", degrees)
   }
 
-  setChaseRange(units: number) {
-    this.setCvar("cg_thirdPersonRange", units)
+  /**
+   * How far the camera sits behind whoever is being watched.
+   *
+   * Pulled all the way in it becomes first person, which is what the engine's
+   * own zero-range behaviour would look like anyway -- but going through
+   * cg_thirdPerson makes it an actual view change rather than a camera clipped
+   * inside the player's head.
+   */
+  setThirdPersonRange(units: number) {
+    if (units < FIRST_PERSON_BELOW) {
+      this.setCvar("cg_thirdPerson", 0)
+      return
+    }
+    this.setCvar("cg_thirdPersonRange", Math.round(units))
+    this.setCvar("cg_thirdPerson", 1)
+  }
+
+  /** 0 (silent) to 1. Sound effects only -- music stays permanently off. */
+  setVolume(v: number) {
+    this.setCvar("s_volume", v)
+  }
+
+  /** Mouse-look speed for the free camera. The engine's own default is 5. */
+  setSensitivity(v: number) {
+    this.setCvar("sensitivity", v)
+  }
+
+  /** Averages successive mouse deltas, which browser frame timing needs. */
+  setMouseSmoothing(on: boolean) {
+    this.setCvar("m_filter", on ? 1 : 0)
+  }
+
+  /** The sign of m_pitch is the invert: negative looks up when you push up. */
+  setInvertLook(on: boolean) {
+    this.setCvar("m_pitch", on ? -0.022 : 0.022)
   }
 
   getCvarNumber(name: string): number {
