@@ -4,6 +4,7 @@ import { Zap, BarChart3, Server } from "lucide-react"
 import { computeAchievementLedger, computePlayersDirectory } from "@/lib/achievements-server"
 import { resolveEquippedTitles } from "@/lib/titles-server"
 import { getMatches, getMatchStatsByMonth, getMonthlyPlayerStats } from "@/app/admin/actions"
+import { listFeedDemoUploads } from "@/lib/demos-server"
 import { HomeActivityFeed, type ActivityItem } from "@/components/home-activity-feed"
 import { HomeCrestGrid } from "@/components/home-crest-grid"
 import { HomeActivePlayers, type ActivePlayerRow } from "@/components/home-active-players"
@@ -50,12 +51,13 @@ export default async function HomePage() {
   const currentKey = monthKeyOf(now.toISOString())
   const monthName = now.toLocaleString("en-GB", { month: "long" })
 
-  const [ledger, directory, matchesRes, statsMonthRes, monthlyPlayerStatsRes] = await Promise.all([
+  const [ledger, directory, matchesRes, statsMonthRes, monthlyPlayerStatsRes, demoUploads] = await Promise.all([
     computeAchievementLedger(),
     computePlayersDirectory(),
     getMatches(),
     getMatchStatsByMonth(year, month),
     getMonthlyPlayerStats(),
+    listFeedDemoUploads(FEED_SIZE),
   ])
 
   const allMatches = (matchesRes.success ? (matchesRes.data as RawMatch[]) : []).filter(
@@ -80,7 +82,15 @@ export default async function HomePage() {
   const crestItems: ActivityItem[] = ledger.recent
     .slice(0, FEED_SIZE)
     .map((entry) => ({ type: "crest", date: entry.date, entry }))
-  const activityFeed = [...matchItems, ...crestItems]
+  const demoItems: ActivityItem[] = demoUploads.map((d) => ({
+    type: "demo",
+    date: d.createdAt,
+    demoId: d.id,
+    title: d.title,
+    uploaderName: d.uploaderName,
+    gametype: d.gametype,
+  }))
+  const activityFeed = [...matchItems, ...crestItems, ...demoItems]
     .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
     .slice(0, FEED_SIZE)
 
