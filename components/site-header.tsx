@@ -9,7 +9,7 @@ import { AdminNavButton } from "@/components/admin-nav-button"
 import { PlayerNavButton } from "@/components/player-nav-button"
 import { themes, applyTheme, type ThemeName } from "@/lib/themes"
 import { useToast } from "@/hooks/use-toast"
-import { History, BarChart3, Users } from "lucide-react"
+import { History, BarChart3, Users, Film } from "lucide-react"
 
 // Shared masthead + nav for the main site pages. Each former tab is now its own
 // route, so nav items are plain links and the active state comes from the URL —
@@ -23,6 +23,7 @@ const NAV = [
   { href: "/matches", label: "Match History", icon: History },
   { href: "/players", label: "Players", icon: Users },
   { href: "/stats", label: "Stats", icon: BarChart3 },
+  { href: "/demos", label: "Demos", icon: Film },
 ] as const
 
 export function SiteHeader() {
