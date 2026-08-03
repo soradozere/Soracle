@@ -83,6 +83,8 @@ interface EmscriptenModule {
   /** Emscripten's own rAF loop controls, exported by the engine's build. */
   pauseMainLoop?: () => void
   resumeMainLoop?: () => void
+  /** Hands the loader the asset bundle directly, skipping its own download. */
+  getPreloadedPackage?: (name: string, size: number) => ArrayBuffer
   /** SDL's Emscripten audio backend, whose context is the real sound switch. */
   SDL2?: { audioContext?: AudioContext }
   [key: string]: unknown
@@ -152,6 +154,73 @@ function installKeyboardGuard() {
 }
 
 /**
+ * The asset bundle, fetched once per browser rather than once per page.
+ *
+ * The HTTP cache is not enough here: Firefox never disk-caches a response
+ * this large (its per-entry ceiling is 50MB), so left to itself it re-downloads
+ * the whole bundle on every single visit. The Cache Storage API has no such
+ * ceiling. The bundle is fetched with progress, stored under its exact
+ * versioned URL — a new engine deploy is a new URL, so a stale bundle can
+ * never be served — and handed to Emscripten via getPreloadedPackage. Other
+ * versions are evicted once a new one lands. Anything failing in here
+ * (private windows, storage quota, an ancient browser) falls back to letting
+ * the engine download the file itself, which is exactly the old behaviour.
+ */
+const DATA_CACHE = "jkd-engine-data"
+
+async function loadEngineData(url: string, onStatus?: (s: string) => void): Promise<ArrayBuffer | null> {
+  try {
+    const cache = await caches.open(DATA_CACHE)
+    const hit = await cache.match(url)
+    if (hit) {
+      onStatus?.("Loading game data…")
+      return await hit.arrayBuffer()
+    }
+
+    const res = await fetch(url)
+    if (!res.ok) return null
+    const total = Number(res.headers.get("content-length") || 0)
+    const reader = res.body?.getReader()
+    let bytes: Uint8Array
+    if (reader && total > 0) {
+      const chunks: Uint8Array[] = []
+      let received = 0
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        chunks.push(value)
+        received += value.length
+        // The viewer turns "(received/total)" statuses into its progress bar.
+        onStatus?.(`Loading game data… (${received}/${total})`)
+      }
+      bytes = new Uint8Array(received)
+      let at = 0
+      for (const c of chunks) {
+        bytes.set(c, at)
+        at += c.length
+      }
+    } else {
+      bytes = new Uint8Array(await res.arrayBuffer())
+    }
+
+    try {
+      await cache.put(
+        url,
+        new Response(bytes.slice(), { headers: { "Content-Type": "application/octet-stream" } }),
+      )
+      for (const key of await cache.keys()) {
+        if (key.url !== url) await cache.delete(key)
+      }
+    } catch {
+      // A refused write just means the next visit downloads again.
+    }
+    return bytes.buffer as ArrayBuffer
+  } catch {
+    return null
+  }
+}
+
+/**
  * A running demo engine.
  *
  * One per page: the engine is a singleton inside the wasm module, and loading
@@ -217,6 +286,11 @@ export class JkdEngine {
     // up rendering into one corner of the element.
     if (canvas.id !== "canvas") canvas.id = "canvas"
 
+    // Fetched (or read back from Cache Storage) before the engine script runs,
+    // because getPreloadedPackage is consulted synchronously during its boot.
+    onStatus?.("Loading game data…")
+    const dataBuffer = await loadEngineData(`${baseUrl}/jk2mv_wasm.data`, onStatus)
+
     window.Module = {
       canvas,
       // Read by Com_Init as if they were command-line arguments, which is the
@@ -229,6 +303,9 @@ export class JkdEngine {
       // a demo or a map looks identical to nothing happening at all.
       print: (text: string) => console.log("[jk2]", text),
       printErr: (text: string) => console.warn("[jk2]", text),
+      // Only when the pre-fetch worked; otherwise the loader downloads the
+      // bundle itself and nothing has changed from the old behaviour.
+      ...(dataBuffer ? { getPreloadedPackage: () => dataBuffer } : {}),
     } as unknown as EmscriptenModule
 
     const readyPromise = new Promise<void>((resolve) => {
