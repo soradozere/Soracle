@@ -116,11 +116,10 @@ function RatingWidget({ demoId, canRate, initial }: { demoId: string; canRate: b
 
 function OtherDemoRow({ demo }: { demo: DemoListItem }) {
   return (
-    // Plain <a>, not <Link>: the engine is a page-scoped singleton (it throws
-    // if window.Module already exists), so switching demos needs a full
-    // reload to tear the old one down -- a client-side transition would land
-    // on a second DemoViewer while the first engine is still resident.
-    <a href={`/demos/${demo.id}`} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-muted">
+    // Client-side on purpose: JkdEngine.start() re-attaches to the resident
+    // engine, so switching demos this way reuses the loaded 120MB of assets
+    // and swaps recordings in a couple of seconds instead of a full reboot.
+    <Link href={`/demos/${demo.id}`} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-muted">
       <GametypeBadge gametype={demo.gametype} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{demo.title}</p>
@@ -129,7 +128,7 @@ function OtherDemoRow({ demo }: { demo: DemoListItem }) {
       {demo.durationMs != null && (
         <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{formatDuration(demo.durationMs)}</span>
       )}
-    </a>
+    </Link>
   )
 }
 
@@ -344,9 +343,9 @@ function EditDemoDialog({
         setConfirmingDelete(false)
         return
       }
-      // Hard nav for the same reason the demo links are: this page's engine
-      // is a resident singleton, and the library must not be reached with it
-      // still half-alive behind a client-side transition.
+      // Still a hard nav, but for its own reason now: after deleting the demo
+      // that is loaded into the resident engine, a clean slate beats leaving
+      // the engine suspended mid-way through a recording that no longer exists.
       window.location.href = "/demos"
     })
   }
