@@ -1,6 +1,8 @@
 "use client"
 
 import { useMemo, useState, useTransition } from "react"
+import Link from "next/link"
+import { useRouter } from "next/navigation"
 import { Star } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -62,11 +64,12 @@ function RatingStars({ value, count }: { value: number | null; count: number }) 
 // that looked subtly different there would read as a different kind of thing.
 export function DemoCard({ demo }: { demo: DemoListItem }) {
   return (
-    // Plain <a>, not <Link>: components/demo-viewer.tsx boots a page-scoped
-    // engine singleton (window.Module) with no teardown on unmount -- a
-    // client-side transition into this route re-triggers that boot while the
-    // previous page's engine (if any) is still resident, and it throws.
-    <a href={`/demos/${demo.id}`}>
+    // Client-side navigation on purpose: the engine is a page-scoped singleton
+    // that survives route changes, and JkdEngine.start() re-attaches to a
+    // resident module instead of booting a second one -- so moving between
+    // demos reuses the engine (and its 120MB of loaded assets) rather than
+    // paying the full boot on every click.
+    <Link href={`/demos/${demo.id}`}>
       <Card className="h-full transition-colors hover:border-foreground/30">
         <CardHeader>
           <div className="flex items-center justify-between gap-2">
@@ -128,7 +131,7 @@ export function DemoCard({ demo }: { demo: DemoListItem }) {
           </div>
         </CardContent>
       </Card>
-    </a>
+    </Link>
   )
 }
 
@@ -145,6 +148,7 @@ function UploadDialog({
   const [taggedIds, setTaggedIds] = useState<string[]>([])
   const [highlightTags, setHighlightTags] = useState<string[]>([])
   const [pending, startTransition] = useTransition()
+  const router = useRouter()
   // -1 when no file transfer is running; the byte-level progress of the PUT
   // otherwise. Separate from `pending`, which also covers the metadata save.
   const [uploadPct, setUploadPct] = useState(-1)
@@ -218,10 +222,9 @@ function UploadDialog({
         }
         setOpen(false)
         setTaggedIds([])
-        // Hard nav, not router.push: same engine-singleton reason as the card
-        // links below -- a client-side transition into a DemoViewer page
-        // fights an already-resident window.Module.
-        window.location.href = `/demos/${result.id}`
+        // Client-side, like the cards: a resident engine is re-attached to,
+        // not fought with, so there is nothing a full page load would fix.
+        router.push(`/demos/${result.id}`)
       } finally {
         setUploadPct(-1)
       }
