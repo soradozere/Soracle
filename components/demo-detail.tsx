@@ -282,11 +282,18 @@ function EditDemoDialog({
   players,
   playlists,
   inPlaylistIds,
+  isAdmin,
 }: {
   demo: DemoDetailData
   players: { id: string; name: string }[]
   playlists: DemoPlaylist[]
   inPlaylistIds: string[]
+  /**
+   * Uploaders get this dialog for their own demos, but a smaller version of
+   * it: crediting, playlists and deletion stay with admins, and the server
+   * enforces the same split rather than trusting this flag.
+   */
+  isAdmin: boolean
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -323,11 +330,15 @@ function EditDemoDialog({
         return
       }
       // Membership is its own table, so it is its own write -- but it saves
-      // with the rest of the form rather than as a separate ceremony.
-      const playlistResult = await setDemoPlaylists(demo.id, playlistIds)
-      if (!playlistResult.success) {
-        setError(playlistResult.error)
-        return
+      // with the rest of the form rather than as a separate ceremony. Only
+      // admins can file demos into playlists, and only they were shown the
+      // checkboxes, so an uploader's save skips this entirely.
+      if (isAdmin) {
+        const playlistResult = await setDemoPlaylists(demo.id, playlistIds)
+        if (!playlistResult.success) {
+          setError(playlistResult.error)
+          return
+        }
       }
       setOpen(false)
       router.refresh()
@@ -396,6 +407,8 @@ function EditDemoDialog({
             <Label htmlFor="edit-description">Description</Label>
             <Textarea id="edit-description" name="description" defaultValue={demo.description ?? ""} rows={3} />
           </div>
+          {isAdmin && (
+            <>
           <div className="space-y-1.5">
             <Label>Credited uploader</Label>
             <Select name="uploaderPlayerId" defaultValue={demo.uploaderPlayerId ?? "__none__"}>
@@ -431,6 +444,8 @@ function EditDemoDialog({
               </SelectContent>
             </Select>
           </div>
+            </>
+          )}
           <div className="space-y-1.5">
             <Label>Highlights</Label>
             <p className="text-xs text-muted-foreground">What happens in this one. Drives the library filters.</p>
@@ -454,6 +469,7 @@ function EditDemoDialog({
               })}
             </div>
           </div>
+          {isAdmin && (
           <div className="space-y-1.5">
             <Label>Playlists</Label>
             {playlists.length === 0 ? (
@@ -475,6 +491,7 @@ function EditDemoDialog({
               </div>
             )}
           </div>
+          )}
           <div className="space-y-1.5">
             <Label>Players in this demo</Label>
             <Input
@@ -506,8 +523,12 @@ function EditDemoDialog({
           {error && <p className="text-sm text-destructive">{error}</p>}
           <DialogFooter className="sm:justify-between">
             {/* Two taps, and the second one names what it will destroy -- this
-                removes the recording itself, not just the library entry. */}
-            {confirmingDelete ? (
+                removes the recording itself, not just the library entry.
+                Admins only: an uploader can fix their own details, but
+                removing a recording from the library is not theirs to do. */}
+            {!isAdmin ? (
+              <span />
+            ) : confirmingDelete ? (
               <div className="flex items-center gap-2">
                 <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={remove}>
                   {pending ? "Deleting…" : "Delete permanently"}
@@ -625,13 +646,16 @@ export function DemoDetail({
                 })}
               </p>
             )}
-            {isAdmin && (
+            {/* The uploader can fix their own details without going through an
+                admin -- a typo in a title shouldn't need one. */}
+            {(isAdmin || (!!currentPlayerId && demo.uploaderPlayerId === currentPlayerId)) && (
               <div className="mt-3">
                 <EditDemoDialog
                   demo={demo}
                   players={players}
                   playlists={playlists}
                   inPlaylistIds={inPlaylistIds}
+                  isAdmin={isAdmin}
                 />
               </div>
             )}
