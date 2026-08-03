@@ -154,6 +154,32 @@ function installKeyboardGuard() {
 }
 
 /**
+ * The engine's render target, created once per page.
+ *
+ * A WebGL context belongs to the element it was created on and cannot be moved
+ * to another, so this element has to outlive any React tree that displays it.
+ * Moving between demos unmounts the viewer, and a freshly rendered <canvas>
+ * would leave the engine drawing into the old, detached one -- a black picture
+ * over a demo that is in fact playing perfectly.
+ */
+let engineCanvas: HTMLCanvasElement | null = null
+
+export function getEngineCanvas(): HTMLCanvasElement {
+  if (engineCanvas) return engineCanvas
+  const canvas = document.createElement("canvas")
+  // The engine looks its render target up by this exact id -- GLimp_SetMode
+  // reads the size off a hard-coded "#canvas" selector, not Module.canvas.
+  canvas.id = "canvas"
+  canvas.className = "absolute inset-0 h-full w-full object-contain"
+  canvas.tabIndex = -1
+  // The engine binds right-click to a game action; the browser menu on top of
+  // that is nobody's idea of a control.
+  canvas.addEventListener("contextmenu", (e) => e.preventDefault())
+  engineCanvas = canvas
+  return canvas
+}
+
+/**
  * The asset bundle, fetched once per browser rather than once per page.
  *
  * The HTTP cache is not enough here: Firefox never disk-caches a response
