@@ -9,6 +9,7 @@ import {
   Link2,
   Maximize,
   Minimize,
+  Monitor,
   RotateCcw,
   Settings,
   Volume2,
@@ -127,6 +128,15 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
   // appear or never leave. There, tapping the picture toggles it instead.
   const [touchOnly, setTouchOnly] = useState(false)
   const [tapShowsChrome, setTapShowsChrome] = useState(true)
+  /**
+   * Phones are told, rather than shown a broken picture.
+   *
+   * The engine wants a keyboard, a mouse and a desktop-sized heap, and on iOS
+   * it does not come up at all -- so the alternative to saying so plainly is a
+   * black box and a spinner that never resolves. Decided before the engine is
+   * started, so nobody on a phone pays for a 120MB download to find out.
+   */
+  const [unsupported, setUnsupported] = useState(false)
 
   const [elapsed, setElapsed] = useState(0)
   // The match clock, which is what anyone discussing the game would quote --
@@ -250,6 +260,14 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
 
   useEffect(() => {
     if (!holderRef.current) return
+    // The standard "touch is the primary input" test: true on phones and
+    // tablets, false on a laptop with a touchscreen (which can still hover).
+    // Checked here, first thing, so the engine is never started on one.
+    if (window.matchMedia("(hover: none) and (pointer: coarse)").matches) {
+      setUnsupported(true)
+      setStatus(null)
+      return
+    }
     let cancelled = false
 
     // Reclaim the page's one canvas. On a first visit this creates it; on a
@@ -750,6 +768,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
     setTouchOnly(window.matchMedia("(hover: none)").matches)
   }, [])
 
+
   // Free-fly grabs the pointer for mouse-look (SDL's relative mouse mode maps
   // to the browser's real Pointer Lock API). There's no cursor to hover the
   // bar with at that point, so its visibility has to react to lock state, not
@@ -770,7 +789,9 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
   // loading, mid-scrub or finished, so the controls that matter are never
   // hiding. On touch, where there is no hover, the tap state stands in.
   const showChrome =
-    !pointerLocked && ((touchOnly ? tapShowsChrome : hovering) || paused || !ready || seeking || ended)
+    !unsupported &&
+    !pointerLocked &&
+    ((touchOnly ? tapShowsChrome : hovering) || paused || !ready || seeking || ended)
 
   return (
     <div
@@ -792,6 +813,18 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
           sizes the canvas to match, so nothing here sets width/height, and
           object-contain (on the canvas itself) only scales the result. */}
       <div ref={holderRef} className="absolute inset-0" />
+
+      {/* Said once, plainly, instead of a spinner that never finishes. */}
+      {unsupported && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
+          <Monitor className="h-7 w-7 text-white/40" />
+          <p className="text-sm font-medium text-white/90">Watching needs a computer</p>
+          <p className="max-w-xs text-xs leading-relaxed text-white/50">
+            The demo player runs the actual game, which wants a keyboard, a mouse and rather more
+            memory than a phone will give it. Everything else on this page works fine here.
+          </p>
+        </div>
+      )}
 
       {/* Match clock. Always up, not tied to the auto-hiding chrome: on a full
           match this is what tells you whether you're watching the first minute
