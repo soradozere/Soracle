@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Pause, Play, Eye, Video, Compass } from "lucide-react"
+import { Pause, Play, Eye, Video, Compass, Maximize, Minimize } from "lucide-react"
 import { JkdEngine, type CameraMode, type DemoPlayerInfo } from "@/lib/demo-viewer/jkd-client"
 import { cn } from "@/lib/utils"
 
@@ -28,9 +28,13 @@ interface DemoViewerProps {
 
 export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const containerRef = useRef<HTMLDivElement>(null)
   const engineRef = useRef<JkdEngine | null>(null)
+  const [fullscreen, setFullscreen] = useState(false)
 
   const [status, setStatus] = useState<string | null>("Starting the engine…")
+  // -1 when there is nothing measurable to show, otherwise 0..1.
+  const [progress, setProgress] = useState(-1)
   const [failed, setFailed] = useState<string | null>(null)
   const [ready, setReady] = useState(false)
 
@@ -64,7 +68,20 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
     const engine = new JkdEngine({
       baseUrl: base,
       canvas: canvasRef.current,
-      onStatus: (s) => !cancelled && setStatus(s || null),
+      onStatus: (s) => {
+        if (cancelled) return
+        // The engine reports its asset download as "... (received/total)".
+        // That bundle is hundreds of megabytes, so a bare line of text reads as
+        // a page that has hung -- turn it into a real progress bar.
+        const m = /\((\d+)\s*\/\s*(\d+)\)/.exec(s || "")
+        if (m && Number(m[2]) > 0) {
+          setProgress(Number(m[1]) / Number(m[2]))
+          setStatus("Loading game data…")
+        } else {
+          setProgress(-1)
+          setStatus(s || null)
+        }
+      },
       onKill: ({ target, attacker, viewed }) => {
         if (cancelled || viewed < 0) return
         // World deaths and suicides arrive with the attacker outside the client
@@ -95,13 +112,15 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
         if (cancelled) return
         setReady(true)
         setStatus("Loading demo…")
-        return engine.loadDemo(demoUrl, (f) =>
-          setStatus(f < 1 ? `Loading demo… ${Math.round(f * 100)}%` : null),
-        )
+        return engine.loadDemo(demoUrl, (f) => {
+          setStatus("Loading demo…")
+          setProgress(f)
+        })
       })
       .then(() => {
         if (cancelled) return
         setStatus(null)
+        setProgress(-1)
         engine.setCameraMode("follow")
         engine.setSpeed(1)
         engine.setPaused(false)
@@ -174,6 +193,19 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
   const chooseFollow = useCallback((clientNum: number) => {
     engineRef.current?.setFollow(clientNum)
     setFollow(clientNum)
+  }, [])
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen()
+    else void containerRef.current?.requestFullscreen()
+  }, [])
+
+  // Track it from the event rather than from the click: Escape and the browser's
+  // own controls leave fullscreen too, and the button would otherwise lie.
+  useEffect(() => {
+    const onChange = () => setFullscreen(!!document.fullscreenElement)
+    document.addEventListener("fullscreenchange", onChange)
+    return () => document.removeEventListener("fullscreenchange", onChange)
   }, [])
 
   /**
@@ -255,15 +287,19 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
     [camera, follow],
   )
 
-  const watching =
-    follow >= 0
-      ? engineRef.current?.getPlayerName(follow)
-      : ready
-        ? engineRef.current?.getPlayerName(engineRef.current.getViewClientNum())
-        : null
+  // Nothing is being watched until a snapshot has arrived; asking before that
+  // gets -1 back and renders as the literal "client -1".
+  const viewClient = follow >= 0 ? follow : ready ? (engineRef.current?.getViewClientNum() ?? -1) : -1
+  const watching = viewClient >= 0 ? engineRef.current?.getPlayerName(viewClient) : null
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-xl bg-black">
+    <div
+      ref={containerRef}
+      className={cn(
+        "relative h-full w-full overflow-hidden bg-black",
+        fullscreen ? "rounded-none" : "rounded-xl",
+      )}
+    >
       <canvas
         ref={canvasRef}
         // The engine looks its render target up by this exact id.
@@ -305,10 +341,18 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
       )}
 
       {(status || failed) && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3">
           <div className={cn("text-sm", failed ? "text-red-300" : "text-white/70")}>
             {failed ?? status}
           </div>
+          {!failed && progress >= 0 && (
+            <div className="h-1 w-56 overflow-hidden rounded-full bg-white/15">
+              <div
+                className="h-full rounded-full bg-cyan-400 transition-[width] duration-150"
+                style={{ width: `${Math.round(progress * 100)}%` }}
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -376,6 +420,14 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl }: DemoViewe
               </button>
             ))}
           </div>
+
+          <button
+            onClick={toggleFullscreen}
+            title={fullscreen ? "Exit full screen" : "Full screen"}
+            className="ml-auto rounded-md bg-white/10 p-1.5 text-white hover:bg-white/20"
+          >
+            {fullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+          </button>
         </div>
 
         {players.length > 0 && (
