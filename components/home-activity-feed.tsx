@@ -1,5 +1,5 @@
 import Link from "next/link"
-import { Swords, Sparkles } from "lucide-react"
+import { Swords, Sparkles, Film } from "lucide-react"
 import { fmtDate } from "@/lib/achievement-format"
 import { rarityColor, rarityLabel } from "@/lib/achievement-pages"
 import { roman } from "@/lib/achievement-format"
@@ -8,6 +8,7 @@ import type { LedgerEntry } from "@/lib/achievements-server"
 export type ActivityItem =
   | { type: "match"; date: string; ordinal: number; redScore: number; blueScore: number; playerCount: number }
   | { type: "crest"; date: string; entry: LedgerEntry }
+  | { type: "demo"; date: string; demoId: string; title: string; uploaderName: string | null; gametype: string }
 
 function MatchRow({ item }: { item: Extract<ActivityItem, { type: "match" }> }) {
   return (
@@ -58,6 +59,31 @@ function CrestRow({ item }: { item: Extract<ActivityItem, { type: "crest" }> }) 
   )
 }
 
+function DemoRow({ item }: { item: Extract<ActivityItem, { type: "demo" }> }) {
+  return (
+    <li>
+      {/* Plain <a>: the demo page boots a page-scoped engine singleton, so it
+          has to be reached by a full navigation (see components/demo-library.tsx). */}
+      <a href={`/demos/${item.demoId}`} className="home-feed-row home-feed-row--demo">
+        <span className="home-feed-ico home-feed-ico--demo" aria-hidden>
+          <Film className="w-4 h-4" />
+        </span>
+        <span className="home-feed-main">
+          <span>
+            <span className="text-[#8892a0]">New demo &mdash; </span>
+            <b className="text-[#e6edf3]">{item.title}</b>
+          </span>
+          <span className="home-feed-sub">
+            {item.gametype}
+            {item.uploaderName && ` · ${item.uploaderName}`}
+          </span>
+        </span>
+        <span className="home-feed-date">{fmtDate(item.date)}</span>
+      </a>
+    </li>
+  )
+}
+
 export function HomeActivityFeed({ items }: { items: ActivityItem[] }) {
   if (!items.length) {
     return <p className="text-sm text-[#8892a0]">Nothing logged yet.</p>
@@ -65,16 +91,16 @@ export function HomeActivityFeed({ items }: { items: ActivityItem[] }) {
 
   return (
     <ul className="home-feed">
-      {items.map((item) =>
-        item.type === "match" ? (
-          <MatchRow key={`match-${item.ordinal}`} item={item} />
-        ) : (
+      {items.map((item) => {
+        if (item.type === "match") return <MatchRow key={`match-${item.ordinal}`} item={item} />
+        if (item.type === "demo") return <DemoRow key={`demo-${item.demoId}`} item={item} />
+        return (
           <CrestRow
             key={`crest-${item.entry.achId}-${item.entry.rank}-${item.entry.playerId}-${item.entry.date}`}
             item={item}
           />
-        ),
-      )}
+        )
+      })}
       <style>{`
         .home-feed{list-style:none;margin:0;padding:0;max-height:560px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#2a3542 #0b0c10}
         .home-feed::-webkit-scrollbar{width:6px}
@@ -86,8 +112,10 @@ export function HomeActivityFeed({ items }: { items: ActivityItem[] }) {
         a.home-feed-row:hover{background:#1f2833}
         a.home-feed-row:focus-visible{outline:none;background:#1f2833;box-shadow:inset 3px 0 0 #66fcf1}
         .home-feed-row--match{background:rgba(98,214,232,0.06);box-shadow:inset 3px 0 0 #62d6e8}
+        .home-feed-row--demo{background:rgba(167,139,250,0.06);box-shadow:inset 3px 0 0 #a78bfa}
         .home-feed-ico{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:#151b24;border:1px solid #2a3542;color:#66fcf1;flex-shrink:0}
         .home-feed-ico--match{color:#62d6e8;border-color:#62d6e855}
+        .home-feed-ico--demo{color:#a78bfa;border-color:#a78bfa55}
         .home-feed-main{display:flex;flex-direction:column;gap:1px;min-width:0;font-size:13.5px}
         .home-feed-sub{font-size:11px;color:#8892a0;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
         .home-feed-date{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#8892a0;font-variant-numeric:tabular-nums;white-space:nowrap}
