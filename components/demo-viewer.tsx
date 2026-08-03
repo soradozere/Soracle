@@ -142,6 +142,9 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
   // not started. Only an end that follows actual playback is a real one.
   const playedRef = useRef(false)
   const startedNotifiedRef = useRef(false)
+  // Which recording the engine currently holds, so a route change to a
+  // different demo can be told apart from a re-render of the same one.
+  const loadedUrlRef = useRef<string | null>(null)
   // Held in a ref so the polling effect never has to restart just because the
   // parent re-rendered and handed us a new closure.
   const onStartedRef = useRef(onPlaybackStarted)
@@ -288,6 +291,9 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
         if (cancelled) return
         setReady(true)
         setStatus("Loading demo…")
+        // Claimed before the load starts, so the demo-swap effect below can
+        // tell "already loading this one" from "the route changed".
+        loadedUrlRef.current = demoUrl
         return engine.loadDemo(demoUrl, (f) => {
           setStatus("Loading demo…")
           setProgress(f)
@@ -321,6 +327,67 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
     // on a prop change would try to boot a second one over the first.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  /**
+   * Moving between demos, without rebooting the engine.
+   *
+   * The route keeps this component mounted when you go from one demo to the
+   * next -- same component, different props -- so the boot effect above does
+   * not run again, and the engine (with its 120MB of loaded assets) is still
+   * right there. Swapping the recording into it is all "navigating" needs to
+   * mean: a couple of seconds instead of a full reload.
+   */
+  useEffect(() => {
+    if (!ready) return
+    const engine = engineRef.current
+    if (!engine || loadedUrlRef.current === demoUrl) return
+    loadedUrlRef.current = demoUrl
+    let cancelled = false
+
+    // Everything on screen belongs to the demo being left behind.
+    setEnded(false)
+    setElapsed(0)
+    setMatchTime(-1)
+    setFollow(-1)
+    setPlayers([])
+    setSpan(Math.max(durationMs, 1000))
+    setKillMessage(null)
+    setAnnouncement(null)
+    killShownAtRef.current = -1
+    announceShownAtRef.current = -1
+    playedRef.current = false
+    startedNotifiedRef.current = false
+    setFailed(null)
+    setStatus("Loading demo…")
+
+    engine
+      .loadDemo(demoUrl, (f) => {
+        setStatus("Loading demo…")
+        setProgress(f)
+      })
+      .then(() => {
+        if (cancelled) return
+        setStatus(null)
+        setProgress(-1)
+        engine.setCameraMode("follow")
+        engine.setSpeed(1)
+        engine.setPaused(false)
+        engine.setFov(FIXED_FOV)
+        setCamera("follow")
+        setSpeed(1)
+        setPaused(false)
+        return applyDefaultFollow(engine)
+      })
+      .catch((err: Error) => {
+        if (cancelled) return
+        setFailed(err.message)
+        setStatus(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [demoUrl, ready, durationMs, applyDefaultFollow])
 
   // ---- poll engine state ---------------------------------------------------
 

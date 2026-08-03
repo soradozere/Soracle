@@ -31,3 +31,4 @@ public/models/saber-hilt.glb
 public/models/saber/
 public/models/props/
 public/models/skins/
+.env*
