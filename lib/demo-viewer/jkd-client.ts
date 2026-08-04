@@ -391,7 +391,20 @@ export class JkdEngine {
     this.fnConnected = M.cwrap("JKD_GetConnectedMask", "number", []) as unknown as () => number
     this.fnVisible = M.cwrap("JKD_GetVisibleMask", "number", []) as unknown as () => number
     this.fnPlayerInfo = M.cwrap("JKD_GetPlayerInfo", "string", ["number"]) as unknown as (n: number) => string
-    this.fnConfigString = M.cwrap("JKD_GetConfigString", "string", ["number"]) as unknown as (n: number) => string
+    /*
+     * Optional export: the page and the engine ship separately, so a browser
+     * can be running today's page against last week's engine. A missing
+     * export must degrade to "this feature is unavailable" rather than throw
+     * -- an exception here once took the POV picker down with it, because it
+     * escaped the polling loop before the players were read.
+     */
+    try {
+      this.fnConfigString = M.cwrap("JKD_GetConfigString", "string", ["number"]) as unknown as (
+        n: number,
+      ) => string
+    } catch {
+      this.fnConfigString = () => ""
+    }
     this.fnViewClient = M.cwrap("JKD_GetViewClientNum", "number", []) as unknown as () => number
     this.fnIsFollowing = M.cwrap("JKD_IsFollowing", "number", []) as unknown as () => number
   }
@@ -692,8 +705,14 @@ export class JkdEngine {
    */
   getMapName(): string {
     if (!this.ready) return ""
-    const serverInfo = this.fnConfigString(0) || ""
-    return /\\mapname\\([^\\]+)/.exec(serverInfo)?.[1]?.trim().toLowerCase() ?? ""
+    try {
+      const serverInfo = this.fnConfigString(0) || ""
+      return /\\mapname\\([^\\]+)/.exec(serverInfo)?.[1]?.trim().toLowerCase() ?? ""
+    } catch {
+      // An engine older than this page has no such export; the map stays
+      // whatever the library already knew.
+      return ""
+    }
   }
 
   getPlayerName(clientNum: number): string {
