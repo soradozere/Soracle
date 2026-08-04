@@ -127,6 +127,14 @@ interface DemoViewerProps {
    * comment can jump the player to it.
    */
   onSeekReady?: (seek: (ms: number) => void) => void
+  /**
+   * Hands the page the cutter, or null on an engine too old to have one. The
+   * page owns the in/out points and what happens to the bytes; all this side
+   * knows is how to produce them.
+   */
+  onTrimReady?: (trim: ((startMs: number, endMs: number) => Promise<Uint8Array>) | null) => void
+  /** Shown as a lit region on the scrubber while a cut is being framed up. */
+  trimRange?: { startMs: number; endMs: number } | null
 }
 
 export function DemoViewer({
@@ -140,6 +148,8 @@ export function DemoViewer({
   onRemoveMoment,
   onPositionChange,
   onSeekReady,
+  onTrimReady,
+  trimRange = null,
 }: DemoViewerProps) {
   // Where the engine's canvas gets parked. React owns this div; it does not
   // own the canvas inside it (see getEngineCanvas).
@@ -758,6 +768,29 @@ export function DemoViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ready, requestSeek])
 
+  /**
+   * Hand the page the cutter, or null if this engine has no such export -- the
+   * page and the engine deploy separately, so a viewer can be newer than the
+   * build it is talking to.
+   */
+  useEffect(() => {
+    if (!ready) return
+    const engine = engineRef.current
+    if (!engine?.canTrim) {
+      onTrimReady?.(null)
+      return
+    }
+    onTrimReady?.(async (startMs: number, endMs: number) => {
+      const bytes = await engine.trimDemo(startMs, endMs)
+      // The cut leaves playback at the out-point and the page's own idea of
+      // where it is now wrong; put it back where the clip begins.
+      setEnded(false)
+      requestSeek(startMs, true)
+      return bytes
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, requestSeek])
+
   const onScrubStart = useCallback(() => {
     const engine = engineRef.current
     if (!engine) return
@@ -1301,6 +1334,19 @@ export function DemoViewer({
           {/* The scrubber and its heat marks share a stacking context so the
               glow can sit under the thumb without intercepting the drag. */}
           <div className="relative flex-1">
+            {/* The stretch a trim would keep. Under the moment glow and the
+                thumb, so neither is obscured by it. */}
+            {trimRange && span > 1000 && (
+              <div className="pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-full">
+                <span
+                  style={{
+                    left: `${Math.max(0, Math.min(100, (100 * trimRange.startMs) / span))}%`,
+                    width: `${Math.max(0.5, Math.min(100, (100 * (trimRange.endMs - trimRange.startMs)) / span))}%`,
+                  }}
+                  className="absolute inset-y-0 bg-cyan-400/70 shadow-[0_0_6px_1px_rgba(34,211,238,0.7)]"
+                />
+              </div>
+            )}
             {moments.length > 0 && span > 1000 && (
               <div className="pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-full">
                 {moments.map((m) => {
