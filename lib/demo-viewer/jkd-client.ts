@@ -423,16 +423,23 @@ export class JkdEngine {
     } catch {
       this.fnConfigString = () => ""
     }
-    // Same deal: left undefined on an engine that predates trimming, and the
-    // page hides the control rather than offering something that cannot work.
-    try {
-      this.fnTrimDemo = M.cwrap("JKD_TrimDemo", "number", ["number", "string"]) as unknown as (
-        endMs: number,
-        name: string,
-      ) => number
-    } catch {
-      this.fnTrimDemo = null
-    }
+    /*
+     * Same deal, but asking the right question.
+     *
+     * cwrap does *not* throw on a missing export -- it binds lazily and hands
+     * back a function that dies with "func is not a function" the first time
+     * anyone calls it. So a try/catch around it, which is what this used to be,
+     * never fires and every engine claims it can trim. The export itself is the
+     * only honest test.
+     */
+    const trimExport = (M as unknown as Record<string, unknown>)._JKD_TrimDemo
+    this.fnTrimDemo =
+      typeof trimExport === "function"
+        ? (M.cwrap("JKD_TrimDemo", "number", ["number", "string"]) as unknown as (
+            endMs: number,
+            name: string,
+          ) => number)
+        : null
     this.fnViewClient = M.cwrap("JKD_GetViewClientNum", "number", []) as unknown as () => number
     this.fnIsFollowing = M.cwrap("JKD_IsFollowing", "number", []) as unknown as () => number
   }
