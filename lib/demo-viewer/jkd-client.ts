@@ -71,6 +71,12 @@ export interface JkdEngineOptions {
    * the engine's centre prints, forwarded because it can no longer draw them.
    */
   onAnnouncement?: (text: string) => void
+  /**
+   * One line of the kill feed: an obituary, or who took, returned or capped the
+   * flag. Colour codes already stripped. Chat never arrives here -- the engine
+   * feeds this from the obituary and CTF printers, not from the console.
+   */
+  onFeed?: (text: string) => void
   onPlaybackEnded?: (realDurationMs: number) => void
 }
 
@@ -79,7 +85,13 @@ interface EmscriptenModule {
   canvas: HTMLCanvasElement
   setStatus: (text: string) => void
   cwrap: (name: string, ret: string | null, args: string[]) => (...a: unknown[]) => never
-  FS: { writeFile: (path: string, data: Uint8Array) => void }
+  FS: {
+    writeFile: (path: string, data: Uint8Array) => void
+    readFile: (path: string) => Uint8Array
+    readdir: (path: string) => string[]
+    unlink: (path: string) => void
+    mkdir: (path: string) => void
+  }
   /** Emscripten's own rAF loop controls, exported by the engine's build. */
   pauseMainLoop?: () => void
   resumeMainLoop?: () => void
@@ -96,6 +108,7 @@ declare global {
     JKD_ready?: () => void
     JKD_onKill?: (target: number, attacker: number, mod: number, viewed: number) => void
     JKD_onCenterPrint?: (text: string) => void
+    JKD_onFeed?: (text: string) => void
     JKD_playbackStopped?: (realDuration: number) => void
     JKD_seekDone?: () => void
   }
@@ -366,6 +379,10 @@ export class JkdEngine {
       const clean = stripColourCodes(text || "").replace(/\s+/g, " ").trim()
       if (clean) this.opts.onAnnouncement?.(clean)
     }
+    window.JKD_onFeed = (text: string) => {
+      const clean = stripColourCodes(text || "").replace(/\s+/g, " ").trim()
+      if (clean) this.opts.onFeed?.(clean)
+    }
     window.JKD_playbackStopped = (realDuration: number) => {
       this.opts.onPlaybackEnded?.(realDuration)
     }
@@ -596,6 +613,102 @@ export class JkdEngine {
     await new Promise<void>((resolve) => this.seekWaiters.push(resolve))
   }
 
+  /**
+   * Cut the current demo down to [startMs, endMs], returning the resulting
+   * file's bytes.
+   *
+   * Not protocol surgery of its own -- it leans on two engine features built
+   * for other jobs. seekTo already reconstructs valid game state at an
+   * arbitrary point (that's how scrubbing works), and the engine's own
+   * `record`/`stoprecord` commands -- built for joining a live game mid-match
+   * and saving from there -- write a fresh gamestate snapshot the instant they
+   * start, then everything after verbatim. Demo playback runs through the
+   * same message pipeline a live connection would, so recording through the
+   * middle of one works unmodified.
+   *
+   * Runs in the same visible engine instance the caller is watching (there is
+   * only one -- see getEngineCanvas), so the picture will visibly play through
+   * the trimmed range while this is in flight.
+   */
+  async trimDemo(startMs: number, endMs: number): Promise<Uint8Array> {
+    if (!this.ready) throw new Error("Engine not ready.")
+    if (!(startMs >= 0) || !(endMs > startMs)) throw new Error("Invalid trim range.")
+
+    const prevSpeed = this.fnGetCvar("timescale") || 1
+    const prevPaused = this.fnGetCvar("cl_freezeDemo") === 1
+
+    await this.seekTo(startMs)
+    if (this.fnElapsed() < 0) throw new Error("Lost the demo while seeking to the start point.")
+
+    this.setPaused(false)
+    // The fastest speed the viewer itself already offers -- proven territory,
+    // rather than guessing how high timescale can go before frames get skipped.
+    this.setSpeed(4)
+
+    const tag = `__trim_${Date.now()}`
+    const dir = "/base/demos"
+    this.command(`record ${tag}`)
+
+    try {
+      // JKD_Exec queues onto the engine's own command buffer for the next
+      // frame rather than running inline, so the file will not exist the
+      // instant this call returns -- give it real frames before deciding the
+      // record command never landed (e.g. cls.state was not CA_ACTIVE).
+      const found = await this.pollUntil(() => this.listDemoFiles(dir).some((f) => f.startsWith(tag)), 3000)
+      if (!found) throw new Error("Recording never started -- the engine may not be in a level.")
+
+      const reachedEnd = await this.pollUntil(() => {
+        const elapsed = this.fnElapsed()
+        if (elapsed < 0) throw new Error("Playback ended before reaching the trim's end point.")
+        return elapsed >= endMs
+      }, endMs - startMs + 5000)
+      if (!reachedEnd) throw new Error("Timed out cutting the demo.")
+    } finally {
+      this.command("stoprecord")
+      this.setSpeed(prevSpeed)
+      this.setPaused(prevPaused)
+      // stoprecord runs on the next frame too, and needs to actually close the
+      // file (writing its trailer) before it is safe to read back out.
+      await this.sleep(250)
+    }
+
+    const name = this.listDemoFiles(dir).find((f) => f.startsWith(tag))
+    if (!name) throw new Error("Recording finished but the file is missing.")
+
+    const path = `${dir}/${name}`
+    const FS = window.Module!.FS
+    const bytes = FS.readFile(path)
+    try {
+      FS.unlink(path)
+    } catch {
+      // best effort -- a leftover temp file in the virtual FS costs nothing real
+    }
+    if (bytes.length < 32) throw new Error("Trimmed file looks empty -- refusing to use it.")
+    return bytes
+  }
+
+  private listDemoFiles(dir: string): string[] {
+    try {
+      return window.Module!.FS.readdir(dir)
+    } catch {
+      return []
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms))
+  }
+
+  /** Polls `check` until it returns true or `timeoutMs` elapses. */
+  private async pollUntil(check: () => boolean, timeoutMs: number): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      if (check()) return true
+      await this.sleep(50)
+    }
+    return check()
+  }
+
   // ---- camera --------------------------------------------------------------
 
   setCameraMode(mode: CameraMode) {
@@ -642,6 +755,38 @@ export class JkdEngine {
     }
     this.setCvar("cg_thirdPersonRange", Math.round(units))
     this.setCvar("cg_thirdPerson", 1)
+  }
+
+  /**
+   * Where the chase camera sits around whoever is being watched: `angle` swings
+   * it horizontally (0 is directly behind, 180 is head-on), `pitch` raises and
+   * lowers it.
+   *
+   * Both are the engine's own third-person cvars, so they compose with the
+   * range control above rather than fighting it. They only mean anything while
+   * a chase camera is up -- the free camera flies on its own angles.
+   */
+  setThirdPersonAngle(degrees: number) {
+    this.setCvar("cg_thirdPersonAngle", Math.round(degrees))
+  }
+
+  setThirdPersonPitch(degrees: number) {
+    this.setCvar("cg_thirdPersonPitchOffset", Math.round(degrees))
+  }
+
+  /**
+   * Stop the camera spinning on its own.
+   *
+   * cg_cameraOrbit winds cg_thirdPersonAngle round by a few degrees every
+   * cg_cameraOrbitDelay milliseconds. Nothing here asks for that, but the
+   * game's own end-of-match handlers do (CG_spWin_f / CG_spLose_f both set it
+   * to 2 along with a fixed range) -- so a recording that runs through a win
+   * ends up orbiting for the rest of playback, and dragging the viewer's own
+   * camera-angle setting along with it. Pinned off, and re-pinned after a seek
+   * for the same reason the angles are: it is cheat-flagged.
+   */
+  stopAutoOrbit() {
+    this.setCvar("cg_cameraOrbit", 0)
   }
 
   /** 0 (silent) to 1. Sound effects only -- music stays permanently off. */
