@@ -271,18 +271,36 @@ export function DemoViewer({
       const wanted = followName ? normaliseName(followName) : ""
 
       /*
-       * Wait for the demo to actually be running before deciding the camera.
+       * Open on the recorded view, unless the recording was made by a bot.
        *
-       * Opening a demo resets cg_demoFollow to 0 -- client 0, who on these
-       * recordings is the demobot, floating nowhere near the play -- and that
-       * reset lands *after* the load call returns. Setting the camera any
-       * earlier is simply overwritten, which is why a demo could open on
-       * nobody in particular: not a failure to follow the protagonist, but
-       * the engine's own default winning the race.
+       * The recorded view is editorial intent: on a demo that has been merged
+       * and reframed -- which is most of what this community publishes -- the
+       * file has already been centred on the player who matters, and no
+       * guess here beats that. It also needs no name matching, so it cannot
+       * pick the wrong person.
+       *
+       * The exception is a raw demobot recording, where the recorded view is
+       * the bot itself: a spectator floating nowhere near the play. Spectators
+       * are filtered out of getPlayers(), so "is the recorded client one of
+       * the actual players" is the whole test, and when it fails the
+       * protagonist is the better answer.
+       *
+       * Both gates below matter on a swap: the engine still holds the previous
+       * recording's roster for a moment after a new demo opens, and elapsed
+       * only goes non-negative once this demo's own first snapshot is parsed.
        */
       for (let i = 0; i < 100; i++) {
-        const players = engineRef.current === engine ? engine.getPlayers() : []
+        const ours = engineRef.current === engine && engine.getElapsed() >= 0
+        const players = ours ? engine.getPlayers() : []
         if (players.length > 0) {
+          const recorded = engine.getViewClientNum()
+          const recordedIsPlaying = players.some((p) => p.clientNum === recorded)
+          if (recordedIsPlaying) {
+            engine.setFollow(-1)
+            setFollow(-1)
+            return
+          }
+
           if (wanted) {
             // The library says "sora"; the demo says "^8^5^8sora" or
             // "[TSB] sora", so both sides are normalised before matching.
@@ -296,8 +314,9 @@ export function DemoViewer({
               return
             }
           }
-          // No protagonist, or no confident match: the recorded view, which is
-          // what the demo was framed as. -1 rather than the 0 left behind.
+
+          // A bot recording with nobody named: the recorded view is still the
+          // honest answer, even if it is a dull one.
           engine.setFollow(-1)
           setFollow(-1)
           return
