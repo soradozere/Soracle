@@ -528,9 +528,14 @@ export async function finishDemoTrim(
   }
 
   const supabase = createServiceClient()
-  const { data: demo } = await supabase.from("demos").select("file_path").eq("id", demoId).maybeSingle()
+  const { data: demo } = await supabase
+    .from("demos")
+    .select("file_path, duration_ms")
+    .eq("id", demoId)
+    .maybeSingle()
   if (!demo) return { success: false, error: "Demo not found." }
   const oldPath = demo.file_path as string
+  const oldDurationMs = demo.duration_ms as number | null
 
   const durationMs = Math.round(endMs - startMs)
   const { error } = await supabase
@@ -551,6 +556,31 @@ export async function finishDemoTrim(
       await supabase.from("demo_moments").update({ at_ms: Math.round(m.at_ms - startMs) }).eq("id", m.id)
     }
   }
+
+  /*
+   * Record what was replaced before letting the file go.
+   *
+   * The original lands in trash/, which expires after a week -- so without a
+   * row here, spotting a bad cut on day three means guessing which anonymous
+   * UUID to restore, and after day seven there is nothing left to guess at.
+   * Written before the delete so a trim is never untraceable, and deliberately
+   * not fatal: losing the audit line is not a reason to fail a cut that has
+   * already happened.
+   */
+  const cookieStore = await cookies()
+  const trimmedBy = verifySessionValue(cookieStore.get(PLAYER_SESSION_COOKIE)?.value)
+  await supabase
+    .from("demo_trims")
+    .insert({
+      demo_id: demoId,
+      old_file_path: oldPath,
+      new_file_path: storagePath,
+      start_ms: Math.round(startMs),
+      end_ms: Math.round(endMs),
+      old_duration_ms: oldDurationMs,
+      trimmed_by: trimmedBy,
+    })
+    .then(undefined, () => {})
 
   // Only once the row points somewhere else. Copies to trash/ on the way out.
   if (oldPath && oldPath !== storagePath) await deleteDemoFile(oldPath).catch(() => {})
