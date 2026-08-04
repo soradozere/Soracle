@@ -511,18 +511,26 @@ export function DemoViewer({
         }
       }
       setMatchTime(engine.getMatchTime())
+      // Before the optional extras below: this drives the POV picker, and it
+      // must not be hostage to anything newer or more fragile.
+      setPlayers(engine.getPlayers())
 
       // The recording states its own map; hand it over the first time it is
-      // readable so nobody has to type it in at upload.
+      // readable so nobody has to type it in at upload. Wrapped because this
+      // is the newest thing the engine is asked for, and the page can be
+      // running against an engine that predates it.
       if (!mapReportedRef.current) {
-        const map = engine.getMapName()
-        if (map) {
+        try {
+          const map = engine.getMapName()
+          if (map) {
+            mapReportedRef.current = true
+            onMapRef.current?.(map)
+          }
+        } catch {
+          // Nothing to do: the map stays whatever the library already knew.
           mapReportedRef.current = true
-          onMapRef.current?.(map)
         }
       }
-
-      setPlayers(engine.getPlayers())
 
       // Kill messages expire on demo time, not wall time: one that faded while
       // the demo was paused would be gone before you looked at it, and one left
