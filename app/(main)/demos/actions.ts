@@ -130,7 +130,8 @@ export async function finishDemoUpload(storagePath: string, formData: FormData):
 
   const badTitle = titleIssue(title)
   if (badTitle) return { success: false, error: badTitle }
-  if (!map) return { success: false, error: "Map is required." }
+  // Map is not asked for: the recording carries its own \mapname\, and the
+  // viewer reports it the first time anyone watches (see reportDemoMap).
   if (!GAMETYPES.includes(gametype as (typeof GAMETYPES)[number])) {
     return { success: false, error: "Gametype must be CTF, FFA, or TeamFFA." }
   }
@@ -245,12 +246,11 @@ export async function updateDemo(demoId: string, formData: FormData): Promise<Ac
   }
 
   const supabase = createServiceClient()
-  // Who uploaded it and who it is about are the two fields that decide how a
-  // demo is credited and where it surfaces, so they stay with admins -- an
-  // uploader editing their own clip has no business reassigning either.
-  const adminOnly = editor.isAdmin
-    ? { uploader_player_id: uploaderPlayerId, protagonist_player_id: protagonistPlayerId }
-    : {}
+  // Crediting the upload to someone else stays with admins -- that decides
+  // whose library a demo shows up in. Naming the protagonist does not: it is
+  // a statement about the recording, the uploader is usually in it, and they
+  // are the one who knows whose clip it is.
+  const adminOnly = editor.isAdmin ? { uploader_player_id: uploaderPlayerId } : {}
   const { error: updateError } = await supabase
     .from("demos")
     .update({
@@ -260,6 +260,7 @@ export async function updateDemo(demoId: string, formData: FormData): Promise<Ac
       recorded_at: recordedAt,
       description,
       tags,
+      protagonist_player_id: protagonistPlayerId,
       ...adminOnly,
     })
     .eq("id", demoId)
@@ -419,6 +420,70 @@ export async function setDemoPlaylists(demoId: string, playlistIds: string[]): P
   }
 
   return { success: true, id: demoId }
+}
+
+export interface MomentInput {
+  atMs: number
+  label: string
+  tag: string
+}
+
+/**
+ * Replace a demo's heat moments.
+ *
+ * Whole-set rather than add/remove, matching how the player tags and highlight
+ * tags already save: the edit dialog always holds the complete list, so a diff
+ * would be reconstructing something the caller just sent. Open to whoever may
+ * edit the demo -- the uploader cut the clip for the moment, so they are the
+ * one who knows where it is.
+ */
+export async function setDemoMoments(demoId: string, moments: MomentInput[]): Promise<ActionResult> {
+  const editor = await resolveEditor(demoId)
+  if (!editor.ok) return { success: false, error: editor.error }
+
+  const cookieStore = await cookies()
+  const playerId = verifySessionValue(cookieStore.get(PLAYER_SESSION_COOKIE)?.value)
+
+  const clean = moments
+    .filter((m) => Number.isFinite(m.atMs) && m.atMs >= 0)
+    .slice(0, 40)
+    .map((m) => ({
+      demo_id: demoId,
+      at_ms: Math.round(m.atMs),
+      label: maskSlurs(m.label ?? "").trim().slice(0, 60) || null,
+      tag: normaliseTags([m.tag ?? ""])[0] ?? null,
+      created_by: playerId,
+    }))
+
+  const supabase = createServiceClient()
+  const { error: clearError } = await supabase.from("demo_moments").delete().eq("demo_id", demoId)
+  if (clearError) return { success: false, error: clearError.message }
+  if (clean.length > 0) {
+    const { error } = await supabase.from("demo_moments").insert(clean)
+    if (error) return { success: false, error: error.message }
+  }
+  return { success: true, id: demoId }
+}
+
+/**
+ * Record the map a demo is on, as the engine read it out of the recording.
+ *
+ * Nobody should have to type this in: the .dm_15 states its own map in
+ * CS_SERVERINFO, and the viewer has that string the moment playback starts.
+ * The catch is that the caller is an anonymous page, so this only ever fills
+ * a blank -- it cannot overwrite a map that is already recorded, which makes
+ * the worst case "the first person to watch a new upload got it right", not
+ * "anyone can rewrite any demo's map".
+ */
+export async function reportDemoMap(demoId: string, map: string): Promise<void> {
+  const name = map.trim().toLowerCase()
+  // Map names are filesystem-shaped: letters, digits, underscores.
+  if (!/^[a-z0-9_]{3,64}$/.test(name)) return
+
+  const supabase = createServiceClient()
+  const { data: demo } = await supabase.from("demos").select("map").eq("id", demoId).maybeSingle()
+  if (!demo || (demo.map as string | null)?.trim()) return
+  await supabase.from("demos").update({ map: name }).eq("id", demoId)
 }
 
 const VIEWER_COOKIE = "soracle_viewer"

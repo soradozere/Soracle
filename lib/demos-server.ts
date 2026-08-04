@@ -44,8 +44,16 @@ export interface DemoComment {
   author: DemoPlayerTag
 }
 
+export interface DemoMoment {
+  id: string
+  atMs: number
+  label: string | null
+  tag: string | null
+}
+
 export interface DemoDetail extends DemoListItem {
   demoUrl: string
+  moments: DemoMoment[]
 }
 
 interface DemoRow {
@@ -154,8 +162,17 @@ export async function getDemo(id: string): Promise<DemoDetail | null> {
   const { data, error } = await supabase.from("demos").select("*").eq("id", id).maybeSingle()
   if (error || !data) return null
   const row = data as DemoRow
-  const [withRelations] = await attachRelations([row])
-  return { ...withRelations, demoUrl: demoFileUrl(row.file_path) }
+  const [[withRelations], { data: moments }] = await Promise.all([
+    attachRelations([row]),
+    supabase.from("demo_moments").select("id, at_ms, label, tag").eq("demo_id", id).order("at_ms"),
+  ])
+  return {
+    ...withRelations,
+    demoUrl: demoFileUrl(row.file_path),
+    moments: ((moments ?? []) as { id: string; at_ms: number; label: string | null; tag: string | null }[]).map(
+      (m) => ({ id: m.id, atMs: m.at_ms, label: m.label, tag: m.tag }),
+    ),
+  }
 }
 
 
