@@ -32,26 +32,19 @@ import type {
 import { DEMO_TAGS, demoTagClasses, demoTagLabel } from "@/lib/demo-tags"
 import {
   addComment,
+  addDemoMoment,
   deleteComment,
   deleteDemo,
   rateDemo,
   recordDemoView,
+  removeDemoMoment,
   reportDemoMap,
-  setDemoMoments,
   setDemoPlaylists,
   updateDemo,
 } from "@/app/(main)/demos/actions"
 import { cn, formatDuration } from "@/lib/utils"
 
 const GAMETYPES: Gametype[] = ["CTF", "FFA", "TeamFFA"]
-
-/** A moment being edited: `key` is local only, so unsaved rows can be removed. */
-interface MomentDraft {
-  key: string
-  atMs: number
-  label: string
-  tag: string
-}
 
 function TagBadges({ tags }: { tags: string[] }) {
   if (tags.length === 0) return null
@@ -341,7 +334,6 @@ function EditDemoDialog({
   playlists,
   inPlaylistIds,
   isAdmin,
-  currentMs,
 }: {
   demo: DemoDetailData
   players: { id: string; name: string }[]
@@ -353,8 +345,6 @@ function EditDemoDialog({
    * enforces the same split rather than trusting this flag.
    */
   isAdmin: boolean
-  /** Where playback is right now, for stamping a moment without typing one. */
-  currentMs: () => number
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -364,9 +354,6 @@ function EditDemoDialog({
   const [highlightTags, setHighlightTags] = useState<string[]>(demo.tags)
   const [playlistIds, setPlaylistIds] = useState<string[]>(inPlaylistIds)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
-  const [momentDrafts, setMomentDrafts] = useState<MomentDraft[]>(
-    demo.moments.map((m) => ({ key: m.id, atMs: m.atMs, label: m.label ?? "", tag: m.tag ?? "" })),
-  )
   const [pending, startTransition] = useTransition()
 
   const visiblePlayers = players.filter((p) => p.name.toLowerCase().includes(playerFilter.toLowerCase()))
@@ -391,14 +378,6 @@ function EditDemoDialog({
       const result = await updateDemo(demo.id, formData)
       if (!result.success) {
         setError(result.error)
-        return
-      }
-      const momentResult = await setDemoMoments(
-        demo.id,
-        momentDrafts.map((m) => ({ atMs: m.atMs, label: m.label, tag: m.tag })),
-      )
-      if (!momentResult.success) {
-        setError(momentResult.error)
         return
       }
 
@@ -542,7 +521,6 @@ function EditDemoDialog({
               })}
             </div>
           </div>
-          <MomentEditor moments={momentDrafts} onChange={setMomentDrafts} currentMs={currentMs} />
           {isAdmin && (
           <div className="space-y-1.5">
             <Label>Playlists</Label>
@@ -634,88 +612,61 @@ function EditDemoDialog({
 }
 
 /**
- * Marking the moments worth watching.
+ * Marking the moment worth watching, right now, on its own.
  *
  * The timestamp is taken from the player rather than typed: you mark a moment
  * while you are looking at it, which is the only way anyone would ever get it
- * right to the second. Everything else is optional -- a bare timestamp is a
- * useful marker on its own.
+ * right to the second. Saves the instant it's marked -- not staged behind the
+ * rest of the edit form -- since the whole point is catching it before it's
+ * gone. A short label is optional; a bare timestamp is a useful marker too.
  */
-function MomentEditor({
+function MomentMarker({
+  demoId,
+  currentMs,
   moments,
   onChange,
-  currentMs,
 }: {
-  moments: MomentDraft[]
-  onChange: (next: MomentDraft[]) => void
+  demoId: string
   currentMs: () => number
+  moments: DemoMoment[]
+  onChange: (next: DemoMoment[]) => void
 }) {
   const [label, setLabel] = useState("")
-  const [tag, setTag] = useState<string>("")
+  const [error, setError] = useState<string | null>(null)
+  const [pending, startTransition] = useTransition()
 
-  function add() {
+  function mark() {
+    setError(null)
     const atMs = Math.max(0, Math.round(currentMs()))
-    const next = [...moments, { key: `${atMs}-${Math.random()}`, atMs, label: label.trim(), tag }]
-    next.sort((a, b) => a.atMs - b.atMs)
-    onChange(next)
-    setLabel("")
+    startTransition(async () => {
+      const result = await addDemoMoment(demoId, atMs, label)
+      if (!result.success || !result.moment) {
+        setError(result.success ? "Couldn't save that moment." : result.error)
+        return
+      }
+      onChange([...moments, result.moment].sort((a, b) => a.atMs - b.atMs))
+      setLabel("")
+    })
   }
 
   return (
-    <div className="space-y-2">
-      <Label>Moments</Label>
-      <p className="text-xs text-muted-foreground">
-        Pause where it happens, then mark it. These glow on the timeline so people can jump straight there.
-      </p>
-      <div className="flex flex-wrap gap-2">
-        <Input
-          placeholder="What happens? (optional)"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
-          className="min-w-0 flex-1"
-          onKeyDown={(e) => {
-            if (e.key === "Enter") {
-              e.preventDefault()
-              add()
-            }
-          }}
-        />
-        <Select value={tag || "__none__"} onValueChange={(v) => setTag(v === "__none__" ? "" : v)}>
-          <SelectTrigger className="w-32">
-            <SelectValue placeholder="Type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">No type</SelectItem>
-            {DEMO_TAGS.map((t) => (
-              <SelectItem key={t.id} value={t.id}>
-                {t.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button type="button" variant="secondary" onClick={add}>
-          Mark {formatDuration(Math.max(0, Math.round(currentMs())))}
-        </Button>
-      </div>
-      {moments.length > 0 && (
-        <ul className="space-y-1 rounded-md border p-2">
-          {moments.map((m) => (
-            <li key={m.key} className="flex items-center gap-2 text-sm">
-              <span className="tabular-nums text-muted-foreground">{formatDuration(m.atMs)}</span>
-              <span className="min-w-0 flex-1 truncate">{m.label || <em className="text-muted-foreground">unnamed</em>}</span>
-              {m.tag && <Badge className={cn("border", demoTagClasses(m.tag))}>{demoTagLabel(m.tag)}</Badge>}
-              <button
-                type="button"
-                aria-label="Remove moment"
-                onClick={() => onChange(moments.filter((x) => x.key !== m.key))}
-                className="p-1 text-muted-foreground hover:text-destructive"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
+    <div className="flex flex-wrap items-center gap-2">
+      <Input
+        placeholder="What's happening? (optional)"
+        value={label}
+        onChange={(e) => setLabel(e.target.value)}
+        className="h-8 w-44 text-xs"
+        onKeyDown={(e) => {
+          if (e.key === "Enter") {
+            e.preventDefault()
+            mark()
+          }
+        }}
+      />
+      <Button type="button" variant="outline" size="sm" disabled={pending} onClick={mark}>
+        Mark {formatDuration(Math.max(0, Math.round(currentMs())))}
+      </Button>
+      {error && <span className="text-xs text-destructive">{error}</span>}
     </div>
   )
 }
@@ -752,6 +703,10 @@ export function DemoDetail({
   const playbackMsRef = useRef(0)
   // Handed up by the player so a timestamp in a comment can drive it.
   const seekRef = useRef<((ms: number) => void) | null>(null)
+  // Held here rather than re-derived from `demo` so marking or removing a
+  // moment shows up on the scrubber immediately, without a full page reload.
+  const [moments, setMoments] = useState<DemoMoment[]>(demo.moments)
+  const canEditMoments = isAdmin || (!!currentPlayerId && demo.uploaderPlayerId === currentPlayerId)
 
   return (
     <div className={cn("grid grid-cols-1 gap-6", !theater && "lg:grid-cols-[minmax(0,1fr)_20rem]")}>
@@ -771,7 +726,21 @@ export function DemoDetail({
             onSeekReady={(fn) => {
               seekRef.current = fn
             }}
-            moments={demo.moments}
+            moments={moments}
+            onRemoveMoment={
+              canEditMoments
+                ? (id: string) => {
+                    const removed = moments.find((m) => m.id === id)
+                    setMoments((prev) => prev.filter((m) => m.id !== id))
+                    void removeDemoMoment(demo.id, id).then((result) => {
+                      // Put it back -- the delete didn't actually happen.
+                      if (!result.success && removed) {
+                        setMoments((prev) => [...prev, removed].sort((a, b) => a.atMs - b.atMs))
+                      }
+                    })
+                  }
+                : undefined
+            }
           />
         </div>
 
@@ -824,15 +793,20 @@ export function DemoDetail({
             )}
             {/* The uploader can fix their own details without going through an
                 admin -- a typo in a title shouldn't need one. */}
-            {(isAdmin || (!!currentPlayerId && demo.uploaderPlayerId === currentPlayerId)) && (
-              <div className="mt-3">
+            {canEditMoments && (
+              <div className="mt-3 flex flex-wrap items-center gap-3">
                 <EditDemoDialog
                   demo={demo}
                   players={players}
                   playlists={playlists}
                   inPlaylistIds={inPlaylistIds}
                   isAdmin={isAdmin}
+                />
+                <MomentMarker
+                  demoId={demo.id}
                   currentMs={() => playbackMsRef.current}
+                  moments={moments}
+                  onChange={setMoments}
                 />
               </div>
             )}

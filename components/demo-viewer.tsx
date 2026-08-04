@@ -14,6 +14,7 @@ import {
   Settings,
   Volume2,
   VolumeX,
+  X,
 } from "lucide-react"
 import {
   JkdEngine,
@@ -49,6 +50,31 @@ const DEFAULT_VOLUME = 0.8
 const SENSITIVITY_MIN = 20
 const SENSITIVITY_MAX = 40
 const SENSITIVITY_DEFAULT = 20
+
+/**
+ * Where the chase camera sits around the player being followed.
+ *
+ * Angle is a full circle expressed as a swing either way from directly behind,
+ * so 0 is the default over-the-shoulder shot and ±180 both land head-on. Pitch
+ * stops short of straight up and down, where a camera looking along its own
+ * axis has nothing left to orient by.
+ */
+const CAM_ANGLE_MIN = -180
+const CAM_ANGLE_MAX = 180
+const CAM_PITCH_MIN = -60
+const CAM_PITCH_MAX = 60
+/** How far one arrow-key press nudges the camera, in degrees. */
+const CAM_NUDGE = 5
+
+/**
+ * The kill feed, top left, as the game prints it.
+ *
+ * Held for eight seconds of *demo* time rather than wall time, so slow motion
+ * reads them at the pace of the fight they describe. Five lines is what a busy
+ * CTF exchange produces in that window without the feed becoming the picture.
+ */
+const FEED_MAX_LINES = 5
+const FEED_HOLD_MS = 8000
 
 // Kept out of the engine because the engine cannot act on it after boot -- the
 // choice has to survive a page load to be applied at all.
@@ -88,6 +114,12 @@ interface DemoViewerProps {
    * its two seconds of interest are.
    */
   moments?: { id: string; atMs: number; label: string | null; tag: string | null }[]
+  /**
+   * Lets whoever is watching take a moment back off the timeline. Left unset
+   * for anyone who isn't allowed to edit this demo -- their moment chips are
+   * plain, not editable.
+   */
+  onRemoveMoment?: (id: string) => void
   /** Playback position, pushed out so the page can stamp a moment with it. */
   onPositionChange?: (ms: number) => void
   /**
@@ -105,6 +137,7 @@ export function DemoViewer({
   onPlaybackStarted,
   onMapDetected,
   moments = [],
+  onRemoveMoment,
   onPositionChange,
   onSeekReady,
 }: DemoViewerProps) {
@@ -133,6 +166,8 @@ export function DemoViewer({
   // Engine settings the viewer can reach, mirrored here only so the controls
   // can render their current position -- the engine remains the owner.
   const [range, setRange] = useState(RANGE_DEFAULT)
+  const [camAngle, setCamAngle] = useState(0)
+  const [camPitch, setCamPitch] = useState(0)
   const [sensitivity, setSensitivity] = useState(SENSITIVITY_DEFAULT)
   const [invertLook, setInvertLook] = useState(false)
   const [smoothMouse, setSmoothMouse] = useState(true)
@@ -174,6 +209,15 @@ export function DemoViewer({
   const [seeking, setSeeking] = useState(false)
   const [killMessage, setKillMessage] = useState<{ lead: string; who: string } | null>(null)
   const [announcement, setAnnouncement] = useState<string | null>(null)
+  /**
+   * The running kill feed, newest last, as the game would print it.
+   *
+   * Each line carries the demo time it arrived at so it can expire on the
+   * *demo's* clock rather than the wall clock -- otherwise watching at 0.25x
+   * would blink lines away mid-fight, and a seek would leave stale ones sitting
+   * there describing something that has not happened yet.
+   */
+  const [feed, setFeed] = useState<{ id: number; text: string; atMs: number }[]>([])
 
   // Scrub state lives in refs: the drag handlers run far more often than React
   // should re-render, and the gesture has to survive a re-render mid-drag.
@@ -182,6 +226,7 @@ export function DemoViewer({
   const pendingTargetRef = useRef<number | null>(null)
   const killShownAtRef = useRef(-1)
   const announceShownAtRef = useRef(-1)
+  const feedIdRef = useRef(0)
   const rangeRef = useRef(RANGE_DEFAULT)
   // A renderer restart stops the demo on its way through, which reaches the
   // viewer as an ordinary end of playback. Without this the quality toggle
@@ -199,6 +244,10 @@ export function DemoViewer({
   // The chosen speed, readable from callbacks that must not be rebuilt every
   // time it changes -- a seek has to put it back (see requestSeek).
   const speedRef = useRef(1)
+  // Same reason as speedRef: a backward seek reopens the demo, and these are
+  // cheat-flagged cvars the engine is entitled to reset on the way through.
+  const camAngleRef = useRef(0)
+  const camPitchRef = useRef(0)
   // Where the scrubber currently sits, so the release handler knows the target
   // even though it fires on the window rather than on the input.
   const scrubValueRef = useRef(0)
@@ -391,6 +440,11 @@ export function DemoViewer({
         setAnnouncement(text)
         announceShownAtRef.current = engine.getElapsed()
       },
+      onFeed: (text) => {
+        if (cancelled) return
+        const atMs = engine.getElapsed()
+        setFeed((prev) => [...prev, { id: feedIdRef.current++, text, atMs }].slice(-FEED_MAX_LINES))
+      },
       onPlaybackEnded: (real) => {
         if (cancelled || restartingRef.current || !playedRef.current) return
         if (real > 0) setSpan(real)
@@ -423,7 +477,9 @@ export function DemoViewer({
         engine.setPaused(false)
         engine.setVolume(DEFAULT_VOLUME)
         engine.setFov(FIXED_FOV)
-        engine.setSensitivity(SENSITIVITY_DEFAULT)
+        engine.stopAutoOrbit()
+        // Sensitivity is not set here: it is gated on the camera mode, by the
+        // effect that watches it.
         return applyLinkState(engine).then(() => applyDefaultFollow(engine))
       })
       .catch((err: Error) => {
@@ -469,6 +525,7 @@ export function DemoViewer({
     setSpan(Math.max(durationMs, 1000))
     setKillMessage(null)
     setAnnouncement(null)
+    setFeed([])
     killShownAtRef.current = -1
     announceShownAtRef.current = -1
     playedRef.current = false
@@ -534,6 +591,12 @@ export function DemoViewer({
       // must not be hostage to anything newer or more fragile.
       setPlayers(engine.getPlayers())
 
+      // The game can switch the orbit on partway through -- its end-of-match
+      // handlers do exactly that -- so pinning it at boot is not enough. Read
+      // first and only write when it has actually drifted: the read is a plain
+      // C call, while the write goes through the command buffer.
+      if (engine.getCvarNumber("cg_cameraOrbit") !== 0) engine.stopAutoOrbit()
+
       // The recording states its own map; hand it over the first time it is
       // readable so nobody has to type it in at upload. Wrapped because this
       // is the newest thing the engine is asked for, and the page can be
@@ -568,6 +631,18 @@ export function DemoViewer({
           setAnnouncement(null)
         }
       }
+      // Same rule for the feed, line by line. A negative age means the demo has
+      // been seeked back behind the line, which describes something that has
+      // not happened again yet.
+      if (now >= 0) {
+        setFeed((prev) => {
+          const kept = prev.filter((l) => {
+            const age = now - l.atMs
+            return age >= 0 && age <= FEED_HOLD_MS
+          })
+          return kept.length === prev.length ? prev : kept
+        })
+      }
     }, 200)
 
     return () => window.clearInterval(id)
@@ -595,9 +670,22 @@ export function DemoViewer({
     setCamera(mode)
   }, [])
 
+  /**
+   * Picking whose shoulder to watch over.
+   *
+   * Asking to chase the player the demo was recorded from is really a request
+   * for the recorded view, and has to be sent as one: the chase camera tracks
+   * its target through cg_entities[], where the recording client's own body
+   * does not appear (their state arrives as the playerState instead). Chasing
+   * them lands on the last valid target's stale position -- a camera parked in
+   * an empty corridor -- so it is routed to the recorded view, which is the
+   * same picture anyone asking for it wanted.
+   */
   const chooseFollow = useCallback((clientNum: number) => {
-    engineRef.current?.setFollow(clientNum)
-    setFollow(clientNum)
+    const recorded = engineRef.current?.getViewClientNum() ?? -1
+    const target = clientNum >= 0 && clientNum === recorded ? -1 : clientNum
+    engineRef.current?.setFollow(target)
+    setFollow(target)
   }, [])
 
   const toggleFullscreen = useCallback(() => {
@@ -640,6 +728,9 @@ export function DemoViewer({
       // timescaled demo". Watching in slow motion is not dropping out of it,
       // so the chosen speed goes back on afterwards.
       engine.setSpeed(speedRef.current)
+      engine.setThirdPersonAngle(camAngleRef.current)
+      engine.setThirdPersonPitch(camPitchRef.current)
+      engine.stopAutoOrbit()
       const queued = pendingTargetRef.current
       pendingTargetRef.current = null
       if (queued !== null) {
@@ -784,8 +875,52 @@ export function DemoViewer({
 
   const changeSensitivity = useCallback((v: number) => {
     setSensitivity(v)
-    engineRef.current?.setSensitivity(v)
   }, [])
+
+  const changeCamAngle = useCallback((v: number) => {
+    // Wraps rather than clamps: swinging past head-on should come round the
+    // other side, not stick against the end of the slider.
+    const wrapped = ((((v + 180) % 360) + 360) % 360) - 180
+    setCamAngle(wrapped)
+    camAngleRef.current = wrapped
+    engineRef.current?.setThirdPersonAngle(wrapped)
+  }, [])
+
+  const changeCamPitch = useCallback((v: number) => {
+    const clamped = Math.min(CAM_PITCH_MAX, Math.max(CAM_PITCH_MIN, v))
+    setCamPitch(clamped)
+    camPitchRef.current = clamped
+    engineRef.current?.setThirdPersonPitch(clamped)
+  }, [])
+
+  const resetCamera = useCallback(() => {
+    changeCamAngle(0)
+    changeCamPitch(0)
+  }, [changeCamAngle, changeCamPitch])
+
+  /**
+   * Only let the mouse steer when steering is what the mouse is for.
+   *
+   * SDL feeds every mousemove over the canvas straight to the engine's view
+   * angles -- so while following a player, merely passing the cursor across
+   * the picture used to swing the camera, which reads as the view drifting on
+   * its own. Zeroing sensitivity is the switch: the events still arrive, they
+   * just scale to nothing.
+   *
+   * The mode is the whole test, deliberately, and pointer lock is not part of
+   * it. Free fly does not depend on the lock -- it is requested but does not
+   * always land (the browser refuses it outside a user gesture, and in an
+   * embedded frame it can fail outright) and mouse-look works regardless, so
+   * gating on it took the mouse away from the one mode whose point is looking
+   * around. Following does not want the mouse at all: the chase camera will
+   * happily orbit off a usercmd delta, which is what made the view lurch the
+   * moment anyone clicked the picture, and the camera-angle controls do that
+   * job deliberately now.
+   */
+  useEffect(() => {
+    if (!ready) return
+    engineRef.current?.setSensitivity(camera === "free" ? sensitivity : 0)
+  }, [ready, camera, sensitivity])
 
   const toggleInvert = useCallback((on: boolean) => {
     setInvertLook(on)
@@ -852,8 +987,20 @@ export function DemoViewer({
    */
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (!ready || e.repeat || e.metaKey || e.ctrlKey || e.altKey) return
-      if (e.target instanceof HTMLElement && e.target.closest("button, a, input, select, textarea")) return
+      if (!ready || e.metaKey || e.ctrlKey || e.altKey) return
+      // Some remote-input paths deliver an arrow as the legacy unprefixed name.
+      const arrow = /^(Arrow)?(Left|Right|Up|Down)$/.exec(e.key)?.[2] ?? null
+      // Auto-repeat is a mis-fire for a toggle but exactly right for the
+      // arrows, where holding one should sweep the camera round.
+      if (e.repeat && !arrow) return
+      if (e.target instanceof HTMLElement) {
+        // Sliders and text fields own the arrow keys outright, so those always
+        // win. Buttons do not use them -- and after clicking any control the
+        // focus is sitting on one, so bailing there would mean the arrows
+        // stopped working the moment you touched the player's own chrome.
+        const owner = e.target.closest("button, a, input, select, textarea")
+        if (owner && (!arrow || !owner.matches("button, a"))) return
+      }
       // Match on key as well as code: virtual keyboards and remote-input
       // software deliver real keydowns with an empty `code`.
       if (e.code === "Space" || e.key === " ") {
@@ -862,11 +1009,23 @@ export function DemoViewer({
         else togglePaused()
       } else if (e.code === "KeyM" || e.key.toLowerCase() === "m") {
         toggleMuted()
+      } else if (arrow) {
+        // Only while a chase camera is up: in free fly the arrows are the
+        // engine's own, and the third-person angles mean nothing anyway.
+        if (camera !== "follow") return
+        e.preventDefault()
+        // Off the refs, not off state: auto-repeat fires faster than React
+        // re-renders, so reading state here would have every press in a burst
+        // start from the same stale angle and the camera would crawl.
+        if (arrow === "Left") changeCamAngle(camAngleRef.current - CAM_NUDGE)
+        else if (arrow === "Right") changeCamAngle(camAngleRef.current + CAM_NUDGE)
+        else if (arrow === "Up") changeCamPitch(camPitchRef.current - CAM_NUDGE)
+        else if (arrow === "Down") changeCamPitch(camPitchRef.current + CAM_NUDGE)
       }
     }
     window.addEventListener("keydown", onKey)
     return () => window.removeEventListener("keydown", onKey)
-  }, [ready, ended, replay, togglePaused, toggleMuted])
+  }, [ready, ended, replay, togglePaused, toggleMuted, camera, changeCamAngle, changeCamPitch])
 
   // Asked once on mount rather than from a userAgent guess: `hover: none` is
   // the actual question -- can this input device hover at all.
@@ -954,6 +1113,24 @@ export function DemoViewer({
       {ready && !failed && camera === "free" && (
         <div className="pointer-events-none absolute inset-x-0 top-5 text-center text-xl font-semibold text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.85)]">
           Free camera
+        </div>
+      )}
+
+      {/* The kill feed, where the game puts it. Obituaries and flag events only
+          -- the engine feeds this from those two printers rather than from the
+          console, so chat never reaches it. Monospaced and left-aligned, since
+          it is a log being skimmed rather than prose. Sits below the match
+          clock, which owns the top-left corner and is always up. */}
+      {feed.length > 0 && (
+        <div className="pointer-events-none absolute left-4 top-14 flex max-w-[min(30rem,55%)] flex-col gap-0.5">
+          {feed.map((line) => (
+            <span
+              key={line.id}
+              className="w-fit rounded bg-black/45 px-1.5 py-0.5 font-mono text-[11px] leading-snug text-white/90 drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)]"
+            >
+              {line.text}
+            </span>
+          ))}
         </div>
       )}
 
@@ -1064,6 +1241,42 @@ export function DemoViewer({
               step={4}
               onChange={changeRange}
             />
+            {/* Only while a chase camera is up -- the free camera flies on its
+                own angles and these would do nothing. */}
+            {camera === "follow" && (
+              <>
+                <SettingSlider
+                  label="Camera angle"
+                  value={camAngle}
+                  display={camAngle === 0 ? "Behind" : `${camAngle > 0 ? "+" : ""}${camAngle}°`}
+                  min={CAM_ANGLE_MIN}
+                  max={CAM_ANGLE_MAX}
+                  step={CAM_NUDGE}
+                  onChange={changeCamAngle}
+                />
+                <SettingSlider
+                  label="Camera height"
+                  value={camPitch}
+                  display={camPitch === 0 ? "Level" : `${camPitch > 0 ? "+" : ""}${camPitch}°`}
+                  min={CAM_PITCH_MIN}
+                  max={CAM_PITCH_MAX}
+                  step={CAM_NUDGE}
+                  onChange={changeCamPitch}
+                />
+                <div className="flex items-center justify-between gap-2 px-2 py-1.5">
+                  <span className="text-[11px] text-white/40">Arrow keys nudge {CAM_NUDGE}°</span>
+                  <button
+                    type="button"
+                    onClick={resetCamera}
+                    disabled={camAngle === 0 && camPitch === 0}
+                    className="rounded border border-white/15 px-2 py-0.5 text-[11px] text-white/70 transition-colors enabled:hover:border-white/30 enabled:hover:bg-white/10 enabled:hover:text-white disabled:opacity-30"
+                  >
+                    Reset
+                  </button>
+                </div>
+                <div className="my-1 border-t border-white/10" />
+              </>
+            )}
             <SettingSlider
               label="Mouse sensitivity"
               value={sensitivity}
@@ -1128,19 +1341,33 @@ export function DemoViewer({
         {moments.length > 0 && (
           <div className="mb-2 flex flex-wrap items-center gap-1.5">
             {moments.map((m) => (
-              <button
+              <span
                 key={m.id}
-                onClick={() => {
-                  setEnded(false)
-                  requestSeek(m.atMs, true)
-                }}
-                disabled={!ready}
-                title={`Jump to ${formatTime(m.atMs)}`}
-                className="flex items-center gap-1.5 rounded-full border border-amber-300/40 bg-amber-300/10 px-2 py-0.5 text-[11px] text-amber-100 transition-colors hover:bg-amber-300/25 disabled:opacity-40"
+                className="flex items-center gap-1.5 rounded-full border border-amber-300/40 bg-amber-300/10 pl-2 pr-0.5 py-0.5 text-[11px] text-amber-100"
               >
-                <span className="tabular-nums opacity-70">{formatTime(m.atMs)}</span>
-                {m.label && <span className="max-w-[14rem] truncate">{m.label}</span>}
-              </button>
+                <button
+                  onClick={() => {
+                    setEnded(false)
+                    requestSeek(m.atMs, true)
+                  }}
+                  disabled={!ready}
+                  title={`Jump to ${formatTime(m.atMs)}`}
+                  className="flex items-center gap-1.5 py-0.5 transition-colors hover:text-white disabled:opacity-40"
+                >
+                  <span className="tabular-nums opacity-70">{formatTime(m.atMs)}</span>
+                  {m.label && <span className="max-w-[14rem] truncate">{m.label}</span>}
+                </button>
+                {onRemoveMoment && (
+                  <button
+                    onClick={() => onRemoveMoment(m.id)}
+                    title="Remove moment"
+                    aria-label="Remove moment"
+                    className="rounded-full p-0.5 text-amber-100/60 transition-colors hover:bg-amber-300/25 hover:text-amber-100"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </span>
             ))}
           </div>
         )}
