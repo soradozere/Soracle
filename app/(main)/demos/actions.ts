@@ -1,6 +1,7 @@
 "use server"
 
 import { cookies } from "next/headers"
+import type { DemoMoment } from "@/lib/demos-server"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
@@ -422,46 +423,59 @@ export async function setDemoPlaylists(demoId: string, playlistIds: string[]): P
   return { success: true, id: demoId }
 }
 
-export interface MomentInput {
-  atMs: number
-  label: string
-  tag: string
-}
-
 /**
- * Replace a demo's heat moments.
- *
- * Whole-set rather than add/remove, matching how the player tags and highlight
- * tags already save: the edit dialog always holds the complete list, so a diff
- * would be reconstructing something the caller just sent. Open to whoever may
- * edit the demo -- the uploader cut the clip for the moment, so they are the
- * one who knows where it is.
+ * Mark a moment the instant it happens, saved on its own rather than staged
+ * behind the rest of the edit form -- a moment marked mid-watch shouldn't be
+ * lost because some unrelated field on the form didn't validate. Open to
+ * whoever may edit the demo -- the uploader cut the clip, so they are the one
+ * who knows where the moment is.
  */
-export async function setDemoMoments(demoId: string, moments: MomentInput[]): Promise<ActionResult> {
+export async function addDemoMoment(
+  demoId: string,
+  atMs: number,
+  label: string,
+): Promise<ActionResult & { moment?: DemoMoment }> {
   const editor = await resolveEditor(demoId)
   if (!editor.ok) return { success: false, error: editor.error }
+  if (!Number.isFinite(atMs) || atMs < 0) return { success: false, error: "Invalid timestamp." }
 
   const cookieStore = await cookies()
   const playerId = verifySessionValue(cookieStore.get(PLAYER_SESSION_COOKIE)?.value)
 
-  const clean = moments
-    .filter((m) => Number.isFinite(m.atMs) && m.atMs >= 0)
-    .slice(0, 40)
-    .map((m) => ({
+  const supabase = createServiceClient()
+  const { count } = await supabase
+    .from("demo_moments")
+    .select("id", { count: "exact", head: true })
+    .eq("demo_id", demoId)
+  if ((count ?? 0) >= 40) return { success: false, error: "This demo already has 40 moments -- remove one first." }
+
+  const { data, error } = await supabase
+    .from("demo_moments")
+    .insert({
       demo_id: demoId,
-      at_ms: Math.round(m.atMs),
-      label: maskSlurs(m.label ?? "").trim().slice(0, 60) || null,
-      tag: normaliseTags([m.tag ?? ""])[0] ?? null,
+      at_ms: Math.round(atMs),
+      label: maskSlurs(label ?? "").trim().slice(0, 60) || null,
       created_by: playerId,
-    }))
+    })
+    .select("id, at_ms, label, tag")
+    .single()
+  if (error) return { success: false, error: error.message }
+
+  return {
+    success: true,
+    id: demoId,
+    moment: { id: data.id as string, atMs: data.at_ms as number, label: data.label as string | null, tag: data.tag as string | null },
+  }
+}
+
+/** Undo a moment. Same immediacy as adding one -- no form to re-save. */
+export async function removeDemoMoment(demoId: string, momentId: string): Promise<ActionResult> {
+  const editor = await resolveEditor(demoId)
+  if (!editor.ok) return { success: false, error: editor.error }
 
   const supabase = createServiceClient()
-  const { error: clearError } = await supabase.from("demo_moments").delete().eq("demo_id", demoId)
-  if (clearError) return { success: false, error: clearError.message }
-  if (clean.length > 0) {
-    const { error } = await supabase.from("demo_moments").insert(clean)
-    if (error) return { success: false, error: error.message }
-  }
+  const { error } = await supabase.from("demo_moments").delete().eq("id", momentId).eq("demo_id", demoId)
+  if (error) return { success: false, error: error.message }
   return { success: true, id: demoId }
 }
 
