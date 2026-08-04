@@ -1758,21 +1758,28 @@ function SettingSlider({
    * anyone clicked the slider.
    */
   useEffect(() => {
-    const end = (e: PointerEvent) => {
+    const end = (e: Event) => {
       if (!draggingRef.current) return
       draggingRef.current = false
       const el = inputRef.current
       if (!el) return
-      if (el.hasPointerCapture?.(e.pointerId)) {
-        el.releasePointerCapture(e.pointerId)
-        el.blur()
-      }
+      // Release first if the browser admits to holding a capture, then blur
+      // regardless. The conditional version of this shipped and did not work:
+      // Safari does not report a capture on a range input, so nothing ran and
+      // the thumb kept following the mouse. Blurring is what actually ends it.
+      const pid = (e as PointerEvent).pointerId
+      if (pid !== undefined && el.hasPointerCapture?.(pid)) el.releasePointerCapture(pid)
+      el.blur()
     }
+    // mouseup as well as pointerup: this is a browser that has already been
+    // caught not sending the one the gesture began with.
     window.addEventListener("pointerup", end)
     window.addEventListener("pointercancel", end)
+    window.addEventListener("mouseup", end)
     return () => {
       window.removeEventListener("pointerup", end)
       window.removeEventListener("pointercancel", end)
+      window.removeEventListener("mouseup", end)
     }
   }, [])
 
@@ -1790,6 +1797,9 @@ function SettingSlider({
         step={step}
         value={value}
         onPointerDown={() => {
+          draggingRef.current = true
+        }}
+        onMouseDown={() => {
           draggingRef.current = true
         }}
         onChange={(e) => onChange(Number(e.target.value))}
