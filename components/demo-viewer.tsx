@@ -1741,6 +1741,41 @@ function SettingSlider({
   step?: number
   onChange: (v: number) => void
 }) {
+  const inputRef = useRef<HTMLInputElement>(null)
+  const draggingRef = useRef(false)
+
+  /**
+   * End the drag wherever the pointer is let go.
+   *
+   * The same Safari behaviour the scrubber already guards against: pointerup is
+   * not reliably delivered to a range input, so the thumb goes on following the
+   * mouse with no button held and the next click somewhere else is what finally
+   * lets go of it. The window always sees the release, so the capture is
+   * dropped from there.
+   *
+   * Only after a real drag, and focus is left alone unless Safari has kept the
+   * capture -- otherwise arrow-key adjustment would be taken away the moment
+   * anyone clicked the slider.
+   */
+  useEffect(() => {
+    const end = (e: PointerEvent) => {
+      if (!draggingRef.current) return
+      draggingRef.current = false
+      const el = inputRef.current
+      if (!el) return
+      if (el.hasPointerCapture?.(e.pointerId)) {
+        el.releasePointerCapture(e.pointerId)
+        el.blur()
+      }
+    }
+    window.addEventListener("pointerup", end)
+    window.addEventListener("pointercancel", end)
+    return () => {
+      window.removeEventListener("pointerup", end)
+      window.removeEventListener("pointercancel", end)
+    }
+  }, [])
+
   return (
     <label className="block px-2 py-1.5">
       <span className="mb-1 flex items-center justify-between text-xs text-white">
@@ -1748,11 +1783,15 @@ function SettingSlider({
         <span className="tabular-nums text-white/50">{display}</span>
       </span>
       <input
+        ref={inputRef}
         type="range"
         min={min}
         max={max}
         step={step}
         value={value}
+        onPointerDown={() => {
+          draggingRef.current = true
+        }}
         onChange={(e) => onChange(Number(e.target.value))}
         className="h-1 w-full cursor-pointer accent-cyan-400"
       />
