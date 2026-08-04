@@ -24,6 +24,7 @@ import { DemoViewer } from "@/components/demo-viewer"
 import type {
   DemoComment,
   DemoDetail as DemoDetailData,
+  DemoLink,
   DemoListItem,
   DemoMoment,
   DemoPlaylist,
@@ -75,14 +76,53 @@ function GametypeBadge({ gametype }: { gametype: Gametype }) {
   return <Badge className={cn("border", tint)}>{gametype}</Badge>
 }
 
-function RatingWidget({ demoId, canRate, initial }: { demoId: string; canRate: boolean; initial: number | null }) {
+function RatingWidget({
+  demoId,
+  canRate,
+  initial,
+  avgRating,
+  ratingCount,
+}: {
+  demoId: string
+  canRate: boolean
+  initial: number | null
+  avgRating: number | null
+  ratingCount: number
+}) {
   const [hover, setHover] = useState<number | null>(null)
   const [mine, setMine] = useState<number | null>(initial)
   const [error, setError] = useState<string | null>(null)
   const [pending, startTransition] = useTransition()
 
+  /*
+   * What everyone else made of it, under whatever the stars are showing.
+   *
+   * The stars are personal -- they show your own rating, and swing to follow
+   * the cursor while you pick -- so without this the page could tell you what
+   * you thought and nothing about what anyone else did. The count comes with
+   * it because "4.5" from two people and from forty are not the same claim.
+   *
+   * Not live: this is the figure from page load, so it will not include a
+   * rating just cast. Refreshing is the honest way to see that, rather than
+   * doing arithmetic on a number whose denominator we would be guessing at.
+   */
+  const summary =
+    avgRating !== null && ratingCount > 0 ? (
+      <p className="mt-1 text-xs text-muted-foreground">
+        Global rating: <span className="font-medium text-foreground">{avgRating.toFixed(1)}</span>
+        <span className="tabular-nums"> / 5</span> · {ratingCount} {ratingCount === 1 ? "rating" : "ratings"}
+      </p>
+    ) : (
+      <p className="mt-1 text-xs text-muted-foreground">No ratings yet</p>
+    )
+
   if (!canRate) {
-    return <p className="text-sm text-muted-foreground">Log in as a player to rate this demo.</p>
+    return (
+      <div className="text-right">
+        {summary}
+        <p className="text-sm text-muted-foreground">Log in as a player to rate this demo.</p>
+      </div>
+    )
   }
 
   function submit(n: number) {
@@ -115,6 +155,7 @@ function RatingWidget({ demoId, canRate, initial }: { demoId: string; canRate: b
           </button>
         ))}
       </div>
+      {summary}
       {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
     </div>
   )
@@ -867,6 +908,8 @@ function TrimControl({
 export function DemoDetail({
   demo,
   others,
+  previousDemo,
+  nextDemo,
   canRate,
   ownRating,
   isAdmin,
@@ -878,6 +921,9 @@ export function DemoDetail({
 }: {
   demo: DemoDetailData
   others: DemoListItem[]
+  /** The demos either side of this one, for the end-of-demo overlay. */
+  previousDemo: DemoLink | null
+  nextDemo: DemoLink | null
   canRate: boolean
   ownRating: number | null
   isAdmin: boolean
@@ -933,6 +979,8 @@ export function DemoDetail({
               setTrimSettled(true)
             }}
             trimRange={trimRange}
+            previousDemo={previousDemo}
+            nextDemo={nextDemo}
             moments={moments}
             onRemoveMoment={
               canEditMoments
@@ -1031,7 +1079,13 @@ export function DemoDetail({
               </div>
             )}
           </div>
-          <RatingWidget demoId={demo.id} canRate={canRate} initial={ownRating} />
+          <RatingWidget
+            demoId={demo.id}
+            canRate={canRate}
+            initial={ownRating}
+            avgRating={demo.avgRating}
+            ratingCount={demo.ratingCount}
+          />
         </div>
 
         <DemoComments
