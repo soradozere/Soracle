@@ -22,6 +22,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import type { DemoListItem, Gametype } from "@/lib/demos-server"
 import { DEMO_TAGS, demoTagClasses, demoTagLabel } from "@/lib/demo-tags"
+import { matchRank } from "@/lib/demo-search"
 import { beginDemoUpload, finishDemoUpload } from "@/app/(main)/demos/actions"
 import { cn, formatDuration } from "@/lib/utils"
 
@@ -374,6 +375,7 @@ function monthLabel(key: string): string {
   return new Date(y, m - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })
 }
 
+
 export function DemoLibrary({
   demos,
   players,
@@ -429,7 +431,23 @@ export function DemoLibrary({
     } else {
       sorted.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
     }
-    return sorted
+
+    /*
+     * With a name typed in, put the demos that are *about* that person first.
+     *
+     * A name matches four different things -- who starred in it, who was in
+     * it, who uploaded it, and the words in its title -- and flattening those
+     * into one date-ordered list buries the good stuff. Searching a player
+     * gave their headline clips mixed in with everything they happened to
+     * upload, in whatever order they landed.
+     *
+     * Applied only when something is typed, and only as a first key: the
+     * chosen sort still decides the order inside each band, so switching to
+     * "highest rated" still does what it says, just about the right demos
+     * first.
+     */
+    if (!q) return sorted
+    return sorted.sort((a, b) => matchRank(b, q) - matchRank(a, q))
   }, [demos, query, gametype, month, sort, tag, minRating])
 
   return (
