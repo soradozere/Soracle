@@ -9,6 +9,7 @@ import {
   Link2,
   Maximize,
   Minimize,
+  Monitor,
   RotateCcw,
   Settings,
   Volume2,
@@ -76,9 +77,37 @@ interface DemoViewerProps {
    * page loaded. What a view count should be counting.
    */
   onPlaybackStarted?: () => void
+  /**
+   * The map the recording says it is on, handed over once the gamestate has
+   * arrived. Nobody types this in at upload time; the demo already knows.
+   */
+  onMapDetected?: (map: string) => void
+  /**
+   * The moments worth watching for, in milliseconds from the first frame.
+   * Drawn onto the scrubber and clickable, so a two-minute clip says where
+   * its two seconds of interest are.
+   */
+  moments?: { id: string; atMs: number; label: string | null; tag: string | null }[]
+  /** Playback position, pushed out so the page can stamp a moment with it. */
+  onPositionChange?: (ms: number) => void
+  /**
+   * Hands the page a way to drive playback, so a timestamp written in a
+   * comment can jump the player to it.
+   */
+  onSeekReady?: (seek: (ms: number) => void) => void
 }
 
-export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName, onPlaybackStarted }: DemoViewerProps) {
+export function DemoViewer({
+  demoUrl,
+  durationMs = 0,
+  engineBaseUrl,
+  followName,
+  onPlaybackStarted,
+  onMapDetected,
+  moments = [],
+  onPositionChange,
+  onSeekReady,
+}: DemoViewerProps) {
   // Where the engine's canvas gets parked. React owns this div; it does not
   // own the canvas inside it (see getEngineCanvas).
   const holderRef = useRef<HTMLDivElement>(null)
@@ -127,6 +156,15 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
   // appear or never leave. There, tapping the picture toggles it instead.
   const [touchOnly, setTouchOnly] = useState(false)
   const [tapShowsChrome, setTapShowsChrome] = useState(true)
+  /**
+   * Phones are told, rather than shown a broken picture.
+   *
+   * The engine wants a keyboard, a mouse and a desktop-sized heap, and on iOS
+   * it does not come up at all -- so the alternative to saying so plainly is a
+   * black box and a spinner that never resolves. Decided before the engine is
+   * started, so nobody on a phone pays for a 120MB download to find out.
+   */
+  const [unsupported, setUnsupported] = useState(false)
 
   const [elapsed, setElapsed] = useState(0)
   // The match clock, which is what anyone discussing the game would quote --
@@ -168,6 +206,12 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
   // parent re-rendered and handed us a new closure.
   const onStartedRef = useRef(onPlaybackStarted)
   onStartedRef.current = onPlaybackStarted
+  const onMapRef = useRef(onMapDetected)
+  onMapRef.current = onMapDetected
+  const onPositionRef = useRef(onPositionChange)
+  onPositionRef.current = onPositionChange
+  // Reported once per loaded recording, not once per poll.
+  const mapReportedRef = useRef(false)
 
   const base =
     engineBaseUrl ?? process.env.NEXT_PUBLIC_DEMO_ENGINE_URL ?? "http://127.0.0.1:8090"
@@ -220,24 +264,42 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
    */
   const applyDefaultFollow = useCallback(
     async (engine: JkdEngine) => {
-      if (!followName) return
       const params = new URLSearchParams(window.location.search)
+      // A shared link's own camera wins over any default.
       if (params.get("cam") || params.get("follow")) return
-      const wanted = normaliseName(followName)
-      if (!wanted) return
-      // Players come from the gamestate's configstrings, which arrive a
-      // moment after the demo opens.
+
+      const wanted = followName ? normaliseName(followName) : ""
+
+      /*
+       * Wait for the demo to actually be running before deciding the camera.
+       *
+       * Opening a demo resets cg_demoFollow to 0 -- client 0, who on these
+       * recordings is the demobot, floating nowhere near the play -- and that
+       * reset lands *after* the load call returns. Setting the camera any
+       * earlier is simply overwritten, which is why a demo could open on
+       * nobody in particular: not a failure to follow the protagonist, but
+       * the engine's own default winning the race.
+       */
       for (let i = 0; i < 100; i++) {
         const players = engineRef.current === engine ? engine.getPlayers() : []
         if (players.length > 0) {
-          const norm = players.map((p) => ({ p, n: normaliseName(p.name) }))
-          const exact = norm.filter((x) => x.n === wanted)
-          const partial = norm.filter((x) => x.n.includes(wanted))
-          const hit = exact.length === 1 ? exact[0] : exact.length === 0 && partial.length === 1 ? partial[0] : null
-          if (hit) {
-            engine.setFollow(hit.p.clientNum)
-            setFollow(hit.p.clientNum)
+          if (wanted) {
+            // The library says "sora"; the demo says "^8^5^8sora" or
+            // "[TSB] sora", so both sides are normalised before matching.
+            const norm = players.map((p) => ({ p, n: normaliseName(p.name) }))
+            const exact = norm.filter((x) => x.n === wanted)
+            const partial = norm.filter((x) => x.n.includes(wanted))
+            const hit = exact.length === 1 ? exact[0] : exact.length === 0 && partial.length === 1 ? partial[0] : null
+            if (hit) {
+              engine.setFollow(hit.p.clientNum)
+              setFollow(hit.p.clientNum)
+              return
+            }
           }
+          // No protagonist, or no confident match: the recorded view, which is
+          // what the demo was framed as. -1 rather than the 0 left behind.
+          engine.setFollow(-1)
+          setFollow(-1)
           return
         }
         await new Promise((r) => setTimeout(r, 100))
@@ -250,6 +312,14 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
 
   useEffect(() => {
     if (!holderRef.current) return
+    // The standard "touch is the primary input" test: true on phones and
+    // tablets, false on a laptop with a touchscreen (which can still hover).
+    // Checked here, first thing, so the engine is never started on one.
+    if (window.matchMedia("(hover: none) and (pointer: coarse)").matches) {
+      setUnsupported(true)
+      setStatus(null)
+      return
+    }
     let cancelled = false
 
     // Reclaim the page's one canvas. On a first visit this creates it; on a
@@ -384,6 +454,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
     announceShownAtRef.current = -1
     playedRef.current = false
     startedNotifiedRef.current = false
+    mapReportedRef.current = false
     setFailed(null)
     setStatus("Loading demo…")
 
@@ -429,6 +500,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
 
       const now = engine.getElapsed()
       if (now >= 0 && !draggingRef.current && !engine.isSeeking) setElapsed(now)
+      if (now >= 0) onPositionRef.current?.(now)
       if (now > 3000) {
         playedRef.current = true
         // Separate from playedRef, which a replay resets -- watching twice in
@@ -439,6 +511,16 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
         }
       }
       setMatchTime(engine.getMatchTime())
+
+      // The recording states its own map; hand it over the first time it is
+      // readable so nobody has to type it in at upload.
+      if (!mapReportedRef.current) {
+        const map = engine.getMapName()
+        if (map) {
+          mapReportedRef.current = true
+          onMapRef.current?.(map)
+        }
+      }
 
       setPlayers(engine.getPlayers())
 
@@ -542,6 +624,21 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
       }
     })
   }, [])
+
+  /**
+   * Hand the page a seek it can call. Registered once ready, so a comment's
+   * timestamp cannot drive an engine that has not loaded a demo yet.
+   */
+  useEffect(() => {
+    if (!ready) return
+    onSeekReady?.((ms) => {
+      setEnded(false)
+      requestSeek(ms, true)
+    })
+    // onSeekReady is a prop the parent redefines every render; depending on it
+    // would re-register on every keystroke elsewhere on the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, requestSeek])
 
   const onScrubStart = useCallback(() => {
     const engine = engineRef.current
@@ -750,6 +847,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
     setTouchOnly(window.matchMedia("(hover: none)").matches)
   }, [])
 
+
   // Free-fly grabs the pointer for mouse-look (SDL's relative mouse mode maps
   // to the browser's real Pointer Lock API). There's no cursor to hover the
   // bar with at that point, so its visibility has to react to lock state, not
@@ -770,7 +868,9 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
   // loading, mid-scrub or finished, so the controls that matter are never
   // hiding. On touch, where there is no hover, the tap state stands in.
   const showChrome =
-    !pointerLocked && ((touchOnly ? tapShowsChrome : hovering) || paused || !ready || seeking || ended)
+    !unsupported &&
+    !pointerLocked &&
+    ((touchOnly ? tapShowsChrome : hovering) || paused || !ready || seeking || ended)
 
   return (
     <div
@@ -792,6 +892,18 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
           sizes the canvas to match, so nothing here sets width/height, and
           object-contain (on the canvas itself) only scales the result. */}
       <div ref={holderRef} className="absolute inset-0" />
+
+      {/* Said once, plainly, instead of a spinner that never finishes. */}
+      {unsupported && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
+          <Monitor className="h-7 w-7 text-white/40" />
+          <p className="text-sm font-medium text-white/90">Watching needs a computer</p>
+          <p className="max-w-xs text-xs leading-relaxed text-white/50">
+            The demo player runs the actual game, which wants a keyboard, a mouse and rather more
+            memory than a phone will give it. Everything else on this page works fine here.
+          </p>
+        </div>
+      )}
 
       {/* Match clock. Always up, not tied to the auto-hiding chrome: on a full
           match this is what tells you whether you're watching the first minute
@@ -946,6 +1058,25 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
 
         <div className="mb-2 flex items-center gap-3 text-xs text-white/70">
           <span className="tabular-nums">{seeking ? "seeking…" : formatTime(elapsed)}</span>
+          {/* The scrubber and its heat marks share a stacking context so the
+              glow can sit under the thumb without intercepting the drag. */}
+          <div className="relative flex-1">
+            {moments.length > 0 && span > 1000 && (
+              <div className="pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-full">
+                {moments.map((m) => {
+                  const pct = Math.min(100, Math.max(0, (100 * m.atMs) / span))
+                  return (
+                    <span
+                      key={m.id}
+                      // Centred on the moment and a little wider than a hairline:
+                      // this is "look around here", not a frame-exact cut.
+                      style={{ left: `calc(${pct}% - 1.1%)`, width: "2.2%" }}
+                      className="absolute inset-y-0 rounded-full bg-amber-300/80 shadow-[0_0_6px_1px_rgba(252,211,77,0.9)]"
+                    />
+                  )
+                })}
+              </div>
+            )}
           <input
             type="range"
             min={0}
@@ -960,10 +1091,32 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
               if (draggingRef.current) return
               onScrubEnd((Number((e.target as HTMLInputElement).value) / 1000) * span)
             }}
-            className="h-1 flex-1 cursor-pointer accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+            className="relative h-1 w-full cursor-pointer bg-transparent accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
           />
+          </div>
           <span className="tabular-nums">{formatTime(span)}</span>
         </div>
+
+        {/* Named moments, jumpable. The glow says where; these say what. */}
+        {moments.length > 0 && (
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            {moments.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => {
+                  setEnded(false)
+                  requestSeek(m.atMs, true)
+                }}
+                disabled={!ready}
+                title={`Jump to ${formatTime(m.atMs)}`}
+                className="flex items-center gap-1.5 rounded-full border border-amber-300/40 bg-amber-300/10 px-2 py-0.5 text-[11px] text-amber-100 transition-colors hover:bg-amber-300/25 disabled:opacity-40"
+              >
+                <span className="tabular-nums opacity-70">{formatTime(m.atMs)}</span>
+                {m.label && <span className="max-w-[14rem] truncate">{m.label}</span>}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-4">
           <button
