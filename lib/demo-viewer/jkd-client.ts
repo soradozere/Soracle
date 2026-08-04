@@ -284,6 +284,7 @@ export class JkdEngine {
   private fnVisible!: () => number
   private fnPlayerInfo!: (n: number) => string
   private fnConfigString!: (n: number) => string
+  private fnTrimDemo!: ((endMs: number, name: string) => number) | null
   private fnViewClient!: () => number
   private fnIsFollowing!: () => number
 
@@ -422,6 +423,16 @@ export class JkdEngine {
     } catch {
       this.fnConfigString = () => ""
     }
+    // Same deal: left undefined on an engine that predates trimming, and the
+    // page hides the control rather than offering something that cannot work.
+    try {
+      this.fnTrimDemo = M.cwrap("JKD_TrimDemo", "number", ["number", "string"]) as unknown as (
+        endMs: number,
+        name: string,
+      ) => number
+    } catch {
+      this.fnTrimDemo = null
+    }
     this.fnViewClient = M.cwrap("JKD_GetViewClientNum", "number", []) as unknown as () => number
     this.fnIsFollowing = M.cwrap("JKD_IsFollowing", "number", []) as unknown as () => number
   }
@@ -479,6 +490,18 @@ export class JkdEngine {
     this.command("bind MOUSE2 +moveup")
     this.command("unbind SPACE")
     this.command("unbind m")
+    /*
+     * The arrows are the page's, for placing the chase camera.
+     *
+     * The game binds them to +left/+right/+forward/+back, which feed usercmd
+     * angle deltas into the engine's own orbit around the followed player --
+     * a second, invisible set of camera angles the page cannot see or reset.
+     * Pressing an arrow therefore moved the camera twice, and Reset only put
+     * one of the two back, so the view never quite returned.
+     */
+    for (const key of ["UPARROW", "DOWNARROW", "LEFTARROW", "RIGHTARROW"]) {
+      this.command(`unbind ${key}`)
+    }
   }
 
   private setCvar(name: string, value: string | number) {
@@ -613,69 +636,48 @@ export class JkdEngine {
     await new Promise<void>((resolve) => this.seekWaiters.push(resolve))
   }
 
+  /** Whether this engine build can trim. Older ones simply do not export it. */
+  get canTrim(): boolean {
+    return this.ready && !!this.fnTrimDemo
+  }
+
   /**
-   * Cut the current demo down to [startMs, endMs], returning the resulting
-   * file's bytes.
+   * Cut the demo down to [startMs, endMs] and hand back the new file's bytes.
    *
-   * Not protocol surgery of its own -- it leans on two engine features built
-   * for other jobs. seekTo already reconstructs valid game state at an
-   * arbitrary point (that's how scrubbing works), and the engine's own
-   * `record`/`stoprecord` commands -- built for joining a live game mid-match
-   * and saving from there -- write a fresh gamestate snapshot the instant they
-   * start, then everything after verbatim. Demo playback runs through the
-   * same message pipeline a live connection would, so recording through the
-   * middle of one works unmodified.
+   * The seek happens here and the cut happens in the engine, and the split is
+   * deliberate. Seeking backwards restarts the demo, which rebuilds cgame --
+   * safe between frames, which is why seekTo goes through the engine's own
+   * frame-sliced path, and a crash if done underneath a single call from here.
+   * Everything after that point is a read loop with the recorder attached, so
+   * the engine runs it at seek speed rather than making anyone watch the clip
+   * play through.
    *
-   * Runs in the same visible engine instance the caller is watching (there is
-   * only one -- see getEngineCanvas), so the picture will visibly play through
-   * the trimmed range while this is in flight.
+   * Playback is left sitting at the out-point; the caller decides where the
+   * viewer should go next.
    */
   async trimDemo(startMs: number, endMs: number): Promise<Uint8Array> {
     if (!this.ready) throw new Error("Engine not ready.")
+    if (!this.fnTrimDemo) throw new Error("This viewer's engine is too old to trim demos.")
     if (!(startMs >= 0) || !(endMs > startMs)) throw new Error("Invalid trim range.")
 
-    const prevSpeed = this.fnGetCvar("timescale") || 1
-    const prevPaused = this.fnGetCvar("cl_freezeDemo") === 1
+    const wasPaused = this.fnGetCvar("cl_freezeDemo") === 1
 
     await this.seekTo(startMs)
     if (this.fnElapsed() < 0) throw new Error("Lost the demo while seeking to the start point.")
+    // The engine refuses to cut mid-seek, and seekTo can return with the tail
+    // of one still being worked through.
+    for (let i = 0; i < 200 && this.isSeeking; i++) await this.sleep(50)
 
-    this.setPaused(false)
-    // The fastest speed the viewer itself already offers -- proven territory,
-    // rather than guessing how high timescale can go before frames get skipped.
-    this.setSpeed(4)
+    const name = `jkdtrim${Date.now().toString(36)}`
+    const size = this.fnTrimDemo(endMs, name)
+    if (size < 0) throw new Error(`The engine could not cut this demo (${size}).`)
+    if (size < 32) throw new Error("The cut came out empty.")
 
-    const tag = `__trim_${Date.now()}`
-    const dir = "/base/demos"
-    this.command(`record ${tag}`)
+    // Back to however the viewer had it -- a trim from a paused demo should
+    // not leave it running.
+    this.setPaused(wasPaused)
 
-    try {
-      // JKD_Exec queues onto the engine's own command buffer for the next
-      // frame rather than running inline, so the file will not exist the
-      // instant this call returns -- give it real frames before deciding the
-      // record command never landed (e.g. cls.state was not CA_ACTIVE).
-      const found = await this.pollUntil(() => this.listDemoFiles(dir).some((f) => f.startsWith(tag)), 3000)
-      if (!found) throw new Error("Recording never started -- the engine may not be in a level.")
-
-      const reachedEnd = await this.pollUntil(() => {
-        const elapsed = this.fnElapsed()
-        if (elapsed < 0) throw new Error("Playback ended before reaching the trim's end point.")
-        return elapsed >= endMs
-      }, endMs - startMs + 5000)
-      if (!reachedEnd) throw new Error("Timed out cutting the demo.")
-    } finally {
-      this.command("stoprecord")
-      this.setSpeed(prevSpeed)
-      this.setPaused(prevPaused)
-      // stoprecord runs on the next frame too, and needs to actually close the
-      // file (writing its trailer) before it is safe to read back out.
-      await this.sleep(250)
-    }
-
-    const name = this.listDemoFiles(dir).find((f) => f.startsWith(tag))
-    if (!name) throw new Error("Recording finished but the file is missing.")
-
-    const path = `${dir}/${name}`
+    const path = `/base/demos/${name}.dm_15`
     const FS = window.Module!.FS
     const bytes = FS.readFile(path)
     try {
@@ -683,30 +685,11 @@ export class JkdEngine {
     } catch {
       // best effort -- a leftover temp file in the virtual FS costs nothing real
     }
-    if (bytes.length < 32) throw new Error("Trimmed file looks empty -- refusing to use it.")
     return bytes
-  }
-
-  private listDemoFiles(dir: string): string[] {
-    try {
-      return window.Module!.FS.readdir(dir)
-    } catch {
-      return []
-    }
   }
 
   private sleep(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms))
-  }
-
-  /** Polls `check` until it returns true or `timeoutMs` elapses. */
-  private async pollUntil(check: () => boolean, timeoutMs: number): Promise<boolean> {
-    const deadline = Date.now() + timeoutMs
-    while (Date.now() < deadline) {
-      if (check()) return true
-      await this.sleep(50)
-    }
-    return check()
   }
 
   // ---- camera --------------------------------------------------------------

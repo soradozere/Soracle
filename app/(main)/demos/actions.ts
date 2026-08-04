@@ -468,6 +468,96 @@ export async function addDemoMoment(
   }
 }
 
+/**
+ * First half of trimming: hand back somewhere to put the cut.
+ *
+ * The trimmed bytes come out of the engine in the browser, so they take the
+ * same presigned route as an upload rather than passing through the server.
+ * A new key rather than the existing one: the swap only happens once the file
+ * is verifiably in place, so a failure here leaves the demo exactly as it was.
+ */
+export async function beginDemoTrim(demoId: string, sizeBytes: number): Promise<BeginUploadResult> {
+  const editor = await resolveEditor(demoId)
+  if (!editor.ok) return { success: false, error: editor.error }
+  if (!Number.isInteger(sizeBytes) || sizeBytes <= 0) return { success: false, error: "Nothing to save." }
+  // A cut is by definition shorter than what it came from, so the player cap is
+  // the wrong test here -- an admin's long recording would fail to trim.
+  if (sizeBytes > MAX_DEMO_BYTES_ADMIN) return { success: false, error: "Trimmed file is implausibly large." }
+
+  const storagePath = `${crypto.randomUUID()}.dm_15`
+  try {
+    const url = await createDemoUploadUrl(storagePath, sizeBytes)
+    return { success: true, url, storagePath }
+  } catch (e) {
+    return { success: false, error: `Could not start the trim: ${e instanceof Error ? e.message : "unknown error"}` }
+  }
+}
+
+/**
+ * Second half: point the demo at the cut, and move everything that was hung off
+ * the old timeline onto the new one.
+ *
+ * Moments are the reason this is not just a file swap. They are stored as
+ * milliseconds from the first frame, and the first frame has just moved, so
+ * every one of them shifts by the in-point and any that fell outside the window
+ * no longer refer to anything.
+ *
+ * The old file goes to the trash prefix rather than being deleted outright
+ * (deleteDemoFile copies first), because this is the one action here that
+ * destroys something a person cannot make again.
+ */
+export async function finishDemoTrim(
+  demoId: string,
+  storagePath: string,
+  startMs: number,
+  endMs: number,
+): Promise<ActionResult> {
+  const editor = await resolveEditor(demoId)
+  if (!editor.ok) return { success: false, error: editor.error }
+  if (!STORAGE_PATH_RE.test(storagePath)) return { success: false, error: "Malformed trim reference." }
+  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || endMs <= startMs || startMs < 0) {
+    return { success: false, error: "Invalid trim range." }
+  }
+
+  // Confirm the browser's upload actually landed before anything is changed.
+  const storedBytes = await headDemoFile(storagePath)
+  if (storedBytes === null) return { success: false, error: "The trimmed file never arrived." }
+  if (storedBytes < 32) {
+    await deleteDemoFile(storagePath).catch(() => {})
+    return { success: false, error: "The trimmed file is empty." }
+  }
+
+  const supabase = createServiceClient()
+  const { data: demo } = await supabase.from("demos").select("file_path").eq("id", demoId).maybeSingle()
+  if (!demo) return { success: false, error: "Demo not found." }
+  const oldPath = demo.file_path as string
+
+  const durationMs = Math.round(endMs - startMs)
+  const { error } = await supabase
+    .from("demos")
+    .update({ file_path: storagePath, duration_ms: durationMs })
+    .eq("id", demoId)
+  if (error) {
+    await deleteDemoFile(storagePath).catch(() => {})
+    return { success: false, error: error.message }
+  }
+
+  // Rebase the moments onto the cut, and drop the ones it no longer contains.
+  const { data: moments } = await supabase.from("demo_moments").select("id, at_ms").eq("demo_id", demoId)
+  for (const m of (moments ?? []) as { id: string; at_ms: number }[]) {
+    if (m.at_ms < startMs || m.at_ms > endMs) {
+      await supabase.from("demo_moments").delete().eq("id", m.id)
+    } else {
+      await supabase.from("demo_moments").update({ at_ms: Math.round(m.at_ms - startMs) }).eq("id", m.id)
+    }
+  }
+
+  // Only once the row points somewhere else. Copies to trash/ on the way out.
+  if (oldPath && oldPath !== storagePath) await deleteDemoFile(oldPath).catch(() => {})
+
+  return { success: true, id: demoId }
+}
+
 /** Undo a moment. Same immediacy as adding one -- no form to re-save. */
 export async function removeDemoMoment(demoId: string, momentId: string): Promise<ActionResult> {
   const editor = await resolveEditor(demoId)
