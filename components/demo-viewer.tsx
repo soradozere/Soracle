@@ -1224,6 +1224,19 @@ export function DemoViewer({
   const viewClient = follow >= 0 ? follow : ready ? (engineRef.current?.getViewClientNum() ?? -1) : -1
   const watching = viewClient >= 0 ? engineRef.current?.getPlayerName(viewClient) : null
 
+  /*
+   * Whether the recording currently knows where the followed player is.
+   *
+   * Only asked of an explicitly chosen POV. The recorded view is by definition
+   * someone the recording was watching, so it is never out of view -- and a
+   * demobot's own spectator does not appear in this list at all.
+   *
+   * Read from the same poll that drives the picker, so it changes with the
+   * play rather than being a fixed claim about the demo.
+   */
+  const followedOutOfView =
+    follow >= 0 && players.length > 0 && players.some((p) => p.clientNum === follow && !p.visible)
+
   // Hidden once playing and the mouse has left, or the whole time the
   // pointer is locked (no cursor to hover with). Visible while paused, still
   // loading, mid-scrub or finished, so the controls that matter are never
@@ -1297,6 +1310,25 @@ export function DemoViewer({
           <div className="text-xl font-semibold text-white drop-shadow-[0_2px_10px_rgba(0,0,0,0.85)]">
             {watching}
           </div>
+          {/*
+            Say when the recording stops knowing where they are.
+
+            A demo only contains what the recorder could see. Follow someone who
+            has gone round a corner and the camera holds their last known
+            position -- they stand still, or slide, or vanish -- which reads as
+            the player being broken rather than the recording ending at the
+            recorder's line of sight.
+
+            The POV list already dims whoever is out of view, but that is a
+            hover tooltip you only meet before choosing. This is the same fact
+            at the moment it actually matters, and it comes and goes with the
+            play, because that is how the coverage itself behaves.
+          */}
+          {followedOutOfView && (
+            <div className="mt-1 text-[11px] text-amber-200/90 drop-shadow-[0_1px_4px_rgba(0,0,0,0.9)]">
+              Out of view — the recorder couldn&rsquo;t see them here
+            </div>
+          )}
         </div>
       )}
       {ready && !failed && camera === "free" && (
