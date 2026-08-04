@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useTransition } from "react"
+import { useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Star, Trash2 } from "lucide-react"
@@ -25,6 +25,7 @@ import type {
   DemoComment,
   DemoDetail as DemoDetailData,
   DemoListItem,
+  DemoMoment,
   DemoPlaylist,
   Gametype,
 } from "@/lib/demos-server"
@@ -35,12 +36,22 @@ import {
   deleteDemo,
   rateDemo,
   recordDemoView,
+  reportDemoMap,
+  setDemoMoments,
   setDemoPlaylists,
   updateDemo,
 } from "@/app/(main)/demos/actions"
 import { cn, formatDuration } from "@/lib/utils"
 
 const GAMETYPES: Gametype[] = ["CTF", "FFA", "TeamFFA"]
+
+/** A moment being edited: `key` is local only, so unsaved rows can be removed. */
+interface MomentDraft {
+  key: string
+  atMs: number
+  label: string
+  tag: string
+}
 
 function TagBadges({ tags }: { tags: string[] }) {
   if (tags.length === 0) return null
@@ -152,14 +163,57 @@ function timeAgo(iso: string): string {
   return `${value} ${unit}${value === 1 ? "" : "s"} ago`
 }
 
+/**
+ * Turn timestamps people type into links that jump there.
+ *
+ * "1:23" in a comment means the same thing everywhere else on the internet, so
+ * it should mean it here too -- and it lets the people who can comment point
+ * at a moment without owning the demo. Split with a capturing group so the
+ * text between matches survives; rendered as text nodes and buttons, never as
+ * markup, since this is player-written.
+ */
+const TIMESTAMP_RE = /(\b\d{1,2}:[0-5]\d(?::[0-5]\d)?\b)/g
+
+function CommentBody({ body, onSeek }: { body: string; onSeek?: (ms: number) => void }) {
+  const parts = body.split(TIMESTAMP_RE)
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (!TIMESTAMP_RE.test(part) || !onSeek) {
+          // test() advances lastIndex on a global regex; reset so the next
+          // part is judged on its own merits.
+          TIMESTAMP_RE.lastIndex = 0
+          return <span key={i}>{part}</span>
+        }
+        TIMESTAMP_RE.lastIndex = 0
+        const units = part.split(":").map(Number)
+        const seconds =
+          units.length === 3 ? units[0] * 3600 + units[1] * 60 + units[2] : units[0] * 60 + units[1]
+        return (
+          <button
+            key={i}
+            type="button"
+            onClick={() => onSeek(seconds * 1000)}
+            className="font-medium text-primary underline-offset-2 hover:underline"
+          >
+            {part}
+          </button>
+        )
+      })}
+    </>
+  )
+}
+
 function CommentRow({
   comment,
   canDelete,
   onDeleted,
+  onSeek,
 }: {
   comment: DemoComment
   canDelete: boolean
   onDeleted: () => void
+  onSeek?: (ms: number) => void
 }) {
   const [pending, startTransition] = useTransition()
   return (
@@ -181,7 +235,9 @@ function CommentRow({
           <span className="font-bold text-foreground">{comment.author.name}</span>{" "}
           <span className="text-xs text-muted-foreground">{timeAgo(comment.createdAt)}</span>
         </p>
-        <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">{comment.body}</p>
+        <p className="whitespace-pre-wrap break-words text-sm text-muted-foreground">
+          <CommentBody body={comment.body} onSeek={onSeek} />
+        </p>
       </div>
       {canDelete && (
         <button
@@ -208,11 +264,13 @@ function DemoComments({
   comments,
   currentPlayerId,
   isAdmin,
+  onSeek,
 }: {
   demoId: string
   comments: DemoComment[]
   currentPlayerId: string | null
   isAdmin: boolean
+  onSeek?: (ms: number) => void
 }) {
   const router = useRouter()
   const [body, setBody] = useState("")
@@ -283,6 +341,7 @@ function EditDemoDialog({
   playlists,
   inPlaylistIds,
   isAdmin,
+  currentMs,
 }: {
   demo: DemoDetailData
   players: { id: string; name: string }[]
@@ -294,6 +353,8 @@ function EditDemoDialog({
    * enforces the same split rather than trusting this flag.
    */
   isAdmin: boolean
+  /** Where playback is right now, for stamping a moment without typing one. */
+  currentMs: () => number
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -303,6 +364,9 @@ function EditDemoDialog({
   const [highlightTags, setHighlightTags] = useState<string[]>(demo.tags)
   const [playlistIds, setPlaylistIds] = useState<string[]>(inPlaylistIds)
   const [confirmingDelete, setConfirmingDelete] = useState(false)
+  const [momentDrafts, setMomentDrafts] = useState<MomentDraft[]>(
+    demo.moments.map((m) => ({ key: m.id, atMs: m.atMs, label: m.label ?? "", tag: m.tag ?? "" })),
+  )
   const [pending, startTransition] = useTransition()
 
   const visiblePlayers = players.filter((p) => p.name.toLowerCase().includes(playerFilter.toLowerCase()))
@@ -329,6 +393,15 @@ function EditDemoDialog({
         setError(result.error)
         return
       }
+      const momentResult = await setDemoMoments(
+        demo.id,
+        momentDrafts.map((m) => ({ atMs: m.atMs, label: m.label, tag: m.tag })),
+      )
+      if (!momentResult.success) {
+        setError(momentResult.error)
+        return
+      }
+
       // Membership is its own table, so it is its own write -- but it saves
       // with the rest of the form rather than as a separate ceremony. Only
       // admins can file demos into playlists, and only they were shown the
@@ -469,6 +542,7 @@ function EditDemoDialog({
               })}
             </div>
           </div>
+          <MomentEditor moments={momentDrafts} onChange={setMomentDrafts} currentMs={currentMs} />
           {isAdmin && (
           <div className="space-y-1.5">
             <Label>Playlists</Label>
@@ -559,6 +633,93 @@ function EditDemoDialog({
   )
 }
 
+/**
+ * Marking the moments worth watching.
+ *
+ * The timestamp is taken from the player rather than typed: you mark a moment
+ * while you are looking at it, which is the only way anyone would ever get it
+ * right to the second. Everything else is optional -- a bare timestamp is a
+ * useful marker on its own.
+ */
+function MomentEditor({
+  moments,
+  onChange,
+  currentMs,
+}: {
+  moments: MomentDraft[]
+  onChange: (next: MomentDraft[]) => void
+  currentMs: () => number
+}) {
+  const [label, setLabel] = useState("")
+  const [tag, setTag] = useState<string>("")
+
+  function add() {
+    const atMs = Math.max(0, Math.round(currentMs()))
+    const next = [...moments, { key: `${atMs}-${Math.random()}`, atMs, label: label.trim(), tag }]
+    next.sort((a, b) => a.atMs - b.atMs)
+    onChange(next)
+    setLabel("")
+  }
+
+  return (
+    <div className="space-y-2">
+      <Label>Moments</Label>
+      <p className="text-xs text-muted-foreground">
+        Pause where it happens, then mark it. These glow on the timeline so people can jump straight there.
+      </p>
+      <div className="flex flex-wrap gap-2">
+        <Input
+          placeholder="What happens? (optional)"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          className="min-w-0 flex-1"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault()
+              add()
+            }
+          }}
+        />
+        <Select value={tag || "__none__"} onValueChange={(v) => setTag(v === "__none__" ? "" : v)}>
+          <SelectTrigger className="w-32">
+            <SelectValue placeholder="Type" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">No type</SelectItem>
+            {DEMO_TAGS.map((t) => (
+              <SelectItem key={t.id} value={t.id}>
+                {t.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button type="button" variant="secondary" onClick={add}>
+          Mark {formatDuration(Math.max(0, Math.round(currentMs())))}
+        </Button>
+      </div>
+      {moments.length > 0 && (
+        <ul className="space-y-1 rounded-md border p-2">
+          {moments.map((m) => (
+            <li key={m.key} className="flex items-center gap-2 text-sm">
+              <span className="tabular-nums text-muted-foreground">{formatDuration(m.atMs)}</span>
+              <span className="min-w-0 flex-1 truncate">{m.label || <em className="text-muted-foreground">unnamed</em>}</span>
+              {m.tag && <Badge className={cn("border", demoTagClasses(m.tag))}>{demoTagLabel(m.tag)}</Badge>}
+              <button
+                type="button"
+                aria-label="Remove moment"
+                onClick={() => onChange(moments.filter((x) => x.key !== m.key))}
+                className="p-1 text-muted-foreground hover:text-destructive"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export function DemoDetail({
   demo,
   others,
@@ -586,6 +747,11 @@ export function DemoDetail({
   // back -- a page-layout concern, not something DemoViewer itself needs to
   // know about (it already just fills whatever box it's given).
   const [theater, setTheater] = useState(false)
+  // Read on demand rather than held in state: the position changes 5x a second
+  // and only matters at the instant someone marks a moment.
+  const playbackMsRef = useRef(0)
+  // Handed up by the player so a timestamp in a comment can drive it.
+  const seekRef = useRef<((ms: number) => void) | null>(null)
 
   return (
     <div className={cn("grid grid-cols-1 gap-6", !theater && "lg:grid-cols-[minmax(0,1fr)_20rem]")}>
@@ -596,6 +762,16 @@ export function DemoDetail({
             durationMs={demo.durationMs ?? 0}
             followName={demo.protagonist?.name}
             onPlaybackStarted={() => void recordDemoView(demo.id)}
+            // Fills in a map nobody typed at upload. Only ever fills a blank,
+            // so a demo that already knows its map is never overwritten.
+            onMapDetected={demo.map ? undefined : (map) => void reportDemoMap(demo.id, map)}
+            onPositionChange={(ms) => {
+              playbackMsRef.current = ms
+            }}
+            onSeekReady={(fn) => {
+              seekRef.current = fn
+            }}
+            moments={demo.moments}
           />
         </div>
 
@@ -656,6 +832,7 @@ export function DemoDetail({
                   playlists={playlists}
                   inPlaylistIds={inPlaylistIds}
                   isAdmin={isAdmin}
+                  currentMs={() => playbackMsRef.current}
                 />
               </div>
             )}
@@ -668,6 +845,7 @@ export function DemoDetail({
           comments={comments}
           currentPlayerId={currentPlayerId}
           isAdmin={isAdmin}
+          onSeek={(ms) => seekRef.current?.(ms)}
         />
       </div>
 
