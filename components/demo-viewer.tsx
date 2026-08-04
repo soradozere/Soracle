@@ -110,6 +110,34 @@ const readGamma = () => {
   return stored
 }
 
+/**
+ * Safari does not apply this filter, so it gets an approximation instead.
+ *
+ * WebKit's support for `filter: url(#...)` against an inline SVG is partial,
+ * and feComponentTransfer on a composited layer -- which a WebGL canvas always
+ * is -- lands in the gap: the declaration is accepted and simply does nothing.
+ * There is no feature test for "accepted but ignored", so this asks which
+ * browser it is, which is the honest shape of a known vendor bug. Chromium and
+ * Firefox both carry "Safari" in their UA strings, hence the exclusions.
+ *
+ * The fallback is deliberately not the same picture. Shorthand filters have no
+ * gamma, so it lifts with brightness and takes a little contrast back out to
+ * stop the highlights blowing -- close in feel, less good in the shadows, which
+ * is exactly where gamma earns its keep. Better than a control that lies about
+ * doing something.
+ */
+function prefersShorthandFilter(): boolean {
+  if (typeof navigator === "undefined") return false
+  return /^((?!chrome|chromium|crios|android|firefox|fxios|edg).)*safari/i.test(navigator.userAgent)
+}
+
+function gammaFilterFor(gamma: number): string {
+  if (gamma === 1) return ""
+  if (!prefersShorthandFilter()) return `url(#${GAMMA_FILTER_ID})`
+  const lift = 1 - gamma
+  return `brightness(${(1 + lift * 0.9).toFixed(3)}) contrast(${(1 - lift * 0.35).toFixed(3)})`
+}
+
 interface DemoViewerProps {
   /** URL of the .dm_15 to play. */
   demoUrl: string
@@ -955,7 +983,7 @@ export function DemoViewer({
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    canvas.style.filter = gamma === 1 ? "" : `url(#${GAMMA_FILTER_ID})`
+    canvas.style.filter = gammaFilterFor(gamma)
     return () => {
       canvas.style.filter = ""
     }
