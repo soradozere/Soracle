@@ -1132,6 +1132,29 @@ export function DemoViewer({
     return () => document.removeEventListener("pointerlockchange", onChange)
   }, [])
 
+  /**
+   * Give the cursor back the moment there is nothing to look around with.
+   *
+   * The engine takes the pointer itself, from inside SDL, on a click in the
+   * picture -- the page only finds out afterwards. So it can end up held in
+   * situations the page would never have asked for it, and the worst of those
+   * is a demo running out while the free camera has it: the "watch again"
+   * overlay appears over a locked pointer, so there is no cursor to click it
+   * with and nothing on screen explaining that Escape is the way out. Someone
+   * reported closing the browser to get their mouse back, which is a fair
+   * response to a page that appears to have eaten it.
+   *
+   * Escape does still work, and always did -- browsers guarantee it. Knowing
+   * that is the part we cannot rely on, so the lock is simply dropped whenever
+   * it is not earning its place: following a player (where the mouse steers
+   * nothing anyway), at the end of a demo, or before the engine is up.
+   */
+  useEffect(() => {
+    if (!pointerLocked) return
+    if (camera === "free" && ready && !ended) return
+    document.exitPointerLock?.()
+  }, [pointerLocked, camera, ready, ended])
+
   // Nothing is being watched until a snapshot has arrived; asking before that
   // gets -1 back and renders as the literal "client -1".
   const viewClient = follow >= 0 ? follow : ready ? (engineRef.current?.getViewClientNum() ?? -1) : -1
@@ -1309,8 +1332,20 @@ export function DemoViewer({
             <span className="font-medium">M</span>
           </div>
           <div className="rounded-md bg-black/70 px-2 py-1 text-[11px] text-white/70">
-            Right-click to fly up · Esc to release
+            Right-click to fly up
           </div>
+        </div>
+      )}
+
+      {/* How to get the cursor back, said plainly and where it will be read.
+          The corner strip carried this and it was missed -- understandably: the
+          pointer has just vanished, which is the moment someone is looking at
+          the middle of the picture, not its edges. */}
+      {pointerLocked && (
+        <div className="pointer-events-none absolute inset-x-0 top-4 flex justify-center">
+          <span className="rounded-full bg-black/80 px-3 py-1.5 text-xs text-white/90 ring-1 ring-white/20">
+            Mouse hidden for free look — press <kbd className="font-semibold text-white">Esc</kbd> to get the cursor back
+          </span>
         </div>
       )}
 
