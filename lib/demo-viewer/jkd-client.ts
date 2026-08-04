@@ -270,6 +270,7 @@ export class JkdEngine {
   private fnConnected!: () => number
   private fnVisible!: () => number
   private fnPlayerInfo!: (n: number) => string
+  private fnConfigString!: (n: number) => string
   private fnViewClient!: () => number
   private fnIsFollowing!: () => number
 
@@ -390,6 +391,7 @@ export class JkdEngine {
     this.fnConnected = M.cwrap("JKD_GetConnectedMask", "number", []) as unknown as () => number
     this.fnVisible = M.cwrap("JKD_GetVisibleMask", "number", []) as unknown as () => number
     this.fnPlayerInfo = M.cwrap("JKD_GetPlayerInfo", "string", ["number"]) as unknown as (n: number) => string
+    this.fnConfigString = M.cwrap("JKD_GetConfigString", "string", ["number"]) as unknown as (n: number) => string
     this.fnViewClient = M.cwrap("JKD_GetViewClientNum", "number", []) as unknown as () => number
     this.fnIsFollowing = M.cwrap("JKD_IsFollowing", "number", []) as unknown as () => number
   }
@@ -679,6 +681,19 @@ export class JkdEngine {
       })
     }
     return out
+  }
+
+  /**
+   * The map this demo is on, as the recording itself states it.
+   *
+   * Read out of CS_SERVERINFO rather than asked for at upload time -- the
+   * demo has always known, and a person typing it in is a person getting it
+   * wrong. Empty until the gamestate has arrived.
+   */
+  getMapName(): string {
+    if (!this.ready) return ""
+    const serverInfo = this.fnConfigString(0) || ""
+    return /\\mapname\\([^\\]+)/.exec(serverInfo)?.[1]?.trim().toLowerCase() ?? ""
   }
 
   getPlayerName(clientNum: number): string {
