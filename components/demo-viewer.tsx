@@ -1,7 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import Link from "next/link"
 import {
+  ChevronLeft,
+  ChevronRight,
   Pause,
   Play,
   Eye,
@@ -190,6 +193,13 @@ interface DemoViewerProps {
    * knows is how to produce them.
    */
   onTrimReady?: (trim: ((startMs: number, endMs: number) => Promise<Uint8Array>) | null) => void
+  /**
+   * Where to go when this one finishes. Named rather than just arrows, because
+   * "next" means nothing on its own and the title is what someone is choosing
+   * between.
+   */
+  previousDemo?: { id: string; title: string } | null
+  nextDemo?: { id: string; title: string } | null
   /** Shown as a lit region on the scrubber while a cut is being framed up. */
   trimRange?: { startMs: number; endMs: number } | null
 }
@@ -207,6 +217,8 @@ export function DemoViewer({
   onSeekReady,
   onTrimReady,
   trimRange = null,
+  previousDemo = null,
+  nextDemo = null,
 }: DemoViewerProps) {
   // Where the engine's canvas gets parked. React owns this div; it does not
   // own the canvas inside it (see getEngineCanvas).
@@ -1367,6 +1379,33 @@ export function DemoViewer({
             <RotateCcw className="h-4 w-4" />
             Watch again
           </button>
+
+          {/* Somewhere to go next. The end of a demo is the moment someone
+              decides whether to keep watching, and until now the only thing
+              offered was the one they had just finished. Ordinary links, so
+              they route client-side and reuse the resident engine. */}
+          {(previousDemo || nextDemo) && (
+            <div className="flex max-w-[min(36rem,90%)] flex-wrap items-center justify-center gap-2">
+              {previousDemo && (
+                <Link
+                  href={`/demos/${previousDemo.id}`}
+                  className="flex max-w-[16rem] items-center gap-1.5 rounded-full bg-white/5 px-3 py-1.5 text-xs text-white/80 ring-1 ring-white/15 transition-colors hover:bg-white/15 hover:text-white"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{previousDemo.title}</span>
+                </Link>
+              )}
+              {nextDemo && (
+                <Link
+                  href={`/demos/${nextDemo.id}`}
+                  className="flex max-w-[16rem] items-center gap-1.5 rounded-full bg-white/5 px-3 py-1.5 text-xs text-white/80 ring-1 ring-white/15 transition-colors hover:bg-white/15 hover:text-white"
+                >
+                  <span className="truncate">{nextDemo.title}</span>
+                  <ChevronRight className="h-3.5 w-3.5 shrink-0" />
+                </Link>
+              )}
+            </div>
+          )}
         </div>
       )}
 

@@ -3,6 +3,7 @@ import { notFound } from "next/navigation"
 import { cookies } from "next/headers"
 import {
   getDemo,
+  getAdjacentDemos,
   getOwnRating,
   listComments,
   listOtherDemos,
@@ -28,8 +29,9 @@ export default async function DemoDetailPage({ params }: { params: Promise<{ id:
   const demo = await getDemo(id)
   if (!demo) notFound()
 
-  const [others, comments, playlists, inPlaylistIds, cookieStore, supabase] = await Promise.all([
+  const [others, adjacent, comments, playlists, inPlaylistIds, cookieStore, supabase] = await Promise.all([
     listOtherDemos(id),
+    getAdjacentDemos(id, demo.createdAt),
     listComments(id),
     listPlaylists(),
     playlistIdsForDemo(id),
@@ -52,6 +54,8 @@ export default async function DemoDetailPage({ params }: { params: Promise<{ id:
       <DemoDetail
         demo={demo}
         others={others}
+        previousDemo={adjacent.previous}
+        nextDemo={adjacent.next}
         canRate={!!playerId}
         ownRating={ownRating}
         isAdmin={isAdmin}

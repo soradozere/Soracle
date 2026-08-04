@@ -253,7 +253,9 @@ export async function listComments(demoId: string): Promise<DemoComment[]> {
     .from("demo_comments")
     .select("id, body, created_at, player:players(id, name, avatar_url)")
     .eq("demo_id", demoId)
-    .order("created_at", { ascending: true })
+    // Newest first: a demo picks up comments over time, and the recent reaction
+    // is the one worth reading -- not whatever someone said the day it landed.
+    .order("created_at", { ascending: false })
   if (error || !data) return []
 
   // Same to-one-embed-typed-as-array caveat as attachRelations above.
@@ -312,6 +314,50 @@ export async function listFeedDemoUploads(limit = 15): Promise<
     createdAt: r.created_at,
     uploaderName: r.uploader_player_id ? (nameById.get(r.uploader_player_id) ?? null) : null,
   }))
+}
+
+/** Just enough of a demo to put its name on a button. */
+export interface DemoLink {
+  id: string
+  title: string
+}
+
+/**
+ * The demos either side of this one, in the order the library lists them.
+ *
+ * Newest first, so "previous" is the newer one above it and "next" is the
+ * older one below -- matching the sidebar rather than the direction time runs,
+ * which is what someone clicking through a list expects.
+ *
+ * Two bounded queries rather than reading the library and searching it: this
+ * runs on every demo page, and only ever needs one row from each side.
+ */
+export async function getAdjacentDemos(
+  id: string,
+  createdAt: string,
+): Promise<{ previous: DemoLink | null; next: DemoLink | null }> {
+  const supabase = await createClient()
+  const [newer, older] = await Promise.all([
+    supabase
+      .from("demos")
+      .select("id, title")
+      .gt("created_at", createdAt)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from("demos")
+      .select("id, title")
+      .lt("created_at", createdAt)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ])
+  const link = (r: { data: unknown }): DemoLink | null => {
+    const row = r.data as { id: string; title: string } | null
+    return row ? { id: row.id, title: row.title } : null
+  }
+  return { previous: link(newer), next: link(older) }
 }
 
 export async function listOtherDemos(excludeId: string, limit = 12): Promise<DemoListItem[]> {
