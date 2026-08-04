@@ -246,31 +246,22 @@ function UploadDialog({
             <Label htmlFor="title">Title</Label>
             <Input id="title" name="title" placeholder="Sora vs N|A East — CTF Yavin" required />
           </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="map">Map</Label>
-              <Input id="map" name="map" list="known-maps" placeholder="ctf_yavin_no_outside" required />
-              <datalist id="known-maps">
-                <option value="ctf_yavin_no_outside" />
-                <option value="ctf_yavin" />
-                <option value="ffa_bespin" />
-              </datalist>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="gametype">Gametype</Label>
-              <Select name="gametype" required defaultValue="CTF">
-                <SelectTrigger id="gametype">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {GAMETYPES.map((g) => (
-                    <SelectItem key={g} value={g}>
-                      {g}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+          {/* No map field: the recording states its own, and the viewer fills
+              it in the first time anyone watches (see reportDemoMap). */}
+          <div className="space-y-1.5">
+            <Label htmlFor="gametype">Gametype</Label>
+            <Select name="gametype" required defaultValue="CTF">
+              <SelectTrigger id="gametype">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {GAMETYPES.map((g) => (
+                  <SelectItem key={g} value={g}>
+                    {g}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="recordedAt">Date recorded</Label>
