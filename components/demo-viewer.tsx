@@ -81,6 +81,35 @@ const FEED_HOLD_MS = 8000
 const DETAIL_KEY = "soracle.demo.detail"
 const readHighDetail = () => localStorage.getItem(DETAIL_KEY) !== "low"
 
+/**
+ * Brightness, as a gamma curve over the finished picture.
+ *
+ * The engine's own r_gamma does nothing here: JK2MV prefers a post-processing
+ * pass needing GL_ARB_fragment_program, which GL4ES does not translate, so it
+ * falls back to setting the display's gamma ramp -- which a web page cannot do
+ * -- and from there to no gamma at all. Verified by setting r_gamma 3 and
+ * getting a pixel-identical frame.
+ *
+ * A CSS filter on the canvas gets there instead, and gamma specifically rather
+ * than `brightness()`: JK2's dark areas are not clipped to black, they are
+ * squeezed into a narrow band of low values, so a curve that stretches that
+ * band into a visible range recovers real detail, where a linear multiply just
+ * washes the whole image out.
+ *
+ * 1 is the recording as it was rendered, and the default -- lower lifts the
+ * shadows. Kept below 1 because there is no reason to make a demo darker.
+ */
+const GAMMA_FILTER_ID = "soracle-demo-gamma"
+const GAMMA_KEY = "soracle.demo.gamma"
+const GAMMA_MIN = 0.5
+const GAMMA_MAX = 1
+const GAMMA_DEFAULT = 1
+const readGamma = () => {
+  const stored = Number(localStorage.getItem(GAMMA_KEY))
+  if (!Number.isFinite(stored) || stored < GAMMA_MIN || stored > GAMMA_MAX) return GAMMA_DEFAULT
+  return stored
+}
+
 interface DemoViewerProps {
   /** URL of the .dm_15 to play. */
   demoUrl: string
@@ -182,6 +211,7 @@ export function DemoViewer({
   const [invertLook, setInvertLook] = useState(false)
   const [smoothMouse, setSmoothMouse] = useState(true)
   const [highDetail, setHighDetail] = useState(true)
+  const [gamma, setGamma] = useState(GAMMA_DEFAULT)
   const [restarting, setRestarting] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [copied, setCopied] = useState(false)
@@ -411,6 +441,7 @@ export function DemoViewer({
     // browser, and the engine needs it before its first frame.
     const detail = readHighDetail()
     setHighDetail(detail)
+    setGamma(readGamma())
 
     const engine = new JkdEngine({
       baseUrl: base,
@@ -906,6 +937,30 @@ export function DemoViewer({
     window.location.reload()
   }, [])
 
+  const changeGamma = useCallback((v: number) => {
+    const clamped = Math.min(GAMMA_MAX, Math.max(GAMMA_MIN, v))
+    setGamma(clamped)
+    localStorage.setItem(GAMMA_KEY, String(clamped))
+  }, [])
+
+  /**
+   * Paint the gamma curve onto the canvas.
+   *
+   * Set on the element rather than through React, because the canvas is a
+   * module-level singleton that outlives this component (see getEngineCanvas)
+   * -- React never owns it. Cleared at 1 rather than left as an identity
+   * filter, so the compositor keeps its fast path when nobody has asked for
+   * anything.
+   */
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    canvas.style.filter = gamma === 1 ? "" : `url(#${GAMMA_FILTER_ID})`
+    return () => {
+      canvas.style.filter = ""
+    }
+  }, [gamma, ready])
+
   const changeSensitivity = useCallback((v: number) => {
     setSensitivity(v)
   }, [])
@@ -1104,6 +1159,20 @@ export function DemoViewer({
         fullscreen ? "rounded-none" : "rounded-xl",
       )}
     >
+      {/* The curve the brightness slider drives, referenced by the canvas's CSS
+          filter. Zero-sized and aria-hidden: it is a definition, not a picture.
+          Exponents are set from state rather than by mutating the DOM, so the
+          filter is just another thing React renders. */}
+      <svg aria-hidden className="pointer-events-none absolute h-0 w-0" focusable="false">
+        <filter id={GAMMA_FILTER_ID} colorInterpolationFilters="sRGB">
+          <feComponentTransfer>
+            <feFuncR type="gamma" exponent={gamma} />
+            <feFuncG type="gamma" exponent={gamma} />
+            <feFuncB type="gamma" exponent={gamma} />
+          </feComponentTransfer>
+        </filter>
+      </svg>
+
       {/* The canvas lives inside here but is not rendered by React -- it is a
           per-page singleton that survives moving between demos, because the
           WebGL context on it cannot be moved to a replacement element. The
@@ -1263,6 +1332,17 @@ export function DemoViewer({
               hint={restarting ? "Reloading…" : "Sharper models. Turn off if playback stutters. Reloads the player."}
               on={highDetail}
               onChange={chooseDetail}
+            />
+            <SettingSlider
+              label="Brightness"
+              value={GAMMA_MAX + GAMMA_MIN - gamma}
+              display={gamma === 1 ? "As recorded" : `+${Math.round((1 - gamma) * 100)}%`}
+              min={GAMMA_MIN}
+              max={GAMMA_MAX}
+              step={0.05}
+              // Inverted so the slider runs dark-to-bright left-to-right, which
+              // is the way round anyone expects. Gamma itself goes the other way.
+              onChange={(v) => changeGamma(GAMMA_MAX + GAMMA_MIN - v)}
             />
             <div className="my-1 border-t border-white/10" />
             <SettingSlider
