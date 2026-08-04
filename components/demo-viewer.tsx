@@ -1742,37 +1742,32 @@ function SettingSlider({
   onChange: (v: number) => void
 }) {
   const inputRef = useRef<HTMLInputElement>(null)
-  const draggingRef = useRef(false)
+  /** True between starting an interaction and letting go of it. */
+  const activeRef = useRef(false)
 
   /**
-   * End the drag wherever the pointer is let go.
+   * Ignore the change events Safari keeps sending after the button is up.
    *
-   * The same Safari behaviour the scrubber already guards against: pointerup is
-   * not reliably delivered to a range input, so the thumb goes on following the
-   * mouse with no button held and the next click somewhere else is what finally
-   * lets go of it. The window always sees the release, so the capture is
-   * dropped from there.
+   * Safari leaves a range input in its drag after the release, so it goes on
+   * firing change as the mouse moves and the thumb follows a pointer that is
+   * not holding it. Three attempts at this treated it as a lost `pointerup` --
+   * releasing the capture, then blurring -- and none of them worked, because
+   * the phantom events keep coming regardless of capture or focus.
    *
-   * Only after a real drag, and focus is left alone unless Safari has kept the
-   * capture -- otherwise arrow-key adjustment would be taken away the moment
-   * anyone clicked the slider.
+   * The scrubber looked immune and is not: its value is rewritten from the
+   * playback poll five times a second, so a phantom drag is overwritten before
+   * anyone sees it. These sliders have no such second opinion -- their value
+   * only ever comes from this handler -- so the phantom events are authoritative
+   * and nothing corrects them.
+   *
+   * So: gate the handler on the interaction actually being live, and put the
+   * element back where the state says it belongs when it is not. Keyboard
+   * counts as an interaction too, or the arrow keys would stop adjusting it.
    */
   useEffect(() => {
-    const end = (e: Event) => {
-      if (!draggingRef.current) return
-      draggingRef.current = false
-      const el = inputRef.current
-      if (!el) return
-      // Release first if the browser admits to holding a capture, then blur
-      // regardless. The conditional version of this shipped and did not work:
-      // Safari does not report a capture on a range input, so nothing ran and
-      // the thumb kept following the mouse. Blurring is what actually ends it.
-      const pid = (e as PointerEvent).pointerId
-      if (pid !== undefined && el.hasPointerCapture?.(pid)) el.releasePointerCapture(pid)
-      el.blur()
+    const end = () => {
+      activeRef.current = false
     }
-    // mouseup as well as pointerup: this is a browser that has already been
-    // caught not sending the one the gesture began with.
     window.addEventListener("pointerup", end)
     window.addEventListener("pointercancel", end)
     window.addEventListener("mouseup", end)
@@ -1782,6 +1777,12 @@ function SettingSlider({
       window.removeEventListener("mouseup", end)
     }
   }, [])
+
+  // Whatever the DOM value drifted to during a phantom drag, the prop is right.
+  useEffect(() => {
+    const el = inputRef.current
+    if (el && el.value !== String(value)) el.value = String(value)
+  }, [value])
 
   return (
     <label className="block px-2 py-1.5">
@@ -1797,12 +1798,26 @@ function SettingSlider({
         step={step}
         value={value}
         onPointerDown={() => {
-          draggingRef.current = true
+          activeRef.current = true
         }}
         onMouseDown={() => {
-          draggingRef.current = true
+          activeRef.current = true
         }}
-        onChange={(e) => onChange(Number(e.target.value))}
+        onKeyDown={() => {
+          activeRef.current = true
+        }}
+        onTouchStart={() => {
+          activeRef.current = true
+        }}
+        onChange={(e) => {
+          // No live interaction means Safari is still dragging something the
+          // user let go of. Put the thumb back and say nothing.
+          if (!activeRef.current) {
+            e.currentTarget.value = String(value)
+            return
+          }
+          onChange(Number(e.target.value))
+        }}
         className="h-1 w-full cursor-pointer accent-cyan-400"
       />
     </label>
