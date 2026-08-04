@@ -264,24 +264,42 @@ export function DemoViewer({
    */
   const applyDefaultFollow = useCallback(
     async (engine: JkdEngine) => {
-      if (!followName) return
       const params = new URLSearchParams(window.location.search)
+      // A shared link's own camera wins over any default.
       if (params.get("cam") || params.get("follow")) return
-      const wanted = normaliseName(followName)
-      if (!wanted) return
-      // Players come from the gamestate's configstrings, which arrive a
-      // moment after the demo opens.
+
+      const wanted = followName ? normaliseName(followName) : ""
+
+      /*
+       * Wait for the demo to actually be running before deciding the camera.
+       *
+       * Opening a demo resets cg_demoFollow to 0 -- client 0, who on these
+       * recordings is the demobot, floating nowhere near the play -- and that
+       * reset lands *after* the load call returns. Setting the camera any
+       * earlier is simply overwritten, which is why a demo could open on
+       * nobody in particular: not a failure to follow the protagonist, but
+       * the engine's own default winning the race.
+       */
       for (let i = 0; i < 100; i++) {
         const players = engineRef.current === engine ? engine.getPlayers() : []
         if (players.length > 0) {
-          const norm = players.map((p) => ({ p, n: normaliseName(p.name) }))
-          const exact = norm.filter((x) => x.n === wanted)
-          const partial = norm.filter((x) => x.n.includes(wanted))
-          const hit = exact.length === 1 ? exact[0] : exact.length === 0 && partial.length === 1 ? partial[0] : null
-          if (hit) {
-            engine.setFollow(hit.p.clientNum)
-            setFollow(hit.p.clientNum)
+          if (wanted) {
+            // The library says "sora"; the demo says "^8^5^8sora" or
+            // "[TSB] sora", so both sides are normalised before matching.
+            const norm = players.map((p) => ({ p, n: normaliseName(p.name) }))
+            const exact = norm.filter((x) => x.n === wanted)
+            const partial = norm.filter((x) => x.n.includes(wanted))
+            const hit = exact.length === 1 ? exact[0] : exact.length === 0 && partial.length === 1 ? partial[0] : null
+            if (hit) {
+              engine.setFollow(hit.p.clientNum)
+              setFollow(hit.p.clientNum)
+              return
+            }
           }
+          // No protagonist, or no confident match: the recorded view, which is
+          // what the demo was framed as. -1 rather than the 0 left behind.
+          engine.setFollow(-1)
+          setFollow(-1)
           return
         }
         await new Promise((r) => setTimeout(r, 100))
