@@ -77,9 +77,37 @@ interface DemoViewerProps {
    * page loaded. What a view count should be counting.
    */
   onPlaybackStarted?: () => void
+  /**
+   * The map the recording says it is on, handed over once the gamestate has
+   * arrived. Nobody types this in at upload time; the demo already knows.
+   */
+  onMapDetected?: (map: string) => void
+  /**
+   * The moments worth watching for, in milliseconds from the first frame.
+   * Drawn onto the scrubber and clickable, so a two-minute clip says where
+   * its two seconds of interest are.
+   */
+  moments?: { id: string; atMs: number; label: string | null; tag: string | null }[]
+  /** Playback position, pushed out so the page can stamp a moment with it. */
+  onPositionChange?: (ms: number) => void
+  /**
+   * Hands the page a way to drive playback, so a timestamp written in a
+   * comment can jump the player to it.
+   */
+  onSeekReady?: (seek: (ms: number) => void) => void
 }
 
-export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName, onPlaybackStarted }: DemoViewerProps) {
+export function DemoViewer({
+  demoUrl,
+  durationMs = 0,
+  engineBaseUrl,
+  followName,
+  onPlaybackStarted,
+  onMapDetected,
+  moments = [],
+  onPositionChange,
+  onSeekReady,
+}: DemoViewerProps) {
   // Where the engine's canvas gets parked. React owns this div; it does not
   // own the canvas inside it (see getEngineCanvas).
   const holderRef = useRef<HTMLDivElement>(null)
@@ -178,6 +206,12 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
   // parent re-rendered and handed us a new closure.
   const onStartedRef = useRef(onPlaybackStarted)
   onStartedRef.current = onPlaybackStarted
+  const onMapRef = useRef(onMapDetected)
+  onMapRef.current = onMapDetected
+  const onPositionRef = useRef(onPositionChange)
+  onPositionRef.current = onPositionChange
+  // Reported once per loaded recording, not once per poll.
+  const mapReportedRef = useRef(false)
 
   const base =
     engineBaseUrl ?? process.env.NEXT_PUBLIC_DEMO_ENGINE_URL ?? "http://127.0.0.1:8090"
@@ -402,6 +436,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
     announceShownAtRef.current = -1
     playedRef.current = false
     startedNotifiedRef.current = false
+    mapReportedRef.current = false
     setFailed(null)
     setStatus("Loading demo…")
 
@@ -447,6 +482,7 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
 
       const now = engine.getElapsed()
       if (now >= 0 && !draggingRef.current && !engine.isSeeking) setElapsed(now)
+      if (now >= 0) onPositionRef.current?.(now)
       if (now > 3000) {
         playedRef.current = true
         // Separate from playedRef, which a replay resets -- watching twice in
@@ -457,6 +493,16 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
         }
       }
       setMatchTime(engine.getMatchTime())
+
+      // The recording states its own map; hand it over the first time it is
+      // readable so nobody has to type it in at upload.
+      if (!mapReportedRef.current) {
+        const map = engine.getMapName()
+        if (map) {
+          mapReportedRef.current = true
+          onMapRef.current?.(map)
+        }
+      }
 
       setPlayers(engine.getPlayers())
 
@@ -560,6 +606,21 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
       }
     })
   }, [])
+
+  /**
+   * Hand the page a seek it can call. Registered once ready, so a comment's
+   * timestamp cannot drive an engine that has not loaded a demo yet.
+   */
+  useEffect(() => {
+    if (!ready) return
+    onSeekReady?.((ms) => {
+      setEnded(false)
+      requestSeek(ms, true)
+    })
+    // onSeekReady is a prop the parent redefines every render; depending on it
+    // would re-register on every keystroke elsewhere on the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, requestSeek])
 
   const onScrubStart = useCallback(() => {
     const engine = engineRef.current
@@ -979,6 +1040,25 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
 
         <div className="mb-2 flex items-center gap-3 text-xs text-white/70">
           <span className="tabular-nums">{seeking ? "seeking…" : formatTime(elapsed)}</span>
+          {/* The scrubber and its heat marks share a stacking context so the
+              glow can sit under the thumb without intercepting the drag. */}
+          <div className="relative flex-1">
+            {moments.length > 0 && span > 1000 && (
+              <div className="pointer-events-none absolute inset-x-0 top-1/2 h-1 -translate-y-1/2 overflow-hidden rounded-full">
+                {moments.map((m) => {
+                  const pct = Math.min(100, Math.max(0, (100 * m.atMs) / span))
+                  return (
+                    <span
+                      key={m.id}
+                      // Centred on the moment and a little wider than a hairline:
+                      // this is "look around here", not a frame-exact cut.
+                      style={{ left: `calc(${pct}% - 1.1%)`, width: "2.2%" }}
+                      className="absolute inset-y-0 rounded-full bg-amber-300/80 shadow-[0_0_6px_1px_rgba(252,211,77,0.9)]"
+                    />
+                  )
+                })}
+              </div>
+            )}
           <input
             type="range"
             min={0}
@@ -993,10 +1073,32 @@ export function DemoViewer({ demoUrl, durationMs = 0, engineBaseUrl, followName,
               if (draggingRef.current) return
               onScrubEnd((Number((e.target as HTMLInputElement).value) / 1000) * span)
             }}
-            className="h-1 flex-1 cursor-pointer accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+            className="relative h-1 w-full cursor-pointer bg-transparent accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
           />
+          </div>
           <span className="tabular-nums">{formatTime(span)}</span>
         </div>
+
+        {/* Named moments, jumpable. The glow says where; these say what. */}
+        {moments.length > 0 && (
+          <div className="mb-2 flex flex-wrap items-center gap-1.5">
+            {moments.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => {
+                  setEnded(false)
+                  requestSeek(m.atMs, true)
+                }}
+                disabled={!ready}
+                title={`Jump to ${formatTime(m.atMs)}`}
+                className="flex items-center gap-1.5 rounded-full border border-amber-300/40 bg-amber-300/10 px-2 py-0.5 text-[11px] text-amber-100 transition-colors hover:bg-amber-300/25 disabled:opacity-40"
+              >
+                <span className="tabular-nums opacity-70">{formatTime(m.atMs)}</span>
+                {m.label && <span className="max-w-[14rem] truncate">{m.label}</span>}
+              </button>
+            ))}
+          </div>
+        )}
 
         <div className="flex flex-wrap items-center gap-4">
           <button
