@@ -33,7 +33,9 @@ import { DEMO_TAGS, demoTagClasses, demoTagLabel } from "@/lib/demo-tags"
 import {
   addComment,
   addDemoMoment,
+  beginDemoTrim,
   deleteComment,
+  finishDemoTrim,
   deleteDemo,
   rateDemo,
   recordDemoView,
@@ -663,9 +665,200 @@ function MomentMarker({
           }
         }}
       />
-      <Button type="button" variant="outline" size="sm" disabled={pending} onClick={mark}>
+      {/* Amber, matching the glow a saved moment leaves on the scrubber -- the
+          control is coloured as the thing it produces. */}
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={pending}
+        onClick={mark}
+        className="border-amber-500/60 bg-amber-500/15 font-medium text-foreground hover:bg-amber-500/30 hover:text-foreground"
+      >
         Mark {formatDuration(Math.max(0, Math.round(currentMs())))}
       </Button>
+      {error && <span className="text-xs text-destructive">{error}</span>}
+    </div>
+  )
+}
+
+/**
+ * Cutting a demo down to the part worth keeping.
+ *
+ * The in and out points are taken from playback rather than typed, for the same
+ * reason moments are: you frame a clip by watching it. The cut itself runs in
+ * the engine and comes back as bytes, which go to R2 by the same presigned
+ * route an upload takes -- the server never sees the file, only the swap.
+ *
+ * Guarded behind a confirm because it replaces the recording. The old file is
+ * copied to the trash prefix on the way out, but that is a safety net for us,
+ * not an undo button for the person clicking.
+ */
+function TrimControl({
+  demoId,
+  currentMs,
+  durationMs,
+  trim,
+  settled,
+  range,
+  onRangeChange,
+}: {
+  demoId: string
+  currentMs: () => number
+  durationMs: number
+  trim: ((startMs: number, endMs: number) => Promise<Uint8Array>) | null
+  /** False until the player has booted far enough to answer either way. */
+  settled: boolean
+  range: { startMs: number; endMs: number } | null
+  onRangeChange: (next: { startMs: number; endMs: number } | null) => void
+}) {
+  const router = useRouter()
+  const [inMs, setInMs] = useState<number | null>(null)
+  const [outMs, setOutMs] = useState<number | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [busy, setBusy] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // Say which of the two "no" answers this is. Rendering nothing at all while
+  // the engine boots reads as a missing feature rather than one that is thirty
+  // seconds away, which is exactly how it looked the first time.
+  if (!settled) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        <span className="font-medium uppercase tracking-wider">Trim</span> &mdash; waiting for the player to load&hellip;
+      </p>
+    )
+  }
+  if (!trim) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        <span className="font-medium uppercase tracking-wider">Trim</span> &mdash; needs a newer player build than the
+        one this page loaded.
+      </p>
+    )
+  }
+
+  function setPoint(which: "in" | "out") {
+    setError(null)
+    setConfirming(false)
+    const at = Math.max(0, Math.round(currentMs()))
+    const nextIn = which === "in" ? at : inMs
+    const nextOut = which === "out" ? at : outMs
+    if (which === "in") setInMs(at)
+    else setOutMs(at)
+    onRangeChange(nextIn !== null && nextOut !== null && nextOut > nextIn ? { startMs: nextIn, endMs: nextOut } : null)
+  }
+
+  function clear() {
+    setInMs(null)
+    setOutMs(null)
+    setConfirming(false)
+    setError(null)
+    onRangeChange(null)
+  }
+
+  async function run() {
+    if (!range || !trim) return
+    setError(null)
+    setConfirming(false)
+    try {
+      setBusy("Cutting…")
+      const bytes = await trim(range.startMs, range.endMs)
+
+      setBusy("Saving…")
+      const begin = await beginDemoTrim(demoId, bytes.length)
+      if (!begin.success) throw new Error(begin.error)
+
+      const put = await fetch(begin.url, {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream", "Cache-Control": "public, max-age=31536000, immutable" },
+        body: new Blob([bytes as BlobPart]),
+      })
+      if (!put.ok) throw new Error(`Upload failed (${put.status}).`)
+
+      const done = await finishDemoTrim(demoId, begin.storagePath, range.startMs, range.endMs)
+      if (!done.success) throw new Error(done.error)
+
+      clear()
+      // A hard reload rather than router.refresh(): the demo the engine has
+      // open no longer exists, so the cleanest thing is to start it again.
+      window.location.reload()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "The trim failed.")
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const cutMs = range ? range.endMs - range.startMs : 0
+
+  return (
+    /* Cyan throughout, matching the range this lights up on the scrubber --
+       the same trick as the amber Mark button: each control wears the colour
+       of what it puts on the timeline. */
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-cyan-500/40 bg-cyan-500/5 px-2.5 py-2">
+      {/* Named, because two buttons saying "Clip starts here" next to a video
+          read as playback controls rather than as the ends of a cut. */}
+      <span className="text-[11px] font-semibold uppercase tracking-wider text-cyan-500">Trim</span>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={!!busy}
+        onClick={() => setPoint("in")}
+        className="border-cyan-500/60 bg-cyan-500/15 font-medium text-foreground hover:bg-cyan-500/30 hover:text-foreground"
+      >
+        {inMs !== null ? `Clip starts ${formatDuration(inMs)}` : "Clip starts here"}
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        disabled={!!busy}
+        onClick={() => setPoint("out")}
+        className="border-cyan-500/60 bg-cyan-500/15 font-medium text-foreground hover:bg-cyan-500/30 hover:text-foreground"
+      >
+        {outMs !== null ? `Clip ends ${formatDuration(outMs)}` : "Clip ends here"}
+      </Button>
+      {inMs === null && outMs === null && (
+        <span className="text-[11px] text-muted-foreground">
+          Play to the moment, mark each end, then cut the rest away.
+        </span>
+      )}
+
+      {range && !confirming && (
+        <Button
+          type="button"
+          size="sm"
+          disabled={!!busy}
+          onClick={() => setConfirming(true)}
+          className="bg-cyan-500 text-black hover:bg-cyan-400"
+        >
+          {busy ?? `Trim to ${formatDuration(cutMs)}`}
+        </Button>
+      )}
+
+      {range && confirming && (
+        <span className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs">
+          <span>
+            Replace this recording with {formatDuration(range.startMs)}–{formatDuration(range.endMs)}
+            {durationMs > 0 && <> ({formatDuration(durationMs)} → {formatDuration(cutMs)})</>}? This cannot be undone.
+          </span>
+          <Button type="button" size="sm" variant="destructive" disabled={!!busy} onClick={run}>
+            Trim
+          </Button>
+          <Button type="button" size="sm" variant="ghost" disabled={!!busy} onClick={() => setConfirming(false)}>
+            Cancel
+          </Button>
+        </span>
+      )}
+
+      {(inMs !== null || outMs !== null) && !busy && (
+        <button type="button" onClick={clear} className="text-xs text-muted-foreground hover:text-foreground">
+          Clear
+        </button>
+      )}
+      {busy && <span className="text-xs text-muted-foreground">{busy}</span>}
       {error && <span className="text-xs text-destructive">{error}</span>}
     </div>
   )
@@ -707,6 +900,13 @@ export function DemoDetail({
   // moment shows up on the scrubber immediately, without a full page reload.
   const [moments, setMoments] = useState<DemoMoment[]>(demo.moments)
   const canEditMoments = isAdmin || (!!currentPlayerId && demo.uploaderPlayerId === currentPlayerId)
+  // Handed up by the player once its engine is running, or null if that engine
+  // is too old to cut. Held in state rather than a ref because whether the
+  // control renders at all depends on it.
+  const [trimFn, setTrimFn] = useState<((startMs: number, endMs: number) => Promise<Uint8Array>) | null>(null)
+  // Distinguishes "the engine has not answered yet" from "the engine says no".
+  const [trimSettled, setTrimSettled] = useState(false)
+  const [trimRange, setTrimRange] = useState<{ startMs: number; endMs: number } | null>(null)
 
   return (
     <div className={cn("grid grid-cols-1 gap-6", !theater && "lg:grid-cols-[minmax(0,1fr)_20rem]")}>
@@ -726,6 +926,13 @@ export function DemoDetail({
             onSeekReady={(fn) => {
               seekRef.current = fn
             }}
+            // Wrapped in a thunk: React would otherwise treat the function
+            // itself as a state updater and call it.
+            onTrimReady={(fn) => {
+              setTrimFn(() => fn)
+              setTrimSettled(true)
+            }}
+            trimRange={trimRange}
             moments={moments}
             onRemoveMoment={
               canEditMoments
@@ -807,6 +1014,19 @@ export function DemoDetail({
                   currentMs={() => playbackMsRef.current}
                   moments={moments}
                   onChange={setMoments}
+                />
+              </div>
+            )}
+            {canEditMoments && (
+              <div className="mt-2">
+                <TrimControl
+                  demoId={demo.id}
+                  currentMs={() => playbackMsRef.current}
+                  durationMs={demo.durationMs ?? 0}
+                  trim={trimFn}
+                  settled={trimSettled}
+                  range={trimRange}
+                  onRangeChange={setTrimRange}
                 />
               </div>
             )}
