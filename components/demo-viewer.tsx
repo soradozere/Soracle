@@ -350,10 +350,34 @@ export function DemoViewer({
       setCamera(cam)
     }
 
-    const followParam = Number(params.get("follow"))
+    /*
+     * Read the target before converting it, because Number(null) is 0.
+     *
+     * This used to be Number(params.get("follow")) straight into the range
+     * check, so a link with no target at all resolved to client 0 and passed
+     * every guard -- integer, in range -- and the viewer dutifully followed
+     * whoever happened to be client 0. On a bot-recorded demo that is the
+     * spectator: a link shared from the recorded view opened on a Padawan
+     * standing still, rather than the player it was shared to show.
+     *
+     * And it hit precisely the links that should have been safest, because the
+     * share builder *removes* follow when the recorded view is the one being
+     * shared. Present-and-valid is now the test.
+     */
+    const followRaw = params.get("follow")
+    const followParam = followRaw === null ? NaN : Number(followRaw)
     if (Number.isInteger(followParam) && followParam >= 0 && followParam < 32) {
       engine.setFollow(followParam)
       setFollow(followParam)
+    } else if (cam === "free" || cam === "follow") {
+      /*
+       * A link that carries camera state but no target means the recorded
+       * view, and it has to be said rather than assumed: the engine outlives a
+       * route change, so without this it keeps following whoever was being
+       * watched on the demo before this one.
+       */
+      engine.setFollow(-1)
+      setFollow(-1)
     }
 
     const seconds = Number(params.get("t"))
