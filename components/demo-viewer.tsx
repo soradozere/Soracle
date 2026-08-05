@@ -303,6 +303,11 @@ export function DemoViewer({
   // Scrub state lives in refs: the drag handlers run far more often than React
   // should re-render, and the gesture has to survive a re-render mid-drag.
   const draggingRef = useRef(false)
+  // Distinct from draggingRef: whether any interaction with the scrubber --
+  // pointer or keyboard -- is genuinely live. Safari streams change events
+  // after a drag is released, and this is how they are told apart from real
+  // ones. Same idea as SettingSlider's activeRef, for the same WebKit bug.
+  const scrubActiveRef = useRef(false)
   const resumeAfterSeekRef = useRef(false)
   const pendingTargetRef = useRef<number | null>(null)
   const killShownAtRef = useRef(-1)
@@ -873,6 +878,7 @@ export function DemoViewer({
     // Scrubbing back into the demo is its own way of un-ending it.
     setEnded(false)
     draggingRef.current = true
+    scrubActiveRef.current = true
     scrubValueRef.current = engine.getElapsed()
     resumeAfterSeekRef.current = !paused
     engine.setPaused(true)
@@ -904,17 +910,26 @@ export function DemoViewer({
    * started on, so a handler bound there can simply never run: the drag stays
    * open, the scrubber keeps following the mouse with no button held, and the
    * next click is what finally commits it. The window always sees the release.
+   *
+   * mouseup as well as pointerup, and for the same Safari: on a held drag it
+   * swallows the pointerup entirely -- window included -- but still delivers
+   * the mouseup. The settings sliders learned this first (see SettingSlider);
+   * the scrubber kept sticking after they were fixed because this listener
+   * predated that lesson.
    */
   useEffect(() => {
     const end = () => {
+      scrubActiveRef.current = false
       if (!draggingRef.current) return
       onScrubEnd(scrubValueRef.current)
     }
     window.addEventListener("pointerup", end)
     window.addEventListener("pointercancel", end)
+    window.addEventListener("mouseup", end)
     return () => {
       window.removeEventListener("pointerup", end)
       window.removeEventListener("pointercancel", end)
+      window.removeEventListener("mouseup", end)
     }
   }, [onScrubEnd])
 
@@ -1589,7 +1604,21 @@ export function DemoViewer({
             value={Math.round((1000 * elapsed) / Math.max(span, 1))}
             disabled={!ready || span <= 1000}
             onPointerDown={onScrubStart}
-            onChange={(e) => onScrubMove((Number(e.target.value) / 1000) * span)}
+            onChange={(e) => {
+              // No live interaction means this is Safari still dragging a
+              // thumb the user let go of. Put it back and say nothing --
+              // the same phantom-change gate as SettingSlider.
+              if (!scrubActiveRef.current) {
+                e.currentTarget.value = String(Math.round((1000 * elapsed) / Math.max(span, 1)))
+                return
+              }
+              onScrubMove((Number(e.target.value) / 1000) * span)
+            }}
+            // Keyboard is an interaction too, or the gate above would eat the
+            // arrow keys.
+            onKeyDown={() => {
+              scrubActiveRef.current = true
+            }}
             // The release is handled on the window, not here -- see the effect
             // by onScrubEnd for why.
             onKeyUp={(e) => {
