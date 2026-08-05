@@ -183,6 +183,20 @@ export async function uploadCSV(formData: FormData) {
       }
     }
 
+    /*
+     * Placed here, above the changelog write, because both of the remaining
+     * return paths below are successes -- a failed tier_changes insert still
+     * leaves the roster updated and returns success-with-warning, so tagging
+     * only at the very end would miss that case.
+     *
+     * A roster import moves name and tier_value, both of which the cached
+     * achievement ledger reads (see HISTORY_TAG in achievements-server.ts).
+     * Without this the /players board would keep the old tiers until the
+     * hour-long safety net expired -- which is the whole point of a tier
+     * review being visible.
+     */
+    updateTag(HISTORY_TAG)
+
     // Record tier changes for the changelog: only players who already existed and
     // whose tier actually moved. New players don't produce a changelog entry.
     const tierChangeRows = players
