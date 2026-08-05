@@ -17,15 +17,25 @@ const GAMETYPES = ["CTF", "FFA", "TeamFFA"] as const
  * (lots of combat, lots of entity deltas every frame) measures in at roughly
  * 30-35KB/s across the demos already here, while a quiet stretch of a full
  * match can be under 2KB/s. So this is a policy line, not a precise duration
- * bound: 5MB covers a dense highlight reel or a typical single game, which
- * is what the library is for -- the multi-hour "recorded overnight" file is
- * exactly what it should reject.
+ * bound.
  *
- * Regular uploads get the policy limit. Admins get the old technical
- * ceiling back, on the basis that a deliberately long, special recording is
- * exactly the kind of thing this is meant to still allow through.
+ * It was 5MB, on the reasoning that a full match had no business here and the
+ * library was for highlights. Raised to 100MB because the thing that made a
+ * long upload a dead end no longer holds: trimming works on player-recorded
+ * demos as of engine 20260805-0954, and an uploader can cut their own demo
+ * (see resolveEditor). "Post the whole match, then trim the bit worth
+ * watching" is now a real workflow rather than a request for an admin.
+ *
+ * Storage is not what this limit protects. The whole library is under 20MB
+ * against a 10GB free tier; the binding cost is that the viewer downloads a
+ * demo in full before playback starts -- there is no range streaming -- so a
+ * 100MB upload is a 100MB wait for every single person who watches it. That
+ * is the reason to keep a ceiling at all, and the reason the trim prompt
+ * matters more than the number does.
+ *
+ * Admins keep a higher ceiling for the deliberately special recording.
  */
-const MAX_DEMO_BYTES_PLAYER = 5 * 1024 * 1024
+const MAX_DEMO_BYTES_PLAYER = 100 * 1024 * 1024
 const MAX_DEMO_BYTES_ADMIN = 150 * 1024 * 1024
 
 type ActionResult = { success: true; id: string } | { success: false; error: string }
