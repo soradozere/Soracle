@@ -7,9 +7,9 @@ export const metadata: Metadata = {
   description: "Every player on record, ranked by Achievement Score, with current form and tier.",
 }
 
-// Same reasoning as /achievements: this walks the entire match history, and the
-// history only moves when an admin approves a match.
-export const revalidate = 300
+// Same reasoning as /achievements: shares the cached ledger (HISTORY_TAG), and
+// a landed match revalidates it on demand -- this window is the safety net.
+export const revalidate = 3600
 
 export default async function PlayersPage() {
   const rows = await computePlayersDirectory()

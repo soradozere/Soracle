@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
 import { cookies } from "next/headers"
+import { revalidateTag } from "next/cache"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
-import { computeAllPlayerAchievements } from "@/lib/achievements-server"
+import { computeAllPlayerAchievements, HISTORY_TAG } from "@/lib/achievements-server"
 import { scoreFromViews } from "@/lib/achievement-score"
 import { earnedTitles, mergeRecordedTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
 import { fetchRecordedTitles } from "@/lib/titles-server"
@@ -138,6 +139,21 @@ export async function POST(request: Request) {
     })
     .eq("id", playerId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  /*
+   * Of everything written above, avatar_url is the one the cached achievement
+   * ledger reads (see HISTORY_TAG in achievements-server.ts) -- it rides along
+   * in the same row fetch to feed the /players board's avatars. The rest
+   * (model, saber, skin, theme, animations, equipped title) are read on their
+   * own elsewhere and are unaffected; the board's "title" column is the top
+   * crest name derived from match history, not players.title.
+   *
+   * revalidateTag, not updateTag: this is a Route Handler, and updateTag
+   * throws outright outside a Server Action. "max" is the profile the
+   * deprecation warning asks for when no read-your-own-writes guarantee is
+   * needed -- nothing here reads the ledger back before responding.
+   */
+  revalidateTag(HISTORY_TAG, "max")
 
   return NextResponse.json({ ok: true })
 }

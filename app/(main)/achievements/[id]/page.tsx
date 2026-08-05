@@ -6,7 +6,14 @@ import { pageDefFor, rankListFor, requirementFor } from "@/lib/achievement-pages
 import { ACHIEVEMENTS, RARITY_META } from "@/lib/achievement-meta"
 import type { AchievementView } from "@/lib/achievements"
 
-export const revalidate = 300
+// generateStaticParams below makes this ~59 independent static routes, each
+// with its own revalidate clock and its own ISR write. At 300s that was up to
+// 59x the write volume of a single page revalidating that often -- the single
+// largest contributor to the Fluid CPU / ISR Writes flag found in the 5 Aug
+// 2026 usage audit, since every one of those writes recomputed the full
+// ledger (now shared and cached, see HISTORY_TAG). Long here because a new
+// match calls revalidateTag itself; this is the safety net, not the trigger.
+export const revalidate = 3600
 
 // Only the visible crests are pre-rendered. A one-of-one gets a page the moment
 // it is claimed, but listing its id here would leak the unclaimed ones.
