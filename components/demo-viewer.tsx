@@ -238,6 +238,11 @@ export function DemoViewer({
   const [paused, setPaused] = useState(false)
   const [speed, setSpeed] = useState(1)
   const [camera, setCamera] = useState<CameraMode>("follow")
+  // Lets the pointerlockchange handler read the current mode without going
+  // stale -- that listener is registered once on mount (see below) and would
+  // otherwise always see the "follow" it closed over at the time.
+  const cameraRef = useRef(camera)
+  cameraRef.current = camera
   const [follow, setFollow] = useState(-1)
   const [players, setPlayers] = useState<DemoPlayerInfo[]>([])
   const [volume, setVolume] = useState(DEFAULT_VOLUME)
@@ -1182,14 +1187,40 @@ export function DemoViewer({
   }, [])
 
 
-  // Free-fly grabs the pointer for mouse-look (SDL's relative mouse mode maps
-  // to the browser's real Pointer Lock API). There's no cursor to hover the
-  // bar with at that point, so its visibility has to react to lock state, not
-  // just mouse position.
+  /**
+   * Free-fly grabs the pointer for mouse-look (SDL's relative mouse mode maps
+   * to the browser's real Pointer Lock API). There's no cursor to hover the
+   * bar with at that point, so its visibility has to react to lock state, not
+   * just mouse position.
+   *
+   * The engine's own Escape handling swallows the key during playback rather
+   * than opening its in-game menu (see the __EMSCRIPTEN__ block guarding
+   * clc.demoplaying in cl_keys.cpp) -- deliberately, because a public demo
+   * viewer has no business routing into Join/Add Bot/Setup. What that leaves
+   * Escape to do is exactly what the browser already guarantees on its own:
+   * release the pointer lock. The page finds out about that release here,
+   * same as any other -- but if it happens while still in free fly, camera
+   * state is left claiming a mode that no longer has the one thing that made
+   * it meaningful, since nothing steers the camera without the pointer. Left
+   * alone, the next click on the picture would silently re-request it and
+   * trap the cursor right back -- which is what "Escape doesn't seem to do
+   * anything" looks like from the outside: the key worked, but nothing
+   * changed about the state a follow-up click would land back in. Falling
+   * back to Follow here is what actually finishes leaving free fly, matching
+   * what clicking the Follow button itself would do.
+   */
   useEffect(() => {
-    const onChange = () => setPointerLocked(!!document.pointerLockElement)
+    const onChange = () => {
+      const locked = !!document.pointerLockElement
+      setPointerLocked(locked)
+      if (!locked && cameraRef.current === "free") chooseCamera("follow")
+    }
     document.addEventListener("pointerlockchange", onChange)
     return () => document.removeEventListener("pointerlockchange", onChange)
+    // chooseCamera is a useCallback with no dependencies of its own -- stable
+    // across renders, so this can safely run once on mount rather than
+    // re-subscribing on every camera change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   /**
