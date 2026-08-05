@@ -1,5 +1,5 @@
-import { timingSafeEqual } from "crypto"
-import { NextResponse } from "next/server"
+import type { NextResponse } from "next/server"
+import { requireBearer } from "@/lib/bearer-auth"
 import { createClient } from "@/lib/supabase/server"
 import { mapDbPlayer } from "@/lib/fetch-players-db"
 import type { PlayerAlias } from "@/lib/name-match"
@@ -11,21 +11,7 @@ import type { Player } from "@/lib/types"
  * Fails closed (401) when BOT_API_SECRET is not configured.
  */
 export function requireBotAuth(request: Request): NextResponse | null {
-  const secret = process.env.BOT_API_SECRET
-  const header = request.headers.get("authorization")
-  const token = header?.startsWith("Bearer ") ? header.slice("Bearer ".length) : null
-
-  if (!secret || !token) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  }
-
-  const tokenBuf = Buffer.from(token)
-  const secretBuf = Buffer.from(secret)
-  if (tokenBuf.length !== secretBuf.length || !timingSafeEqual(tokenBuf, secretBuf)) {
-    return NextResponse.json({ error: "unauthorized" }, { status: 401 })
-  }
-
-  return null
+  return requireBearer(request, process.env.BOT_API_SECRET)
 }
 
 /**
