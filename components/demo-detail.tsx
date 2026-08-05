@@ -503,7 +503,6 @@ function EditDemoDialog({
             <Textarea id="edit-description" name="description" defaultValue={demo.description ?? ""} rows={3} />
           </div>
           {isAdmin && (
-            <>
           <div className="space-y-1.5">
             <Label>Credited uploader</Label>
             <Select name="uploaderPlayerId" defaultValue={demo.uploaderPlayerId ?? "__none__"}>
@@ -520,6 +519,16 @@ function EditDemoDialog({
               </SelectContent>
             </Select>
           </div>
+          )}
+          {/*
+            Not gated on isAdmin, unlike credited-uploader above: the server
+            side of this split (updateDemo, app/(main)/demos/actions.ts) has
+            always treated protagonist as the uploader's call, not an admin
+            one -- "they are the one who knows whose clip it is" -- but this
+            field was accidentally nested inside the admin-only block since
+            the form was first built, so the backend allowed something the UI
+            never offered a way to do.
+          */}
           <div className="space-y-1.5">
             <Label>Protagonist</Label>
             <p className="text-xs text-muted-foreground">
@@ -539,8 +548,6 @@ function EditDemoDialog({
               </SelectContent>
             </Select>
           </div>
-            </>
-          )}
           <div className="space-y-1.5">
             <Label>Highlights</Label>
             <p className="text-xs text-muted-foreground">What happens in this one. Drives the library filters.</p>
