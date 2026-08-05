@@ -218,7 +218,7 @@ async function requireAdmin(): Promise<{ ok: true } | { ok: false; error: string
  * Gates deletion too, not just edits, so there is one answer to "may this
  * person change this demo" rather than several that can drift apart.
  */
-async function resolveEditor(
+export async function resolveEditor(
   demoId: string,
 ): Promise<{ ok: true; isAdmin: boolean } | { ok: false; error: string }> {
   const admin = await requireAdmin()
