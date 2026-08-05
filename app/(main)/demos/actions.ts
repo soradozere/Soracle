@@ -540,7 +540,16 @@ export async function finishDemoTrim(
   const durationMs = Math.round(endMs - startMs)
   const { error } = await supabase
     .from("demos")
-    .update({ file_path: storagePath, duration_ms: durationMs })
+    .update({
+      file_path: storagePath,
+      duration_ms: durationMs,
+      // The size travels with the file. Leaving it behind left every trimmed
+      // demo claiming the length of the recording it replaced -- a 30-second
+      // clip filed as 84MB -- which nothing reads today and everything would
+      // read wrong the day something does. storedBytes is the figure the HEAD
+      // above already confirmed against R2.
+      file_size_bytes: storedBytes,
+    })
     .eq("id", demoId)
   if (error) {
     await deleteDemoFile(storagePath).catch(() => {})
