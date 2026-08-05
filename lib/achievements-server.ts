@@ -1,3 +1,4 @@
+import { unstable_cache } from "next/cache"
 import { createAnonClient } from "@/lib/supabase/anon"
 import {
   computeAchievements,
@@ -91,7 +92,58 @@ interface HistoryIndex {
   holders: Map<string, SecretHolder>
 }
 
-async function buildHistoryIndex(): Promise<HistoryIndex> {
+interface RawPlayerRow {
+  id: string
+  name: string
+  tier_value: number
+  avatar_url: string | null
+  manually_inactive: boolean | null
+}
+
+interface RawHistory {
+  matches: ServerMatch[]
+  stats: ServerStat[]
+  players: RawPlayerRow[]
+}
+
+/*
+ * Three full-table scans, and they used to run fresh on every one of the 62+
+ * pages that call buildHistoryIndex (home, /achievements, one static route
+ * per crest, /players) on each page's own independent revalidate clock --
+ * 60s on the home page. None of those pages shared a result, so the busiest
+ * window paid for all three round-trips repeatedly rather than once. That
+ * combination -- an expensive shared core with no shared cache, behind a
+ * revalidate window shorter than the data actually changes -- was the direct
+ * cause of Fluid CPU and ISR Writes both running high in the same billing
+ * period (found auditing Vercel usage, 5 Aug 2026).
+ *
+ * Cached at the raw-row layer, not around buildHistoryIndex itself: that
+ * function's result is built entirely of Maps, and unstable_cache round-trips
+ * its return value through JSON to store it -- a Map survives that as `{}`,
+ * silently. Caching stops at the plain-array boundary instead; everything
+ * below (the Map-building, the per-match sequence pass, one-of-one
+ * resolution) stays exactly as it was, uncached, running fresh on the shared
+ * arrays every call. Cheap in-memory work was never the cost here -- three
+ * paginated network round-trips were, and this captures the whole saving
+ * without touching a line of the logic those Maps get built from.
+ *
+ * The tag is what keeps this correct rather than just cheaper: a match only
+ * changes on an infrequent, well-defined set of writes (see
+ * app/admin/actions.ts), so those call updateTag(HISTORY_TAG) themselves on
+ * success -- updateTag rather than revalidateTag because one of those writers
+ * needs the very next read in the same action to see fresh data, not just
+ * future requests -- and the 1-hour window below exists only as a safety net
+ * for a write path that bypasses that: Sam edits players/matches by hand in
+ * Supabase sometimes, and that's real, not hypothetical.
+ */
+export const HISTORY_TAG = "achievement-history"
+
+const fetchHistoryRows = unstable_cache(fetchHistoryRowsUncached, ["achievement-history"], {
+  tags: [HISTORY_TAG],
+  revalidate: 3600,
+})
+
+async function fetchHistoryRowsUncached(): Promise<RawHistory> {
   // Anon, not the cookie-backed server client: every one of these reads is public
   // and identical for all callers, and reading cookies would force the pages that
   // depend on this to re-render per request instead of honouring `revalidate`.
@@ -101,14 +153,17 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
     fetchAll<ServerStat>(supabase, "match_stats", STAT_COLUMNS),
     // tier_value / avatar_url / manually_inactive ride along for the /players
     // board: same row, same round-trip, and the achievement passes ignore them.
-    fetchAll<{
-      id: string
-      name: string
-      tier_value: number
-      avatar_url: string | null
-      manually_inactive: boolean | null
-    }>(supabase, "players", "id, name, created_at, tier_value, avatar_url, manually_inactive"),
+    fetchAll<RawPlayerRow>(
+      supabase,
+      "players",
+      "id, name, created_at, tier_value, avatar_url, manually_inactive",
+    ),
   ])
+  return { matches, stats, players }
+}
+
+async function buildHistoryIndex(): Promise<HistoryIndex> {
+  const { matches, stats, players } = await fetchHistoryRows()
 
   const idByName = new Map(players.map((p) => [p.name, p.id]))
   const nameById = new Map(players.map((p) => [p.id, p.name]))

@@ -20,9 +20,16 @@ export const metadata: Metadata = {
   description: "Recent activity, latest crests and the active roster for JK2 Capture the Flag.",
 }
 
-// Matches only arrive when an admin approves one, so a short revalidate is
-// plenty fresh without recomputing the whole ledger on every visitor.
-export const revalidate = 60
+// Matches only arrive when an admin approves one -- and now that landing a
+// match calls revalidateTag(HISTORY_TAG) itself (see app/admin/actions.ts),
+// this window is a safety net rather than the thing keeping the page fresh.
+// It was 60s under the old reasoning ("short window = fresh"), which was
+// backwards for how expensive the underlying ledger computation is: every
+// page sharing that computation on its own 60s clock, uncached, was the
+// direct cause of a Vercel usage flag on Fluid CPU and ISR Writes both
+// (5 Aug 2026 audit). Long now that on-demand invalidation carries the real
+// freshness requirement.
+export const revalidate = 3600
 
 interface RawMatch {
   id: string
