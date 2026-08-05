@@ -2,11 +2,13 @@
 
 import Papa from "papaparse"
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { updateTag } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { normalizeName } from "@/lib/name-match"
 import { notifyAchievementUnlocks } from "@/lib/achievement-notify"
 import { recordSeasonalTitlesSafely } from "@/lib/titles-server"
+import { HISTORY_TAG } from "@/lib/achievements-server"
 
 const PENDING_BUCKET = "pending-scoreboards"
 
@@ -275,6 +277,12 @@ export async function logMatch(data: {
       data.played_at ?? new Date().toISOString(),
     )
 
+    // The achievement ledger is cached across every page that reads it (see
+    // HISTORY_TAG in achievements-server.ts) precisely so a new match doesn't
+    // pay for a full recompute on each one's own clock -- which means this is
+    // now the thing that tells them a match landed, not the clock.
+    updateTag(HISTORY_TAG)
+
     return { success: true }
   } catch (error) {
     return {
@@ -428,6 +436,17 @@ async function persistMatchWithStats(
 
   // 5. Keep players.last_match_at current so the Tier List's activity check works.
   await touchLastMatchAt(supabase, allPlayers, payload.played_at ?? new Date().toISOString())
+
+  /*
+   * Before the unlock ping, not after. notifyAchievementUnlocks ->
+   * computeMatchUnlocks reads through the same cached buildHistoryIndex as the
+   * pages do (see HISTORY_TAG) -- it filters for views earned by *this*
+   * matchId, so it specifically needs data that includes the rows just
+   * inserted above. Calling updateTag afterwards, as the pages' own
+   * freshness trigger does, would let this read a stale cache first and
+   * silently find zero unlocks for a match that has some.
+   */
+  updateTag(HISTORY_TAG)
 
   // Best-effort achievement-unlock ping (never throws; no-op without a webhook).
   await notifyAchievementUnlocks(matchId)
@@ -736,6 +755,10 @@ export async function updateMatchDate(matchId: string, newDate: string) {
       return { success: false, error: error.message }
     }
 
+    // A moved date can move a match into or out of a season, which changes
+    // whose ledger it counts against.
+    updateTag(HISTORY_TAG)
+
     return { success: true }
   } catch (error) {
     return {
@@ -757,6 +780,8 @@ export async function deleteMatch(matchId: string) {
     if (error) {
       return { success: false, error: error.message }
     }
+
+    updateTag(HISTORY_TAG)
 
     return { success: true }
   } catch (error) {

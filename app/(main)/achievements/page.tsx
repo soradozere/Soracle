@@ -10,9 +10,11 @@ export const metadata: Metadata = {
 }
 
 // The ledger walks the entire match history, so it is far too expensive to redo
-// per visitor. Matches only arrive when an admin approves one, so a few minutes
-// of staleness costs nothing.
-export const revalidate = 300
+// per visitor -- computeAchievementLedger is cached across every page that
+// calls it (see HISTORY_TAG), and landing a match calls revalidateTag itself,
+// so this window is a safety net rather than the freshness mechanism. Long,
+// because the real trigger is on-demand now.
+export const revalidate = 3600
 
 // Deep enough to read as a running history rather than a snapshot; the list
 // scrolls in its own pane so it can't push the crest grid off the page.
