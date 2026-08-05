@@ -626,11 +626,11 @@ function EditDemoDialog({
           <DialogFooter className="sm:justify-between">
             {/* Two taps, and the second one names what it will destroy -- this
                 removes the recording itself, not just the library entry.
-                Admins only: an uploader can fix their own details, but
-                removing a recording from the library is not theirs to do. */}
-            {!isAdmin ? (
-              <span />
-            ) : confirmingDelete ? (
+                Not gated on isAdmin: this dialog only opens for an admin or
+                the uploader in the first place (canEditMoments), and deleting
+                your own recording is yours to do. deleteDemo enforces the same
+                pair server-side rather than trusting that. */}
+            {confirmingDelete ? (
               <div className="flex items-center gap-2">
                 <Button type="button" variant="destructive" size="sm" disabled={pending} onClick={remove}>
                   {pending ? "Deleting…" : "Delete permanently"}

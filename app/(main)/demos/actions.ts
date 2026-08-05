@@ -200,12 +200,23 @@ async function requireAdmin(): Promise<{ ok: true } | { ok: false; error: string
 }
 
 /**
- * Who may edit a demo's details: an admin, or the player who uploaded it.
+ * Who may change a demo: an admin, or the player who uploaded that specific
+ * demo. Nobody else, and never somebody else's upload.
  *
  * Uploaders get it because the alternative is asking an admin to fix every
  * typo in a title. They are deliberately not given everything an admin has --
  * see updateDemo, where the fields that decide what a demo *is* to the rest of
  * the site stay admin-only.
+ *
+ * The ownership test below is the whole security boundary for the player path,
+ * and it is per-demo rather than a blanket "is an uploader" role: holding a
+ * player session says nothing about *this* recording. It also settles demos
+ * with no uploader on record (uploader_player_id null, true of the early
+ * admin-seeded library) -- null never equals a session id, so those stay
+ * admin-only rather than becoming unowned and claimable.
+ *
+ * Gates deletion too, not just edits, so there is one answer to "may this
+ * person change this demo" rather than several that can drift apart.
  */
 async function resolveEditor(
   demoId: string,
@@ -224,7 +235,8 @@ async function resolveEditor(
     .eq("id", demoId)
     .maybeSingle()
   if (!demo || demo.uploader_player_id !== playerId) {
-    return { ok: false, error: "You can only edit demos you uploaded." }
+    // "edit" would read oddly on a rejected delete, and this now guards both.
+    return { ok: false, error: "You can only change demos you uploaded." }
   }
   return { ok: true, isAdmin: false }
 }
@@ -292,17 +304,27 @@ export async function updateDemo(demoId: string, formData: FormData): Promise<Ac
 }
 
 /**
- * Admin-only: remove a demo entirely.
+ * Remove a demo entirely -- an admin, or the player who uploaded it.
  *
- * Ratings, tags and comments go with it through the foreign keys' ON DELETE
- * CASCADE (027, 030). The stored .dm_15 does not -- storage has no such
- * relationship to the table -- so it is removed first: an orphaned row with no
- * file plays as a broken page, whereas an orphaned file is invisible and can
- * be swept up later.
+ * Uploaders were held back from this at first, on the reasoning that taking a
+ * recording out of the library was a bigger call than fixing its title. That
+ * was the wrong line to draw: it is their recording, and someone who wants a
+ * clip of theirs gone should not have to ask. Same gate as every other edit
+ * (resolveEditor), so there is one answer to "may this person change this
+ * demo" rather than two that can drift apart.
+ *
+ * Worth knowing what goes with it: ratings, tags and comments cascade through
+ * the foreign keys (027, 030), and comments can be other people's. The .dm_15
+ * does not cascade -- storage has no such relationship to the table -- so it
+ * is removed first: an orphaned row with no file plays as a broken page,
+ * whereas an orphaned file is invisible and can be swept up later. That
+ * removal goes through the trash prefix (deleteDemoFile copies before it
+ * deletes), so the recording itself survives its 7-day lifecycle window even
+ * though the row is gone immediately.
  */
 export async function deleteDemo(demoId: string): Promise<ActionResult> {
-  const admin = await requireAdmin()
-  if (!admin.ok) return { success: false, error: admin.error }
+  const editor = await resolveEditor(demoId)
+  if (!editor.ok) return { success: false, error: editor.error }
 
   const supabase = createServiceClient()
   const { data: demo, error: lookupError } = await supabase
