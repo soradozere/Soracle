@@ -28,6 +28,17 @@ export const RANGE_DEFAULT = 80
 /** Below this the camera would be inside the player, so it becomes first person. */
 const FIRST_PERSON_BELOW = 16
 
+/**
+ * The generation of the demo cut this page is willing to use.
+ *
+ * 1 was the original: one standalone frame at the in-point, which silently
+ * produced unplayable files from any demo whose frames delta more than one
+ * message back. 2 writes enough standalone frames to cover the delta window.
+ * Raise this in step with JKD_TrimRevision whenever a cut written by an older
+ * engine would be wrong rather than merely worse.
+ */
+const TRIM_REVISION = 2
+
 export interface DemoPlayerInfo {
   clientNum: number
   name: string
@@ -285,6 +296,7 @@ export class JkdEngine {
   private fnPlayerInfo!: (n: number) => string
   private fnConfigString!: (n: number) => string
   private fnTrimDemo!: ((endMs: number, name: string) => number) | null
+  private fnTrimRevision!: (() => number) | null
   private fnViewClient!: () => number
   private fnIsFollowing!: () => number
 
@@ -432,13 +444,21 @@ export class JkdEngine {
      * never fires and every engine claims it can trim. The export itself is the
      * only honest test.
      */
-    const trimExport = (M as unknown as Record<string, unknown>)._JKD_TrimDemo
+    const exports = M as unknown as Record<string, unknown>
+    const trimExport = exports._JKD_TrimDemo
     this.fnTrimDemo =
       typeof trimExport === "function"
         ? (M.cwrap("JKD_TrimDemo", "number", ["number", "string"]) as unknown as (
             endMs: number,
             name: string,
           ) => number)
+        : null
+    // Which generation of the cut this engine implements. Absent on every build
+    // before the delta-chain fix, which is the point: see canTrim.
+    const revisionExport = exports._JKD_TrimRevision
+    this.fnTrimRevision =
+      typeof revisionExport === "function"
+        ? (M.cwrap("JKD_TrimRevision", "number", []) as unknown as () => number)
         : null
     this.fnViewClient = M.cwrap("JKD_GetViewClientNum", "number", []) as unknown as () => number
     this.fnIsFollowing = M.cwrap("JKD_IsFollowing", "number", []) as unknown as () => number
@@ -643,9 +663,22 @@ export class JkdEngine {
     await new Promise<void>((resolve) => this.seekWaiters.push(resolve))
   }
 
-  /** Whether this engine build can trim. Older ones simply do not export it. */
+  /**
+   * Whether this engine build can trim *correctly*.
+   *
+   * Exporting JKD_TrimDemo is no longer enough. The first version of the cut
+   * wrote a single standalone frame at the in-point, which is only sufficient
+   * when every following frame deltas one message back -- true of demos the
+   * bot records beside the server, false of anything recorded by a player with
+   * real ping, where frames reference ten or more messages back and the ones
+   * they want are on the far side of the cut. Those files opened, played about
+   * a second, and died; see JKD_TrimRevision in cl_main.cpp.
+   *
+   * So the question is a revision, not an existence check, and an engine that
+   * cannot answer it is by definition the one that got this wrong.
+   */
   get canTrim(): boolean {
-    return this.ready && !!this.fnTrimDemo
+    return this.ready && !!this.fnTrimDemo && (this.fnTrimRevision?.() ?? 0) >= TRIM_REVISION
   }
 
   /**
