@@ -323,21 +323,28 @@ export interface DemoLink {
 }
 
 /**
- * The demos either side of this one, in the order the library lists them.
+ * What the end-of-demo overlay offers: back to the one just above this in the
+ * sidebar, and somewhere new to go.
  *
- * Newest first, so "previous" is the newer one above it and "next" is the
- * older one below -- matching the sidebar rather than the direction time runs,
- * which is what someone clicking through a list expects.
- *
- * Two bounded queries rather than reading the library and searching it: this
- * runs on every demo page, and only ever needs one row from each side.
+ * `previous` stays literal -- the newer demo immediately above this one in the
+ * library's newest-first order, matching what clicking through the sidebar by
+ * hand would land on. `next` is a random pick from everything else instead:
+ * this is the moment someone decides whether to keep watching, and a random
+ * clip is a better answer to "what else is there?" than the runner-up to
+ * whichever demo happened to upload right after this one -- which for an
+ * older demo is usually unrelated, and for the newest demo in the library
+ * doesn't exist at all. PostgREST's `.order()` takes a column, not an
+ * expression, so there's no `order by random()` to reach for here -- id/title
+ * for the whole library (minus this one) is cheap at the library's current
+ * size, and picking uniformly from an array is simpler than fighting the
+ * query layer for something SQL would do in one line.
  */
 export async function getAdjacentDemos(
   id: string,
   createdAt: string,
 ): Promise<{ previous: DemoLink | null; next: DemoLink | null }> {
   const supabase = await createClient()
-  const [newer, older] = await Promise.all([
+  const [newer, others] = await Promise.all([
     supabase
       .from("demos")
       .select("id, title")
@@ -345,19 +352,12 @@ export async function getAdjacentDemos(
       .order("created_at", { ascending: true })
       .limit(1)
       .maybeSingle(),
-    supabase
-      .from("demos")
-      .select("id, title")
-      .lt("created_at", createdAt)
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
+    supabase.from("demos").select("id, title").neq("id", id),
   ])
-  const link = (r: { data: unknown }): DemoLink | null => {
-    const row = r.data as { id: string; title: string } | null
-    return row ? { id: row.id, title: row.title } : null
-  }
-  return { previous: link(newer), next: link(older) }
+  const previous = newer.data ? { id: newer.data.id, title: newer.data.title } : null
+  const pool = (others.data ?? []) as DemoLink[]
+  const next = pool.length ? pool[Math.floor(Math.random() * pool.length)] : null
+  return { previous, next }
 }
 
 export async function listOtherDemos(excludeId: string, limit = 12): Promise<DemoListItem[]> {
