@@ -6,7 +6,7 @@ import { RankSuggestions } from "@/components/rank-suggestions"
 import { Button } from "@/components/ui/button"
 import { ExportDataButton } from "@/components/export-data-button"
 import Link from "next/link"
-import { LogOut, Home, Settings } from "lucide-react"
+import { LogOut, Home, Settings, Youtube } from "lucide-react"
 
 export default async function AdminPage() {
   const supabase = await createClient()
@@ -47,6 +47,12 @@ export default async function AdminPage() {
           <div className="flex items-center gap-4">
             <span className="text-sm text-muted-foreground">{user.email}</span>
             <ExportDataButton />
+            <Link href="/admin/renders">
+              <Button variant="outline" size="sm">
+                <Youtube className="h-4 w-4 mr-2" />
+                Renders
+              </Button>
+            </Link>
             <Link href="/admin/settings">
               <Button variant="outline" size="sm">
                 <Settings className="h-4 w-4 mr-2" />
