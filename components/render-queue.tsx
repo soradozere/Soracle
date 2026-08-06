@@ -3,9 +3,9 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Download, X, ExternalLink, AlertTriangle } from "lucide-react"
+import { Download, X, ExternalLink, AlertTriangle, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { markPublished, rejectRender } from "@/app/admin/renders/actions"
+import { approveRender, markPublished, rejectRender } from "@/app/admin/renders/actions"
 import { Input } from "@/components/ui/input"
 
 export interface RenderJob {
@@ -165,9 +165,17 @@ export function RenderQueue({ jobs, atCap }: { jobs: RenderJob[]; atCap: boolean
 
           {job.status === "pending_review" && (
             <div className="mt-3 space-y-3">
-              <div className="flex gap-2">
+              <p className="text-xs text-muted-foreground">
+                Uploads arrive <span className="font-medium">private</span> — YouTube forces that until the API
+                project passes its compliance audit. Flip it to public in Studio.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button size="sm" disabled={busy === job.id || atCap} onClick={() => act(job.id, approveRender)}>
+                  <Upload className="mr-1.5 h-3.5 w-3.5" />
+                  Approve &amp; upload
+                </Button>
                 {job.downloadUrl && (
-                  <Button size="sm" asChild>
+                  <Button size="sm" variant="outline" asChild>
                     <a href={job.downloadUrl} download>
                       <Download className="mr-1.5 h-3.5 w-3.5" />
                       Download MP4
@@ -185,13 +193,13 @@ export function RenderQueue({ jobs, atCap }: { jobs: RenderJob[]; atCap: boolean
                 </Button>
               </div>
 
-              {/* Closes the loop once it is on YouTube. Without this the row
-                  sits in review forever and the demo page has no link back to
-                  the published video. */}
+              {/* The way out when the automatic upload will not work. Also
+                  the only way to record a video published by hand, which is
+                  otherwise invisible to the queue. */}
               <div className="flex gap-2">
                 <Input
                   className="h-8 text-sm"
-                  placeholder="Paste the YouTube link once it's up"
+                  placeholder="Or paste a YouTube link you uploaded yourself"
                   value={urls[job.id] ?? ""}
                   onChange={(e) => setUrls((u) => ({ ...u, [job.id]: e.target.value }))}
                 />

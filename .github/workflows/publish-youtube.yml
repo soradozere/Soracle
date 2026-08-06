@@ -1,0 +1,147 @@
+name: Publish to YouTube
+
+# Uploads an approved render to the community channel.
+#
+# Runs here rather than in a Vercel function because a full match is gigabytes
+# and a serverless function would hit its execution limit partway through. The
+# runner has the file on local disk, no timeout worth worrying about, and curl
+# streams it without ever holding it in memory.
+#
+# Dispatched by the approve action. workflow_dispatch only.
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "youtube_render_queue row id"
+        required: true
+      r2_key:
+        description: "Object key in the renders bucket"
+        required: true
+      title:
+        required: true
+      description:
+        default: ""
+      privacy:
+        description: "private until the YouTube compliance audit passes"
+        default: "private"
+
+env:
+  SORACLE_URL: "https://jk2ctf.vercel.app"
+  RENDER_BUCKET: "jk2renders"
+
+jobs:
+  publish:
+    name: Upload and record
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Fetch the render from R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_RENDERS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_RENDERS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          R2_KEY: ${{ inputs.r2_key }}
+        run: |
+          aws s3 cp "s3://$RENDER_BUCKET/$R2_KEY" video.mp4 \
+            --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com" --no-progress
+          ls -la video.mp4
+
+      - name: Upload to YouTube
+        id: upload
+        env:
+          CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          TITLE: ${{ inputs.title }}
+          DESCRIPTION: ${{ inputs.description }}
+          PRIVACY: ${{ inputs.privacy }}
+        run: |
+          set -u
+
+          # An access token, from the refresh token stored once.
+          #
+          # The app sits in "In production" publishing status, which is what
+          # stops Google issuing a refresh token that expires after seven days.
+          # If this ever starts failing with invalid_grant, that status changed
+          # or the token went six months unused.
+          ACCESS=$(curl -sS -X POST https://oauth2.googleapis.com/token \
+            --data-urlencode "client_id=$CLIENT_ID" \
+            --data-urlencode "client_secret=$CLIENT_SECRET" \
+            --data-urlencode "refresh_token=$REFRESH_TOKEN" \
+            --data-urlencode "grant_type=refresh_token" | jq -r '.access_token // empty')
+          if [ -z "$ACCESS" ]; then
+            echo "Could not exchange the refresh token. It may have been revoked, or the app moved back to Testing." >&2
+            exit 1
+          fi
+
+          # Metadata via jq --arg, never string interpolation: the title and
+          # description are written by whoever requested the render, and
+          # building this JSON by hand would let a quote or brace break out of
+          # it. categoryId 20 is Gaming.
+          jq -nc \
+            --arg t "$(printf '%s' "$TITLE" | cut -c1-100)" \
+            --arg d "$(printf '%s' "$DESCRIPTION" | cut -c1-4900)" \
+            --arg p "$PRIVACY" \
+            '{snippet: {title: $t, description: $d, categoryId: "20"},
+              status: {privacyStatus: $p, selfDeclaredMadeForKids: false}}' > meta.json
+          cat meta.json
+
+          SIZE=$(stat -c%s video.mp4)
+
+          # Resumable upload: start a session, then stream the file to it.
+          # curl uploads from disk, so a multi-gigabyte match never has to fit
+          # in memory.
+          LOCATION=$(curl -sS -D - -o /dev/null -X POST \
+            "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status" \
+            -H "Authorization: Bearer $ACCESS" \
+            -H "Content-Type: application/json; charset=UTF-8" \
+            -H "X-Upload-Content-Type: video/mp4" \
+            -H "X-Upload-Content-Length: $SIZE" \
+            --data-binary @meta.json \
+            | tr -d '\r' | awk 'tolower($1) == "location:" { print $2 }')
+          if [ -z "$LOCATION" ]; then
+            echo "YouTube did not open an upload session." >&2
+            exit 1
+          fi
+
+          RESPONSE=$(curl -sS -X PUT "$LOCATION" \
+            -H "Content-Type: video/mp4" \
+            --upload-file video.mp4)
+          echo "$RESPONSE" | head -c 800
+
+          VIDEO_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
+          if [ -z "$VIDEO_ID" ]; then
+            echo "Upload finished without a video id." >&2
+            exit 1
+          fi
+          echo "VIDEO_ID=$VIDEO_ID" >> "$GITHUB_OUTPUT"
+          echo "published https://www.youtube.com/watch?v=$VIDEO_ID"
+
+      - name: Report published
+        env:
+          SECRET: ${{ secrets.RENDER_CALLBACK_SECRET }}
+          JOB_ID: ${{ inputs.job_id }}
+          VIDEO_ID: ${{ steps.upload.outputs.VIDEO_ID }}
+        run: |
+          curl -fsS -X POST "$SORACLE_URL/api/render/callback" \
+            -H "Authorization: Bearer $SECRET" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg j "$JOB_ID" --arg v "$VIDEO_ID" \
+                  '{job_id:$j, status:"published", youtube_video_id:$v}')" \
+            -o /dev/null
+
+      # Without this a failed upload leaves the row at 'publishing' forever,
+      # which looks exactly like an upload still in progress.
+      - name: Report failure
+        if: failure() || cancelled()
+        env:
+          SECRET: ${{ secrets.RENDER_CALLBACK_SECRET }}
+          JOB_ID: ${{ inputs.job_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "$SORACLE_URL/api/render/callback" \
+            -H "Authorization: Bearer $SECRET" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg j "$JOB_ID" --arg e "Upload to YouTube failed. Logs: $RUN_URL" \
+                  '{job_id:$j, status:"failed", error:$e}')" \
+            -o /dev/null || true
