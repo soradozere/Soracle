@@ -79,36 +79,55 @@ export async function rejectRender(id: string): Promise<ActionResult> {
 }
 
 /**
- * Approve, and publish.
+ * Record that a render has been put on YouTube by hand.
  *
- * The upload itself is step 8 and does not exist yet. Rather than let approval
- * quietly do nothing -- which would look identical to a publish that worked --
- * this refuses until the YouTube side is wired, and says so.
+ * Uploading through the API is not available: a Cloud project created now has
+ * not passed YouTube's compliance audit, so videos.insert would force every
+ * upload to private, and an app in "Testing" is issued a refresh token that
+ * expires weekly. Both are review processes measured in weeks. Rather than
+ * wait on them, the render is downloaded and uploaded through YouTube Studio,
+ * and this closes the loop so the row does not sit in review forever.
+ *
+ * Takes the URL rather than assuming one: it is the only way back from a
+ * published video to the demo it came from.
  */
-export async function approveRender(id: string): Promise<ActionResult> {
+export async function markPublished(id: string, youtubeUrl: string): Promise<ActionResult> {
   if (!(await requireAdmin())) return { success: false, error: "Not authorized." }
+
+  // Accept a full watch URL, a share link or a bare id -- whatever is on the
+  // clipboard after publishing.
+  const videoId =
+    youtubeUrl.match(/(?:v=|youtu\.be\/|shorts\/|embed\/)([A-Za-z0-9_-]{11})/)?.[1] ??
+    (/^[A-Za-z0-9_-]{11}$/.test(youtubeUrl.trim()) ? youtubeUrl.trim() : null)
+  if (!videoId) {
+    return { success: false, error: "That doesn't look like a YouTube link or video id." }
+  }
 
   const supabase = createServiceClient()
   const { data: row } = await supabase
     .from("youtube_render_queue")
-    .select("id, status")
+    .select("id, status, render_r2_key")
     .eq("id", id)
     .maybeSingle()
   if (!row) return { success: false, error: "That job no longer exists." }
   if (row.status !== "pending_review") {
-    return { success: false, error: `Can only approve a job awaiting review (this one is ${row.status}).` }
+    return { success: false, error: `Can only publish a job awaiting review (this one is ${row.status}).` }
   }
 
-  const today = await publishedToday()
-  if (today >= DAILY_PUBLISH_CAP) {
-    return {
-      success: false,
-      error: `${today} videos have gone out today, which is the daily cap. This will keep until tomorrow.`,
-    }
+  // The video is on YouTube now, so the staging copy has done its job. Deleted
+  // here rather than left to the lifecycle rule for the same reason as reject:
+  // the backstop is for jobs that died, not decisions already made.
+  if (row.render_r2_key) {
+    await deleteRender(row.render_r2_key as string).catch(() => {})
   }
 
-  return {
-    success: false,
-    error: "Publishing to YouTube isn't connected yet. The render is fine and will keep until it is.",
-  }
+  const { error } = await supabase
+    .from("youtube_render_queue")
+    .update({ status: "published", youtube_video_id: videoId, render_r2_key: null })
+    .eq("id", id)
+    .eq("status", "pending_review")
+  if (error) return { success: false, error: error.message }
+
+  revalidatePath("/admin/renders")
+  return { success: true }
 }
