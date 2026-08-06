@@ -42,10 +42,15 @@ env:
   R2_PUBLIC: "https://pub-76bff0ef02794a5d95b7e2a8b8660f61.r2.dev"
   SORACLE_URL: "https://jk2ctf.vercel.app"
   RENDER_BUCKET: "jk2renders"
-  # Seconds of video per capture chunk. The engine writes MJPEG at roughly
-  # 4.3 MB/s per 30fps, so 30s at 60fps is ~260MB -- small enough that peak
-  # disk stays flat however long the demo is.
-  CHUNK_SECONDS: "30"
+  # Bytes of MJPEG per capture chunk, converted to a frame count below.
+  #
+  # Sized rather than timed, because the engine splits a capture itself the
+  # moment it passes 2GB (CL_CheckFileSize in cl_avi.cpp) and that split is
+  # neither free nor announced: it drops the frame it was writing and prints a
+  # console warning that lands in the picture. A 30s chunk at 1440p60 is ~2.9GB
+  # and tripped it every time. 1GB leaves room for a scene busier than the ones
+  # measured without ever getting close.
+  CHUNK_BYTES: "1000000000"
 
 jobs:
   render:
@@ -150,9 +155,20 @@ jobs:
           FOLLOW_VAL="${FOLLOW:--1}"
           [ -z "$FOLLOW" ] && FOLLOW_VAL=-1
 
+          # Frames per chunk, from the byte budget above.
+          #
+          # MJPEG at quality 95 measured 0.45 bytes per pixel per frame on real
+          # gameplay -- 1.64MB at 1440p -- which is how a 30s chunk came to
+          # overrun 2GB. Clamped either side: a chunk shorter than 4s makes
+          # boundaries needlessly frequent, and one longer than 30s stops
+          # bounding peak disk, which is the reason chunking exists.
+          BYTES_PER_FRAME=$(( WIDTH * HEIGHT * 45 / 100 ))
+          CHUNK_FRAMES=$(( CHUNK_BYTES / BYTES_PER_FRAME ))
+          [ "$CHUNK_FRAMES" -lt $(( FPS * 4 )) ] && CHUNK_FRAMES=$(( FPS * 4 ))
+          [ "$CHUNK_FRAMES" -gt $(( FPS * 30 )) ] && CHUNK_FRAMES=$(( FPS * 30 ))
+
           # The command buffer ticks twice per rendered frame, measured -- so a
           # chunk of N frames needs 2N waits.
-          CHUNK_FRAMES=$(( FPS * CHUNK_SECONDS ))
           CHUNK_WAITS=$(( CHUNK_FRAMES * 2 ))
 
           # How many chunks to ask for.
@@ -166,8 +182,9 @@ jobs:
           TOTAL_FRAMES=$(( END_MS * FPS / 1000 ))
           CHUNKS=$(( (TOTAL_FRAMES + CHUNK_FRAMES - 1) / CHUNK_FRAMES ))
           [ "$CHUNKS" -lt 1 ] && CHUNKS=1
-          echo "fps=$FPS chunks=$CHUNKS frames=$TOTAL_FRAMES cam=$CAM_MODE follow=$FOLLOW_VAL"
+          echo "fps=$FPS chunks=$CHUNKS x $CHUNK_FRAMES frames=$TOTAL_FRAMES cam=$CAM_MODE follow=$FOLLOW_VAL"
           echo "CHUNKS=$CHUNKS" >> "$GITHUB_OUTPUT"
+          echo "CHUNK_FRAMES=$CHUNK_FRAMES" >> "$GITHUB_OUTPUT"
 
           CFG="$ROOT/base/render.cfg"
           {
@@ -260,6 +277,33 @@ jobs:
           VID="$ROOT/base/videos"
           mkdir -p "$VID" chunks
 
+          # Every AVI the engine wrote, oldest first.
+          #
+          # Not just part*.avi. Once a capture passes 2GB the engine closes it
+          # and carries on into the same name with an underscore appended --
+          # part000.avi, then part000.avi_, then part000.avi__. That footage is
+          # real and continuous, but the old glob did not match it, so nobody
+          # transcoded it and it was dropped without a word: a published render
+          # lost 8.2s out of the middle and only the seam gave it away.
+          #
+          # The index sidecar (.avi.index.dat) has to stay out of the list, so
+          # match the two shapes explicitly rather than with part*.avi*.
+          # LC_ALL=C so the ordering is byte order rather than the runner's
+          # collation, which treats punctuation as noise.
+          avis () { ls -1 "$VID"/part*.avi "$VID"/part*.avi_* 2>/dev/null | LC_ALL=C sort; }
+
+          # Output name that keeps lexical order chronological.
+          #
+          # part000.avi_ cannot simply keep its name: "part000.avi_.mp4" sorts
+          # before "part000.mp4", so the pieces would concatenate out of order.
+          # Rebuild it from the stem and the number of trailing underscores.
+          chunkname () {
+            base=$(basename "$1")
+            stem=${base%%.avi*}
+            suffix=${base#*.avi}
+            printf 'chunks/%s-%02d.mp4' "$stem" "${#suffix}"
+          }
+
           # Transcode finished chunks while the engine is still writing.
           #
           # Waiting until the end would leave every AVI on disk at once, which
@@ -272,7 +316,7 @@ jobs:
           # below: the newest file is the one still being written to.
           transcode () {
             avi="$1"
-            out="chunks/$(basename "$avi" .avi).mp4"
+            out=$(chunkname "$avi")
             [ -f "$out" ] && return 0
             # crf 16, not 21: this intermediate is a ceiling on the finished
             # video's quality, so encoding it cheaply would throw away detail
@@ -281,15 +325,16 @@ jobs:
             ffmpeg -nostdin -y -i "$avi" \
               -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 16 \
               -c:a aac -b:a 192k "$out" >/dev/null 2>&1 || return 1
-            # The engine writes a sidecar index beside each capture; glob it
-            # rather than guessing the exact suffix.
-            rm -f "$avi" "${avi%.avi}"*.index "$avi".index 2>/dev/null || true
+            # The engine removes its own index sidecar on close; this only
+            # catches one left behind by a capture that died mid-write.
+            rm -f "$avi" "$avi".index.dat 2>/dev/null || true
             echo "  chunked $(basename "$out")"
           }
 
           watcher () {
             while [ ! -f .render-done ]; do
-              for avi in $(ls -1 "$VID"/part*.avi 2>/dev/null | sort | head -n -1); do
+              # head -n -1: the newest file is the one still being written to.
+              for avi in $(avis | head -n -1); do
                 transcode "$avi" || true
               done
               sleep 3
@@ -299,9 +344,19 @@ jobs:
           WATCHER=$!
 
           START=$(date +%s)
+          # s_khz 44 has to be on the command line, not in the cfg: the sound
+          # system reads it once at startup, long before render.cfg runs.
+          #
+          # It is here because 22050 is not divisible by 60, and the engine says
+          # so -- once per AVI it opens, which with chunking means repeatedly,
+          # mid-capture. cl_noprint has to stay 0 for the kill feed, so that
+          # warning went to the notify area and burned into the published video
+          # for ten seconds. 44100 divides by 60 exactly (735 samples a frame),
+          # so it never prints, and the audio track improves on the way past.
           xvfb-run --auto-servernum --server-args="-screen 0 ${WIDTH}x${HEIGHT}x24" \
             "$ROOT/jk2mvmp" \
             +set fs_basepath "$ROOT" +set fs_homepath "$ROOT" \
+            +set s_khz 44 \
             +set logfile 2 \
             +exec render.cfg 2>&1 | tail -40 || true
           echo "=== engine finished in $(( $(date +%s) - START ))s ==="
@@ -311,9 +366,21 @@ jobs:
 
           # Whatever the watcher left, including the final chunk it was told
           # not to touch.
-          for avi in $(ls -1 "$VID"/part*.avi 2>/dev/null | sort); do
+          for avi in $(avis); do
             transcode "$avi" || echo "  FAILED to transcode $avi"
           done
+
+          # Anything the engine printed while capturing was also drawn on
+          # screen, because the kill feed needs cl_noprint 0. Surfacing it here
+          # is how a warning gets noticed in a log rather than in a video.
+          echo "=== console warnings, which are also in the picture ==="
+          LOG=$(find "$ROOT" -name qconsole.log 2>/dev/null | head -1)
+          if [ -n "$LOG" ]; then
+            grep -ihE "WARNING|ERROR" "$LOG" \
+              | grep -viE "mixed glWrapClampMode|R_FindImageFile|could not find" \
+              | sort -u | head -10 || true
+            grep -i "Freq:" "$LOG" | head -2 || true
+          fi
 
           echo "=== chunks ==="
           ls -la chunks/ || true
@@ -327,6 +394,8 @@ jobs:
         env:
           START_MS: ${{ inputs.start_ms }}
           END_MS: ${{ inputs.end_ms }}
+          FPS: ${{ inputs.fps }}
+          CHUNK_FRAMES: ${{ steps.cfg.outputs.CHUNK_FRAMES }}
         run: |
           set -u
           : > concat.txt
@@ -334,6 +403,32 @@ jobs:
             printf "file '%s'\n" "$PWD/$f" >> concat.txt
           done
           cat concat.txt
+
+          # Did every chunk deliver the frames it was asked for?
+          #
+          # This is the check that was missing when a 2GB split threw away 491
+          # frames: the run succeeded, the video was short, and nothing said so
+          # until someone watched it. A chunk arrives in one or more pieces
+          # (partNNN-00, partNNN-01 ...), so count by stem. Only the last chunk
+          # may be short, and only because the demo ran out.
+          count () { ffprobe -v error -count_frames -select_streams v:0 \
+            -show_entries stream=nb_read_frames -of csv=p=0 "$1"; }
+          echo "=== frames per chunk (expect $CHUNK_FRAMES, last may be short) ==="
+          LAST=$(ls -1 chunks/part*.mp4 | sed 's/-[0-9]*\.mp4$//' | sort -u | tail -1)
+          SHORT=0
+          for stem in $(ls -1 chunks/part*.mp4 | sed 's/-[0-9]*\.mp4$//' | sort -u); do
+            N=0
+            for f in "$stem"-*.mp4; do C=$(count "$f"); N=$(( N + ${C:-0} )); done
+            FLAG=""
+            if [ "$N" -lt "$CHUNK_FRAMES" ] && [ "$stem" != "$LAST" ]; then
+              FLAG="  <-- SHORT, footage was lost"
+              SHORT=1
+            fi
+            echo "  $(basename "$stem"): $N frames$FLAG"
+          done
+          if [ "$SHORT" = 1 ]; then
+            echo "::warning::A chunk came up short -- the render is missing footage"
+          fi
 
           # Stream copy: every chunk was encoded with identical settings, so
           # there is nothing to re-encode and nothing to lose.
