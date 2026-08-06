@@ -261,8 +261,18 @@ const EXTRAS_VERSION = "20260806"
  * The rest of that pk3 -- HUD art, console overlay, forcefields -- goes with it,
  * since pk3s are all-or-nothing. Renders keep the lot, so the two disagree about
  * the flag until this is chased down.
+ *
+ * z_basemin_chrome2.pk3 is not community content but a repair. base-min is a
+ * trimmed asset set, and it dropped gfx/effects/chrome2.jpg, which the bones
+ * shader maps additively (GL_ONE GL_ONE) over the whole model. A missing texture
+ * resolves to the default white one, so bones rendered as a grey blob -- in the
+ * renderer as much as here, it simply had not come up in a render yet. Nine
+ * kilobytes of retail texture, restored under the same version prefix so clients
+ * holding the other six fetch only this one.
  */
 const EXTRA_PK3S = [
+  // One 9KB texture the trimmed bundle dropped -- see the note above.
+  "z_basemin_chrome2.pk3",
   "solar_yavinsky2.pk3",
   "eoi_imperialworker_v2_sounds.pk3",
   "x_kestis_sounds.pk3",
