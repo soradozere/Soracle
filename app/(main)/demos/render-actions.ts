@@ -14,12 +14,11 @@ type CamMode = (typeof CAM_MODES)[number]
 /*
  * Render settings are chosen from clip length, not asked for.
  *
- * Two limits, and both are real. Measured on a runner: llvmpipe renders ~38
- * frames/sec at 720p, and cost scales with pixel count, against a six-hour job
- * limit. Disk binds sooner than it looks -- the intermediate video measured
- * 9 MB per second of footage at 1440p60, so a runner's ~14GB runs out after
- * about 26 minutes, well before the clock does. Chunking bounds the *raw*
- * capture on disk, not the encoded pieces waiting to be joined.
+ * Two limits, both checked, and time is the one that bites. Measured on a
+ * runner: llvmpipe renders ~38 frames/sec at 720p and cost scales with pixel
+ * count, against a six-hour job limit. Disk is the other -- chunking bounds the
+ * raw capture but nothing bounds the encoded pieces, which all have to survive
+ * until the concat -- and on the measured numbers it never binds first.
  *
  * 1440p rather than 1080p wherever it fits, because YouTube allocates bitrate
  * by resolution -- a 1440p upload gets a noticeably fatter encode and looks
@@ -29,12 +28,12 @@ type CamMode = (typeof CAM_MODES)[number]
  *
  * Taking the tighter of the two, in preference order:
  *
- *   1440p60   ~26 min of footage   (disk)
- *   1440p30   ~52 min              (disk)
- *   1080p30   ~1.9h                (disk)
+ *   1440p60   46 min of footage   (time; disk would allow 52)
+ *   1440p30   92 min              (time; disk 104)
+ *   1080p30   2.7h                (time; disk 3.1h)
  *
- * A long match dropping to 30fps and 1080p beats one that dies at hour four
- * with "no space left on device" and nothing to show.
+ * A long match dropping to 30fps and 1080p beats one that runs out of clock at
+ * hour six with nothing to show.
  */
 const RENDER_FPS_720P = 38.2
 const JOB_LIMIT_MS = 6 * 60 * 60 * 1000
@@ -42,19 +41,26 @@ const JOB_LIMIT_MS = 6 * 60 * 60 * 1000
 const SAFETY = 0.8
 
 /**
- * Free disk on a runner, and what a second of footage costs there.
+ * Free disk on a runner, and what a second of footage costs there at its peak.
  *
- * 9 MB/s measured at 1440p60 (402MB for 44.8s at crf 16) and taken to scale
- * with pixels and frame rate, which is how x264 behaves at fixed quality. The
- * pieces have to survive until the concat at the end, so this is the total, not
- * a working set -- chunking bounds the raw capture, nothing bounds these.
+ * Both measured rather than guessed. A runner reports 86GB free (`df` in the
+ * render workflow, kept there so this can be checked again); 80 is the working
+ * figure.
  *
- * The disk figure is deliberately conservative: refusing a render that would
- * have fitted is recoverable, discovering the limit four hours in is not. The
- * render workflow prints `df` so it can be replaced with a measurement.
+ * The cost is not just the chunks. They all have to survive until the end,
+ * because the concat needs them -- and the concat then writes a second copy of
+ * the lot before the final encode, so peak disk is roughly twice the chunks
+ * plus the result. Measured across two 1440p60 renders: 6.7 + 6.5 + 3.6, and
+ * 9.2 + 9.0 + 3.6 MB per second of footage. Taking the worse gives 22, and it
+ * scales with pixels and frame rate, which is how x264 behaves at fixed
+ * quality.
+ *
+ * At those numbers disk never actually binds first -- the six-hour job limit
+ * does, at every rung. Worth keeping anyway: it was binding at the figures this
+ * started with, and the two move independently.
  */
-const RUNNER_DISK_BYTES = 13 * 1024 * 1024 * 1024
-const BYTES_PER_SECOND_1440P60 = 9_000_000
+const RUNNER_DISK_BYTES = 80 * 1024 * 1024 * 1024
+const BYTES_PER_SECOND_1440P60 = 22_000_000
 
 interface RenderSettings {
   fps: 30 | 60
