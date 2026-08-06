@@ -6,6 +6,7 @@ import { createServiceClient } from "@/lib/supabase/admin"
 import { deleteRender } from "@/lib/r2-renders"
 import { dispatchPublishJob } from "@/lib/github-dispatch"
 import { DAILY_PUBLISH_CAP } from "@/lib/render-limits"
+import { buildYoutubeTitle, buildYoutubeDescription } from "@/lib/youtube-metadata"
 
 type ActionResult = { success: true } | { success: false; error: string }
 
@@ -91,7 +92,7 @@ export async function approveRender(id: string): Promise<ActionResult> {
   const supabase = createServiceClient()
   const { data: row } = await supabase
     .from("youtube_render_queue")
-    .select("id, status, render_r2_key, title, description")
+    .select("id, status, render_r2_key, title, description, demo_id")
     .eq("id", id)
     .maybeSingle()
   if (!row) return { success: false, error: "That job no longer exists." }
@@ -121,11 +122,50 @@ export async function approveRender(id: string): Promise<ActionResult> {
     .maybeSingle()
   if (!claimed) return { success: false, error: "Someone just acted on this one." }
 
+  /*
+   * The uploader's title and description are what they typed; this is how it
+   * reads on YouTube. Built at publish time rather than stored, so changing the
+   * house style never means re-rendering anything.
+   */
+  const { data: demo } = await supabase
+    .from("demos")
+    .select("id, map, gametype, recorded_at, protagonist_player_id")
+    .eq("id", row.demo_id as string)
+    .maybeSingle()
+
+  const { data: tagged } = await supabase
+    .from("demo_players")
+    .select("players(name)")
+    .eq("demo_id", row.demo_id as string)
+
+  let protagonistName: string | null = null
+  if (demo?.protagonist_player_id) {
+    const { data: p } = await supabase
+      .from("players")
+      .select("name")
+      .eq("id", demo.protagonist_player_id as string)
+      .maybeSingle()
+    protagonistName = (p?.name as string | null) ?? null
+  }
+
+  const meta = {
+    demoId: row.demo_id as string,
+    title: row.title as string,
+    description: row.description as string | null,
+    map: (demo?.map as string | null) ?? null,
+    gametype: (demo?.gametype as string | null) ?? null,
+    recordedAt: (demo?.recorded_at as string | null) ?? null,
+    protagonistName,
+    playerNames: ((tagged ?? []) as { players: { name: string } | null }[])
+      .map((t) => t.players?.name)
+      .filter((n): n is string => !!n),
+  }
+
   const dispatch = await dispatchPublishJob({
     job_id: id,
     r2_key: row.render_r2_key as string,
-    title: row.title as string,
-    description: (row.description as string | null) ?? "",
+    title: buildYoutubeTitle(meta),
+    description: buildYoutubeDescription(meta),
     privacy: "private",
   })
 
