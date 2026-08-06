@@ -268,7 +268,9 @@ const EXTRAS_VERSION = "20260806"
  * resolves to the default white one, so bones rendered as a grey blob -- in the
  * renderer as much as here, it simply had not come up in a render yet. Nine
  * kilobytes of retail texture, restored under the same version prefix so clients
- * holding the other six fetch only this one.
+ * holding the other six fetch only this one. That is what fixed bones: the skin
+ * is a skeleton, and it was rendering as a pale blob because the shader mapped a
+ * texture that had been trimmed away, additively, over the whole model.
  *
  * zzz_transparent_flags.pk3 is the replacement flag, and doubles as an
  * experiment. It is shaders only -- no textures, no models -- and every image it
@@ -276,11 +278,17 @@ const EXTRAS_VERSION = "20260806"
  * stock flag shader it adds exactly three things: `sort seeThrough`, an additive
  * GL_ONE GL_ONE blend (which is what makes it transparent), and `glow`.
  *
- * That narrows the earlier mystery either way. `glow` was one of four suspects
- * for the flag vanishing, alongside deformVertexes wave, tcGen environment and a
- * GL_ZERO/GL_ONE_MINUS_SRC_COLOR stage. This keeps only `glow`: if the flag
- * shows, glow is exonerated and the cause is among the other three; if it
- * vanishes again, glow is it. Cheaper than bisecting the old pack by hand.
+ * It settled the earlier mystery halfway. `glow` was one of four suspects for
+ * the old flag vanishing, alongside deformVertexes wave, tcGen environment and a
+ * GL_ZERO/GL_ONE_MINUS_SRC_COLOR stage; this pack keeps only `glow`, and it
+ * renders. So glow is exonerated and the cause is one of the other three --
+ * worth knowing if that pack is ever revisited.
+ *
+ * Both this and the chrome2 fix took a while to show up after deploying, and
+ * both looked like failures in the meantime -- close enough that they were very
+ * nearly reverted. Between the Vercel deploy and this file's own Cache Storage
+ * there is more than one thing holding the old state, so give a pk3 change a
+ * few minutes and a hard refresh before concluding it does not work.
  *
  * Viewer only for now. Renders keep the flag from
  * z_flag-console-field-scoreboard.pk3, which works there and which Sam has seen,
