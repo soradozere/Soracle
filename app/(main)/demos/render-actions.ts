@@ -120,10 +120,19 @@ export async function requestRender(demoId: string, params: RenderRequestParams)
    * viewer, which does know. A wrong number renders a silent fallback rather
    * than an error, which is one of the things review exists to catch.
    */
+  /*
+   * Null is a real choice, not a missing one.
+   *
+   * The viewer has three states, and only two of them name a player: free
+   * camera, following a specific client, and the recorder's own view -- which
+   * is what a demo shows by default and what most people will render. That
+   * last one is cg_demoFollow -1, and requiring a client number here rejected
+   * it outright with "choose which player the camera should follow", which is
+   * both wrong and impossible to act on.
+   *
+   * So only the range is checked, and only when a number was given.
+   */
   const followClientId = params.followClientId ?? null
-  if (params.camMode !== "free" && followClientId === null) {
-    return { success: false, error: "Choose which player the camera should follow." }
-  }
   if (followClientId !== null && (!Number.isInteger(followClientId) || followClientId < 0 || followClientId > 31)) {
     return { success: false, error: "That isn't a valid player slot." }
   }
