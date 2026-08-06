@@ -38,6 +38,11 @@ on:
         default: ""
 
 env:
+  # Which build of the engine to render with. An env var rather than a literal
+  # because the render config and the engine move together -- seekdemo below
+  # only exists in the fork -- and this is how a change to one gets tested
+  # against the other before either lands.
+  ENGINE_REF: "master"
   ASSET_VERSION: "20260805"
   R2_PUBLIC: "https://pub-76bff0ef02794a5d95b7e2a8b8660f61.r2.dev"
   SORACLE_URL: "https://jk2ctf.vercel.app"
@@ -78,7 +83,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: soradozere/jk2mv
-          ref: master
+          ref: ${{ env.ENGINE_REF }}
           submodules: true
           fetch-depth: 0
           path: jk2mv
@@ -173,13 +178,15 @@ jobs:
 
           # How many chunks to ask for.
           #
-          # Capture starts at the demo's beginning and the segment is cut out
-          # with ffmpeg afterwards, so this covers end_ms, not the segment
-          # length. That is wasteful when someone wants thirty seconds from the
-          # middle of a long match -- the fix is either engine-side fast-forward
-          # or trimming the .dm_15 before dispatch, and neither is built yet.
-          # Correct but slow beats fast but wrong for a first version.
-          TOTAL_FRAMES=$(( END_MS * FPS / 1000 ))
+          # The segment, not the offset. Capture used to start at the demo's
+          # beginning and cut the wanted part out afterwards, so thirty seconds
+          # from an hour into a match cost an hour of rendering -- and at 1440p
+          # the intermediate video for that hour is several times a runner's
+          # disk, so it would have failed rather than merely wasted the time.
+          # seekdemo below skips the lead-in by parsing it, which is roughly
+          # three orders of magnitude faster than drawing it.
+          SEGMENT_MS=$(( END_MS - START_MS ))
+          TOTAL_FRAMES=$(( SEGMENT_MS * FPS / 1000 ))
           CHUNKS=$(( (TOTAL_FRAMES + CHUNK_FRAMES - 1) / CHUNK_FRAMES ))
           [ "$CHUNKS" -lt 1 ] && CHUNKS=1
           echo "fps=$FPS chunks=$CHUNKS x $CHUNK_FRAMES frames=$TOTAL_FRAMES cam=$CAM_MODE follow=$FOLLOW_VAL"
@@ -253,6 +260,18 @@ jobs:
             echo "set cg_thirdPersonAngle 0"
             echo "set cg_cameraOrbit 0"
             echo "wait 10"
+            # Land on the requested moment, immediately before capture starts.
+            #
+            # Last, not first: the waits above run at whatever speed the machine
+            # manages, so anything between the seek and the first frame would
+            # drift the start by a machine-dependent amount -- the thing this
+            # whole file exists to avoid. Seeking here means frame one is the
+            # frame that was asked for.
+            #
+            # Forward only, so start_ms 0 is a no-op and the few frames the
+            # waits above consume are still there. Nothing to do about that
+            # short of not needing the waits.
+            echo "seekdemo $START_MS"
             # Zero-padded so lexical order is chronological order -- part10
             # must not sort before part2, or chunks concat out of sequence.
             for i in $(seq 0 $(( CHUNKS - 1 ))); do
@@ -373,8 +392,20 @@ jobs:
           # Anything the engine printed while capturing was also drawn on
           # screen, because the kill feed needs cl_noprint 0. Surfacing it here
           # is how a warning gets noticed in a log rather than in a video.
-          echo "=== console warnings, which are also in the picture ==="
           LOG=$(find "$ROOT" -name qconsole.log 2>/dev/null | head -1)
+
+          # A seek that stopped short renders the wrong part of the demo, and
+          # every other check here would still pass: the frames are all present,
+          # the chunks are all full length, the video is simply of somewhere
+          # else. Only the engine knows, so ask it.
+          if [ -n "$LOG" ] && grep -q "seekdemo: FAILED" "$LOG"; then
+            grep -h "seekdemo:" "$LOG" | tail -2 >&2
+            echo "the seek did not reach the requested moment -- refusing to stage the wrong footage" >&2
+            exit 1
+          fi
+          grep -h "seekdemo:" "$LOG" 2>/dev/null | tail -1 || true
+
+          echo "=== console warnings, which are also in the picture ==="
           if [ -n "$LOG" ]; then
             grep -ihE "WARNING|ERROR" "$LOG" \
               | grep -viE "mixed glWrapClampMode|R_FindImageFile|could not find" \
@@ -384,6 +415,9 @@ jobs:
 
           echo "=== chunks ==="
           ls -la chunks/ || true
+          # RUNNER_DISK_BYTES in render-actions.ts is a conservative guess until
+          # this says otherwise; the ladder refuses long renders based on it.
+          df -h . | tail -1
           if [ -z "$(ls -A chunks 2>/dev/null)" ]; then
             echo "no chunks were produced -- the engine wrote nothing" >&2
             exit 1
@@ -434,8 +468,11 @@ jobs:
           # there is nothing to re-encode and nothing to lose.
           ffmpeg -nostdin -y -f concat -safe 0 -i concat.txt -c copy joined.mp4 2>&1 | tail -3
 
-          SS=$(awk -v v="$START_MS" 'BEGIN{printf "%.3f", v/1000}')
-          TO=$(awk -v v="$END_MS" 'BEGIN{printf "%.3f", v/1000}')
+          # Only the tail needs trimming now. seekdemo put frame one on the
+          # requested moment, so there is no lead-in to cut off; what is left
+          # over is the rounding from asking for whole chunks -- up to one
+          # chunk's worth past the end.
+          DUR=$(awk -v v="$(( END_MS - START_MS ))" 'BEGIN{printf "%.3f", v/1000}')
           # Re-encode rather than copy: a stream copy can only cut on a
           # keyframe, which would drift the segment by up to a couple of
           # seconds from what the requester actually chose.
@@ -444,7 +481,7 @@ jobs:
           # above their target without the ~35 Mbps that crf 18 produced -- a
           # bitrate that buys nothing visible downstream and would make a long
           # match unwieldy to store and upload.
-          ffmpeg -nostdin -y -ss "$SS" -to "$TO" -i joined.mp4 \
+          ffmpeg -nostdin -y -i joined.mp4 -t "$DUR" \
             -c:v libx264 -pix_fmt yuv420p -preset medium -crf 20 \
             -c:a aac -b:a 192k -movflags +faststart render.mp4 2>&1 | tail -3
 
