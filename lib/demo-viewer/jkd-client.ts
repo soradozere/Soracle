@@ -103,6 +103,8 @@ interface EmscriptenModule {
     unlink: (path: string) => void
     mkdir: (path: string) => void
   }
+  /** The packager's own directory helper, idempotent and available in preRun. */
+  FS_createPath?: (parent: string, path: string, canRead: boolean, canWrite: boolean) => void
   /** Emscripten's own rAF loop controls, exported by the engine's build. */
   pauseMainLoop?: () => void
   resumeMainLoop?: () => void
@@ -466,26 +468,50 @@ export class JkdEngine {
       // bundle itself and nothing has changed from the old behaviour.
       ...(dataBuffer ? { getPreloadedPackage: () => dataBuffer } : {}),
       /*
-       * The last thing before main, which is the only window that works.
+       * Staged in preRun, which runs before the preloaded package is unpacked.
        *
-       * Emscripten runs preRun once every run dependency is satisfied, so the
-       * preloaded package has already been unpacked and /base exists; and it is
-       * still before main, so FS_Startup has not yet scanned for pk3s. Writing
-       * them any earlier races the unpack, any later and the engine has already
-       * decided which pk3s exist.
+       * Worth being exact, because assuming the opposite is why the first
+       * version of this silently staged nothing. The generated loader is:
+       *
+       *   async function run() { preRun(); if (runDependencies) await ...; }
+       *
+       * preRun first, dependencies second -- and the file packager registers
+       * its own unpack (runWithFS, which is what calls FS_createPath("/","base"))
+       * by pushing onto Module.preRun. Ours is pushed before the engine script
+       * even loads, so it runs first of all, when /base does not yet exist.
+       *
+       * So create the directory rather than expecting it. FS_createPath is
+       * idempotent and the packager calls it again moments later, and the
+       * package writes different filenames, so both sets survive -- and both
+       * are in place long before FS_Startup scans for pk3s inside main.
        *
        * Wrapped because a throw here aborts the boot: a failed write should
        * cost the content it carried, not the viewer.
        */
       preRun: [
         () => {
+          if (!extras.length) return
+          const mod = window.Module
+          let staged = 0
+          try {
+            mod?.FS_createPath?.("/", "base", true, true)
+          } catch {
+            // Already there, or the packager beat us to it. Either is fine.
+          }
           for (const { name, bytes } of extras) {
             try {
-              window.Module?.FS?.writeFile(`/base/${name}`, bytes)
+              mod?.FS?.writeFile(`/base/${name}`, bytes)
+              staged++
             } catch (err) {
               console.warn("[jk2] could not stage", name, err)
             }
           }
+          // Said out loud, and counted. The quiet version of this was a
+          // per-file console.warn nobody was looking at, so seven failures read
+          // exactly like a feature that had never been deployed.
+          const msg = `[jk2] staged ${staged}/${extras.length} community pk3s`
+          if (staged === extras.length) console.log(msg)
+          else console.warn(msg)
         },
       ],
     } as unknown as EmscriptenModule
