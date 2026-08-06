@@ -218,6 +218,106 @@ export function getEngineCanvas(): HTMLCanvasElement {
  */
 const DATA_CACHE = "jkd-engine-data"
 
+/*
+ * Community pk3s, written into the engine's filesystem at boot.
+ *
+ * The same seven the renderer stages, so a demo looks here as it does in a
+ * published video -- which matters most for the player models. A demo records
+ * each player's model as a configstring, and when the model is missing the
+ * engine silently substitutes a default, so those demos have been showing the
+ * wrong character. The sky, saber blades, saber sounds and flag art are the
+ * other kind: they make playback look like something other than what the
+ * players saw, deliberately.
+ *
+ * Side-loaded rather than built into the bundle. --preload-file maps
+ * GameData/base-min to /base, FS is in EXPORTED_RUNTIME_METHODS, and preRun
+ * runs after the package is unpacked but before main -- so writing them into
+ * /base there lands them before FS_Startup scans for pk3s. That avoids a full
+ * emscripten rebuild, a ~110MB re-upload and a change of engine URL for 20MB of
+ * content, and lets these move independently of the engine.
+ *
+ * The cost is real: 20MB on top of an 89MB bundle, once, for every cold
+ * visitor. Cached separately from the engine data, whose cache evicts
+ * everything but the current version whenever a new engine lands.
+ */
+const EXTRAS_CACHE = "jkd-extras"
+const EXTRAS_VERSION = "20260806"
+const EXTRA_PK3S = [
+  "solar_yavinsky2.pk3",
+  "eoi_imperialworker_v2_sounds.pk3",
+  "x_kestis_sounds.pk3",
+  "z_flag-console-field-scoreboard.pk3",
+  "z_nightmares.pk3",
+  "zzz_bones.pk3",
+  "zzzTricolor_Sabers_by_Apple.pk3",
+]
+
+/**
+ * Fetch the extras, and never let them stop the viewer starting.
+ *
+ * Every failure path returns what it has rather than throwing: a missing pk3
+ * costs one wrong player model, while a rejected promise here would cost the
+ * whole viewer. Local development has no R2 to fetch from, so returning nothing
+ * is the normal case there rather than an error worth reporting.
+ */
+interface ExtraPk3 {
+  name: string
+  bytes: Uint8Array
+}
+
+async function loadExtraPk3s(baseUrl: string, onStatus?: (s: string) => void): Promise<ExtraPk3[]> {
+  let prefix: string
+  try {
+    prefix = `${new URL(baseUrl, window.location.href).origin}/render-assets/extras/${EXTRAS_VERSION}/`
+  } catch {
+    return []
+  }
+
+  let cache: Cache | null = null
+  try {
+    cache = await caches.open(EXTRAS_CACHE)
+  } catch {
+    // Private windows and quota refusals: fetch every time instead.
+  }
+
+  onStatus?.("Loading community content…")
+  const loaded = await Promise.all(
+    EXTRA_PK3S.map(async (name): Promise<ExtraPk3 | null> => {
+      const url = prefix + name
+      try {
+        const hit = await cache?.match(url)
+        if (hit) return { name, bytes: new Uint8Array(await hit.arrayBuffer()) }
+
+        const res = await fetch(url)
+        if (!res.ok) return null
+        const bytes = new Uint8Array(await res.arrayBuffer())
+        try {
+          await cache?.put(url, new Response(bytes.slice()))
+        } catch {
+          // Next visit downloads it again; nothing else breaks.
+        }
+        return { name, bytes }
+      } catch {
+        return null
+      }
+    }),
+  )
+
+  // Drop anything from an older version. These are versioned URLs so a stale
+  // one can never be served, but it would sit in the user's storage forever.
+  try {
+    if (cache) {
+      for (const key of await cache.keys()) {
+        if (!key.url.startsWith(prefix)) await cache.delete(key)
+      }
+    }
+  } catch {
+    // Eviction is housekeeping, not correctness.
+  }
+
+  return loaded.filter((x): x is ExtraPk3 => x !== null)
+}
+
 async function loadEngineData(url: string, onStatus?: (s: string) => void): Promise<ArrayBuffer | null> {
   try {
     const cache = await caches.open(DATA_CACHE)
@@ -342,7 +442,13 @@ export class JkdEngine {
     // Fetched (or read back from Cache Storage) before the engine script runs,
     // because getPreloadedPackage is consulted synchronously during its boot.
     onStatus?.("Loading game data…")
-    const dataBuffer = await loadEngineData(`${baseUrl}/jk2mv_wasm.data`, onStatus)
+    // Together: the extras are a fifth of the bundle's size and independent of
+    // it, so serialising them would add their download to the wait for no
+    // reason.
+    const [dataBuffer, extras] = await Promise.all([
+      loadEngineData(`${baseUrl}/jk2mv_wasm.data`, onStatus),
+      loadExtraPk3s(baseUrl, onStatus),
+    ])
 
     window.Module = {
       canvas,
@@ -359,6 +465,29 @@ export class JkdEngine {
       // Only when the pre-fetch worked; otherwise the loader downloads the
       // bundle itself and nothing has changed from the old behaviour.
       ...(dataBuffer ? { getPreloadedPackage: () => dataBuffer } : {}),
+      /*
+       * The last thing before main, which is the only window that works.
+       *
+       * Emscripten runs preRun once every run dependency is satisfied, so the
+       * preloaded package has already been unpacked and /base exists; and it is
+       * still before main, so FS_Startup has not yet scanned for pk3s. Writing
+       * them any earlier races the unpack, any later and the engine has already
+       * decided which pk3s exist.
+       *
+       * Wrapped because a throw here aborts the boot: a failed write should
+       * cost the content it carried, not the viewer.
+       */
+      preRun: [
+        () => {
+          for (const { name, bytes } of extras) {
+            try {
+              window.Module?.FS?.writeFile(`/base/${name}`, bytes)
+            } catch (err) {
+              console.warn("[jk2] could not stage", name, err)
+            }
+          }
+        },
+      ],
     } as unknown as EmscriptenModule
 
     const readyPromise = new Promise<void>((resolve) => {
