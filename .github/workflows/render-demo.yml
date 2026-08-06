@@ -25,6 +25,13 @@ on:
         required: true
       fps:
         default: "60"
+      width:
+        default: "1920"
+      height:
+        default: "1080"
+      fov:
+        description: "Match the web viewer's FIXED_FOV so renders look like the site"
+        default: "120"
       cam_mode:
         default: "follow"
       follow_client_id:
@@ -121,6 +128,9 @@ jobs:
           START_MS: ${{ inputs.start_ms }}
           END_MS: ${{ inputs.end_ms }}
           FPS: ${{ inputs.fps }}
+          WIDTH: ${{ inputs.width }}
+          HEIGHT: ${{ inputs.height }}
+          FOV: ${{ inputs.fov }}
           CAM_MODE: ${{ inputs.cam_mode }}
           FOLLOW: ${{ inputs.follow_client_id }}
         run: |
@@ -163,8 +173,8 @@ jobs:
           {
             echo "set com_hunkMegs 256"
             echo "set r_mode -1"
-            echo "set r_customwidth 1280"
-            echo "set r_customheight 720"
+            echo "set r_customwidth $WIDTH"
+            echo "set r_customheight $HEIGHT"
             echo "set r_fullscreen 0"
             echo "set r_swapInterval 0"
             # Audio capture only works off the base DMA mixer; under OpenAL
@@ -174,10 +184,17 @@ jobs:
             echo "set s_volume 0.8"
             echo "set cl_aviFrameRate $FPS"
             echo "set cl_aviMotionJpeg 1"
-            echo "set cl_aviMotionJpegQuality 90"
+            # 95 rather than 90: this is the only original of the footage, and
+            # everything downstream re-encodes it. Compression artefacts baked
+            # in here cannot be recovered later.
+            echo "set cl_aviMotionJpegQuality 95"
             echo "set cg_draw2D 0"
             echo "set con_notifytime 0"
             echo "set cl_noprint 1"
+            # The web viewer pins this (FIXED_FOV in jkd-client.ts). Without it
+            # the engine default of 80 applies and renders come out visibly
+            # tighter than the same demo looks on the site.
+            echo "set cg_fov $FOV"
             echo ""
             echo "demo job"
             # Generous: the follow target has to appear in a snapshot before
@@ -206,6 +223,8 @@ jobs:
         timeout-minutes: 300
         env:
           ROOT: ${{ steps.root.outputs.ROOT }}
+          WIDTH: ${{ inputs.width }}
+          HEIGHT: ${{ inputs.height }}
           LIBGL_ALWAYS_SOFTWARE: "1"
           SDL_AUDIODRIVER: "dummy"
         run: |
@@ -227,9 +246,13 @@ jobs:
             avi="$1"
             out="chunks/$(basename "$avi" .avi).mp4"
             [ -f "$out" ] && return 0
+            # crf 16, not 21: this intermediate is a ceiling on the finished
+            # video's quality, so encoding it cheaply would throw away detail
+            # that the final pass then cannot recover. Still roughly a tenth of
+            # the MJPEG it replaces, which is what keeps disk flat.
             ffmpeg -nostdin -y -i "$avi" \
-              -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 21 \
-              -c:a aac -b:a 128k "$out" >/dev/null 2>&1 || return 1
+              -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 16 \
+              -c:a aac -b:a 192k "$out" >/dev/null 2>&1 || return 1
             # The engine writes a sidecar index beside each capture; glob it
             # rather than guessing the exact suffix.
             rm -f "$avi" "${avi%.avi}"*.index "$avi".index 2>/dev/null || true
@@ -248,7 +271,7 @@ jobs:
           WATCHER=$!
 
           START=$(date +%s)
-          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" \
+          xvfb-run --auto-servernum --server-args="-screen 0 ${WIDTH}x${HEIGHT}x24" \
             "$ROOT/jk2mvmp" \
             +set fs_basepath "$ROOT" +set fs_homepath "$ROOT" \
             +set logfile 2 \
@@ -293,9 +316,11 @@ jobs:
           # Re-encode rather than copy: a stream copy can only cut on a
           # keyframe, which would drift the segment by up to a couple of
           # seconds from what the requester actually chose.
+          # crf 18 and a 192k audio track: YouTube re-encodes whatever it is
+          # given, so the upload wants headroom rather than a small file.
           ffmpeg -nostdin -y -ss "$SS" -to "$TO" -i joined.mp4 \
-            -c:v libx264 -pix_fmt yuv420p -preset medium -crf 21 \
-            -c:a aac -b:a 128k -movflags +faststart render.mp4 2>&1 | tail -3
+            -c:v libx264 -pix_fmt yuv420p -preset medium -crf 18 \
+            -c:a aac -b:a 192k -movflags +faststart render.mp4 2>&1 | tail -3
 
           ls -la render.mp4
           ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 render.mp4

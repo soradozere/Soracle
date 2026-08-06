@@ -19,6 +19,9 @@ export interface RenderJobInputs {
   start_ms: string
   end_ms: string
   fps: string
+  width: string
+  height: string
+  fov: string
   cam_mode: string
   follow_client_id: string
 }
