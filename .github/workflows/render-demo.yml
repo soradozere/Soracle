@@ -44,6 +44,29 @@ env:
   # against the other before either lands.
   ENGINE_REF: "master"
   ASSET_VERSION: "20260805"
+  # Community pk3s staged alongside the trimmed base assets.
+  #
+  # Two different jobs, worth keeping straight. The model packs are an accuracy
+  # fix: a demo records each player's model as a configstring, and when the
+  # model is missing the engine quietly substitutes a default -- so those demos
+  # have been rendering as the wrong character. The rest override base content
+  # (sky, saber blades, saber sounds, flags and HUD) and do the opposite: they
+  # make a render look like something other than what the players saw. That is
+  # a house style, chosen deliberately, not a fix.
+  #
+  # The engine loads pk3s in name order and later wins, so these names ARE the
+  # precedence, and anything here beats assets*.pk3. Renamed on upload for that
+  # reason. Kept out of base-min.tar so a change here cannot damage a
+  # known-good 127MB artifact -- and so this list reads as the changelog.
+  EXTRAS_VERSION: "20260806"
+  EXTRA_PK3S: >-
+    solar_yavinsky2.pk3
+    eoi_imperialworker_v2_sounds.pk3
+    x_kestis_sounds.pk3
+    z_flag-console-field-scoreboard.pk3
+    z_nightmares.pk3
+    zzz_bones.pk3
+    zzzTricolor_Sabers_by_Apple.pk3
   R2_PUBLIC: "https://pub-76bff0ef02794a5d95b7e2a8b8660f61.r2.dev"
   SORACLE_URL: "https://jk2ctf.vercel.app"
   RENDER_BUCKET: "jk2renders"
@@ -135,6 +158,23 @@ jobs:
           mkdir -p assets
           curl -fsSL -o assets/base-min.tar "$R2_PUBLIC/render-assets/$ASSET_VERSION/base-min.tar"
 
+      - name: Restore community pk3s from cache
+        id: extracache
+        uses: actions/cache@v4
+        with:
+          path: assets/extras
+          key: jk2-extras-${{ env.EXTRAS_VERSION }}
+
+      - name: Download community pk3s
+        if: steps.extracache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p assets/extras
+          for P in $EXTRA_PK3S; do
+            curl -fsSL -o "assets/extras/$P" \
+              "$R2_PUBLIC/render-assets/extras/$EXTRAS_VERSION/$P"
+          done
+          ls -la assets/extras
+
       - name: Stage assets and demo
         env:
           ROOT: ${{ steps.root.outputs.ROOT }}
@@ -142,6 +182,9 @@ jobs:
         run: |
           mkdir -p "$ROOT/base/demos"
           tar -xf assets/base-min.tar -C "$ROOT/base"
+          # After base-min, so the names decide what wins -- see EXTRA_PK3S.
+          cp assets/extras/*.pk3 "$ROOT/base/" 2>/dev/null || true
+          ls -la "$ROOT/base"/*.pk3
           # Demos are publicly readable, so this needs no credentials. Only the
           # upload at the end does.
           curl -fsSL -o "$ROOT/base/demos/job.dm_15" "$R2_PUBLIC/demos/$DEMO_KEY"
