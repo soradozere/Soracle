@@ -30,6 +30,8 @@ import {
   type DemoPlayerInfo,
 } from "@/lib/demo-viewer/jkd-client"
 import { readLinkState } from "@/lib/demo-link-state"
+import { diagRequested } from "@/lib/demo-viewer/diagnostics"
+import { DemoViewerDiag } from "@/components/demo-viewer-diag"
 import { cn } from "@/lib/utils"
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4]
@@ -307,6 +309,35 @@ export function DemoViewer({
    * started, so nobody on a phone pays for a 120MB download to find out.
    */
   const [unsupported, setUnsupported] = useState(false)
+  /**
+   * `?diag=1`: show the instrumentation, and let the engine start on a phone.
+   *
+   * The gate above is the reason mobile behaviour is unmeasured -- every figure
+   * worth having (heap at boot, heap after two minutes, frame rate, whether the
+   * GL context survives) requires the engine to be running on the device, and
+   * on a phone it currently never is. This is the way past it, opt-in per
+   * visit, so an ordinary visitor's experience is untouched.
+   */
+  const [diag, setDiag] = useState(false)
+  /**
+   * On a phone, starting means downloading ~141MB (a 121MB bundle plus 20MB of
+   * community pk3s), and the gate has until now meant nobody could do that by
+   * accident. Reopening a diagnostics tab on cellular should not silently spend
+   * that, so the phone path asks first. Desktop is not asked: it was always
+   * going to download this, and nothing has changed there.
+   */
+  const [confirmNeeded, setConfirmNeeded] = useState(false)
+  const [confirmed, setConfirmed] = useState(false)
+  /**
+   * The same canvas as canvasRef, as state.
+   *
+   * The overlay has to re-render when the canvas arrives -- it reads the GL
+   * context and the backing-store size off it -- and assigning a ref does not
+   * cause that. Held in both places rather than converting the ref: everything
+   * else that touches the canvas reads it from callbacks that must not be
+   * rebuilt, which is what the ref is for.
+   */
+  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null)
 
   const [elapsed, setElapsed] = useState(0)
   // The match clock, which is what anyone discussing the game would quote --
@@ -496,11 +527,21 @@ export function DemoViewer({
 
   useEffect(() => {
     if (!holderRef.current) return
+    const wantsDiag = diagRequested(window.location.search)
+    setDiag(wantsDiag)
     // The standard "touch is the primary input" test: true on phones and
     // tablets, false on a laptop with a touchscreen (which can still hover).
     // Checked here, first thing, so the engine is never started on one.
-    if (window.matchMedia("(hover: none) and (pointer: coarse)").matches) {
+    const touchPrimary = window.matchMedia("(hover: none) and (pointer: coarse)").matches
+    if (touchPrimary && !wantsDiag) {
       setUnsupported(true)
+      setStatus(null)
+      return
+    }
+    // Both of these return before the engine is constructed, so re-running this
+    // effect when the answer changes cannot start a second one.
+    if (touchPrimary && !confirmed) {
+      setConfirmNeeded(true)
       setStatus(null)
       return
     }
@@ -512,6 +553,7 @@ export function DemoViewer({
     const canvas = getEngineCanvas()
     holderRef.current.appendChild(canvas)
     canvasRef.current = canvas
+    setCanvasEl(canvas)
 
     // Read here rather than in a state initialiser: this only exists in the
     // browser, and the engine needs it before its first frame.
@@ -613,9 +655,11 @@ export function DemoViewer({
       engine.suspend()
     }
     // The engine is a singleton for the lifetime of the page; re-running this
-    // on a prop change would try to boot a second one over the first.
+    // on a prop change would try to boot a second one over the first. The one
+    // exception is the phone confirmation above, which is answered after mount
+    // and which bails out long before an engine exists.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [confirmed])
 
   /**
    * Moving between demos, without rebooting the engine.
@@ -1302,6 +1346,7 @@ export function DemoViewer({
   // hiding. On touch, where there is no hover, the tap state stands in.
   const showChrome =
     !unsupported &&
+    !confirmNeeded &&
     !pointerLocked &&
     ((touchOnly ? tapShowsChrome : hovering) || paused || !ready || seeking || ended)
 
@@ -1351,6 +1396,38 @@ export function DemoViewer({
           </p>
         </div>
       )}
+
+      {/* The diagnostics path onto a phone: say what it costs before spending
+          it. Nobody arrives here without ?diag=1 in the URL, so this is not a
+          consent banner for visitors -- it is a guard against reopening a test
+          tab on cellular and losing 141MB to it. */}
+      {confirmNeeded && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-black/70 px-6 text-center">
+          <p className="text-sm font-medium text-white/90">Start the engine on this device?</p>
+          <p className="max-w-xs text-xs leading-relaxed text-white/50">
+            Diagnostics mode. This downloads about 141MB and may run out of memory and reload the
+            tab — that outcome is itself a result worth recording. Prefer wi-fi.
+          </p>
+          <button
+            onClick={(e) => {
+              // The container's own onClick toggles the control bar on touch;
+              // without this the same tap would do both.
+              e.stopPropagation()
+              setConfirmNeeded(false)
+              setStatus("Starting the engine…")
+              setConfirmed(true)
+            }}
+            className="mt-1 rounded-full bg-white/10 px-5 py-3 text-sm font-medium text-white ring-1 ring-white/20 transition-colors hover:bg-white/20"
+          >
+            Start anyway
+          </button>
+        </div>
+      )}
+
+      {/* Mounted only on request, and only once there is a canvas to measure.
+          Reading the GL context or the backing-store size before the engine has
+          made one answers nothing. */}
+      {diag && <DemoViewerDiag canvas={canvasEl} />}
 
       {/* Match clock. Always up, not tied to the auto-hiding chrome: on a full
           match this is what tells you whether you're watching the first minute
@@ -1434,8 +1511,17 @@ export function DemoViewer({
       )}
 
       {(status || failed) && (
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3">
-          <div className={cn("text-sm", failed ? "text-red-300" : "text-white/70")}>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 px-6">
+          {/* A failure used to be one short line. The boot-failure message now
+              carries the numbers behind it -- what the engine asked for, what
+              the device would grant -- so it needs room to wrap rather than
+              running off both edges of a phone. */}
+          <div
+            className={cn(
+              "max-w-md text-center text-sm leading-relaxed",
+              failed ? "text-red-300" : "text-white/70",
+            )}
+          >
             {failed ?? status}
           </div>
           {!failed && progress >= 0 && (
