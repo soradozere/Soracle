@@ -27,16 +27,23 @@ export interface RenderCameraState {
 }
 
 /**
- * Same estimate the server uses to choose settings, so the dialog can say what
- * will happen before someone commits to it. Measured on a runner: ~38 rendered
- * frames/sec at 720p, and 1080p is 2.25x the pixels.
+ * Same ladder the server uses, so the dialog can say what will happen before
+ * anyone commits to it. 1440p wherever it fits: YouTube allocates bitrate by
+ * resolution, so a bigger upload survives their encoder better even when
+ * watched at 1080p.
  */
-function estimate(endMs: number): { fps: 30 | 60; minutes: number } | null {
-  const throughput = 38.2 / 2.25
+const LADDER = [
+  { fps: 60 as const, width: 2560, height: 1440 },
+  { fps: 30 as const, width: 2560, height: 1440 },
+  { fps: 30 as const, width: 1920, height: 1080 },
+]
+
+function estimate(endMs: number): { fps: 30 | 60; height: number; minutes: number } | null {
   const budget = 6 * 60 * 60 * 1000 * 0.8
-  for (const fps of [60, 30] as const) {
-    const ms = (endMs / 1000) * fps * (1000 / throughput)
-    if (ms <= budget) return { fps, minutes: Math.max(1, Math.round(ms / 60000)) }
+  for (const s of LADDER) {
+    const throughput = 38.2 / ((s.width * s.height) / (1280 * 720))
+    const ms = (endMs / 1000) * s.fps * (1000 / throughput)
+    if (ms <= budget) return { fps: s.fps, height: s.height, minutes: Math.max(1, Math.round(ms / 60000)) }
   }
   return null
 }
@@ -205,8 +212,11 @@ export function RenderToYoutubeDialog({
             <div className="rounded-md border p-2.5 text-xs text-muted-foreground">
               {est ? (
                 <>
-                  Renders at 1080p{est.fps}, about {est.minutes} minute{est.minutes === 1 ? "" : "s"}.{" "}
-                  {est.fps === 30 && "Long demos drop to 30fps so the job finishes inside its time limit."}
+                  Renders at {est.height}p{est.fps}, about {est.minutes} minute
+                  {est.minutes === 1 ? "" : "s"}.{" "}
+                  {est.height < 1440 || est.fps === 30
+                    ? "Longer demos step down so the job finishes inside its time limit."
+                    : ""}
                 </>
               ) : (
                 <>This demo is too long to render in one job, even at 30fps.</>

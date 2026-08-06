@@ -14,31 +14,49 @@ type CamMode = (typeof CAM_MODES)[number]
 /*
  * Render settings are chosen from clip length, not asked for.
  *
- * Disk is no longer the constraint -- chunked capture keeps peak usage flat
- * however long the demo runs. Wall clock is. Measured on a runner: llvmpipe
- * renders ~38 frames/sec at 720p, and 1080p is 2.25x the pixels so ~17
- * frames/sec. Against GitHub's hard six-hour job limit that gives:
+ * Disk stopped being the constraint once chunked capture landed; wall clock is
+ * the one that bites. Measured on a runner: llvmpipe renders ~38 frames/sec at
+ * 720p, and cost scales with pixel count.
  *
- *   1080p60   3.5x realtime   good to ~1.7h of footage
- *   1080p30   1.8x realtime   good to ~3.4h
+ * 1440p rather than 1080p wherever it fits, because YouTube allocates bitrate
+ * by resolution -- a 1440p upload gets a noticeably fatter encode and looks
+ * better even watched at 1080p. Our own source is already well above what
+ * YouTube keeps, so the graininess comes from their encoder, not ours, and
+ * resolution is the lever that actually moves it.
  *
- * So highlights get the full 1080p60 -- a 60s clip renders in about 3.5
- * minutes -- and anything long enough to run out of clock drops to 30fps
- * rather than failing at hour six with nothing to show. YouTube would rather
- * have a complete 30fps match than a truncated 60fps one.
+ * Against GitHub's six-hour job limit that gives, in preference order:
+ *
+ *   1440p60   6.3x realtime   good to ~48 min of footage
+ *   1440p30   3.1x realtime   good to ~1.5h
+ *   1080p30   1.8x realtime   good to ~2.7h
+ *
+ * A long match dropping to 30fps and 1080p beats one that runs out of clock at
+ * hour six with nothing to show.
  */
 const RENDER_FPS_720P = 38.2
-const PIXEL_RATIO_1080P = 2.25
 const JOB_LIMIT_MS = 6 * 60 * 60 * 1000
-/** Leave room for the build, asset staging, encode and upload around the render. */
+/** Headroom for the build, asset staging, encode and upload around the render. */
 const SAFETY = 0.8
 
-function chooseSettings(durationMs: number): { fps: 30 | 60; width: number; height: number } | null {
-  const throughput1080 = RENDER_FPS_720P / PIXEL_RATIO_1080P
+interface RenderSettings {
+  fps: 30 | 60
+  width: number
+  height: number
+}
+
+const SETTINGS_LADDER: RenderSettings[] = [
+  { fps: 60, width: 2560, height: 1440 },
+  { fps: 30, width: 2560, height: 1440 },
+  { fps: 30, width: 1920, height: 1080 },
+]
+
+function chooseSettings(durationMs: number): RenderSettings | null {
   const budget = JOB_LIMIT_MS * SAFETY
-  for (const fps of [60, 30] as const) {
-    const estimateMs = (durationMs / 1000) * fps * (1000 / throughput1080)
-    if (estimateMs <= budget) return { fps, width: 1920, height: 1080 }
+  for (const s of SETTINGS_LADDER) {
+    const pixelRatio = (s.width * s.height) / (1280 * 720)
+    const throughput = RENDER_FPS_720P / pixelRatio
+    const estimateMs = (durationMs / 1000) * s.fps * (1000 / throughput)
+    if (estimateMs <= budget) return s
   }
   return null
 }
