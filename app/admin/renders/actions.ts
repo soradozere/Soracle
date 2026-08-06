@@ -149,7 +149,6 @@ export async function approveRender(id: string): Promise<ActionResult> {
   }
 
   const meta = {
-    demoId: row.demo_id as string,
     title: row.title as string,
     description: row.description as string | null,
     map: (demo?.map as string | null) ?? null,
