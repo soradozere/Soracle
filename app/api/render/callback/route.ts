@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { requireBearer } from "@/lib/bearer-auth"
 import { createServiceClient } from "@/lib/supabase/admin"
+import { deleteRender } from "@/lib/r2-renders"
 
 /*
  * Where a render job reports back from.
@@ -73,13 +74,14 @@ export async function POST(request: Request) {
   const supabase = createServiceClient()
   const { data: row } = await supabase
     .from("youtube_render_queue")
-    .select("id, status")
+    .select("id, status, render_r2_key")
     .eq("id", jobId)
     .maybeSingle()
 
   if (!row) return NextResponse.json({ error: "unknown job" }, { status: 404 })
 
   const from = row.status as string
+  const existingKey = (row.render_r2_key as string | null) ?? null
   if (!ALLOWED[status].includes(from)) {
     /*
      * 409 rather than an error: the job did nothing wrong, it is just late or
@@ -122,6 +124,27 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
   if (!updated) {
     return NextResponse.json({ error: "status changed under us", ignored: true }, { status: 409 })
+  }
+
+  /*
+   * Once it is on YouTube, the staging copy has done its job.
+   *
+   * The manual path already did this; the automated one did not, so every
+   * publish left its mp4 behind. YouTube is the storage -- this bucket is a
+   * staging area that should sit near-empty, and the lifecycle rule is a
+   * backstop for jobs that died rather than a substitute for tidying up after
+   * ones that worked.
+   *
+   * Deliberately after the status write and not fatal: the video is already
+   * published, so an R2 hiccup must not turn a successful publish into a
+   * failure. A key left behind is collected by the lifecycle rule.
+   */
+  if (status === "published" && existingKey) {
+    await deleteRender(existingKey).catch(() => {})
+    // Supabase returns errors in the result rather than throwing, so there is
+    // nothing to catch here -- and a failure to null the column is cosmetic
+    // next to a video that is already live.
+    await supabase.from("youtube_render_queue").update({ render_r2_key: null }).eq("id", jobId)
   }
 
   return NextResponse.json({ ok: true, id: updated.id, status: updated.status })
