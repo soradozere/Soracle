@@ -45,9 +45,17 @@ function client(): S3Client {
  * shareable. An hour outlives any realistic review sitting.
  */
 export async function signedRenderUrl(key: string, expiresInSeconds = 3600): Promise<string> {
-  return getSignedUrl(client(), new GetObjectCommand({ Bucket: BUCKET, Key: key }), {
-    expiresIn: expiresInSeconds,
-  })
+  return getSignedUrl(
+    client(),
+    // ResponseContentType overrides whatever is stored on the object. Without
+    // it a render uploaded as application/octet-stream is refused by the video
+    // element -- "No video with supported format and MIME type found" -- even
+    // though the file itself is a perfectly good h264 mp4. Forcing it here also
+    // repairs renders already sitting in the bucket, rather than only ones
+    // uploaded after the workflow was fixed.
+    new GetObjectCommand({ Bucket: BUCKET, Key: key, ResponseContentType: "video/mp4" }),
+    { expiresIn: expiresInSeconds },
+  )
 }
 
 /**
