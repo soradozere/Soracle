@@ -195,6 +195,17 @@ interface DemoViewerProps {
    */
   onTrimReady?: (trim: ((startMs: number, endMs: number) => Promise<Uint8Array>) | null) => void
   /**
+   * Hands the page a reader for the camera as it stands right now, so a render
+   * can start from what someone has already framed rather than from defaults.
+   *
+   * A getter rather than a value, for the same reason onPositionChange is not
+   * state: the camera moves constantly, and this only matters at the instant a
+   * dialog opens.
+   */
+  onCameraStateReady?: (
+    read: (() => { camera: CameraMode; follow: number; players: DemoPlayerInfo[] }) | null,
+  ) => void
+  /**
    * Where to go when this one finishes. Named rather than just arrows, because
    * "next" means nothing on its own and the title is what someone is choosing
    * between.
@@ -217,6 +228,7 @@ export function DemoViewer({
   onPositionChange,
   onSeekReady,
   onTrimReady,
+  onCameraStateReady,
   trimRange = null,
   previousDemo = null,
   nextDemo = null,
@@ -245,6 +257,15 @@ export function DemoViewer({
   cameraRef.current = camera
   const [follow, setFollow] = useState(-1)
   const [players, setPlayers] = useState<DemoPlayerInfo[]>([])
+  /*
+   * Same reason cameraRef above exists: onCameraStateReady's getter is handed
+   * up once, when the engine becomes ready, so a closure over this state would
+   * answer with whatever it was at that moment and never change.
+   */
+  const followRef = useRef(follow)
+  const playersRef = useRef(players)
+  followRef.current = follow
+  playersRef.current = players
   const [volume, setVolume] = useState(DEFAULT_VOLUME)
   const [muted, setMuted] = useState(false)
 
@@ -862,6 +883,17 @@ export function DemoViewer({
   useEffect(() => {
     if (!ready) return
     const engine = engineRef.current
+
+    // Handed up before the trim check below, not after: rendering needs the
+    // camera and the roster, which every engine has. Gating it on canTrim
+    // meant an engine too old to cut also refused to render, which are
+    // unrelated capabilities.
+    onCameraStateReady?.(() => ({
+      camera: cameraRef.current,
+      follow: followRef.current,
+      players: playersRef.current,
+    }))
+
     if (!engine?.canTrim) {
       onTrimReady?.(null)
       return

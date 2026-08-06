@@ -31,6 +31,7 @@ import type {
   Gametype,
 } from "@/lib/demos-server"
 import { DEMO_TAGS, demoTagClasses, demoTagLabel } from "@/lib/demo-tags"
+import { RenderToYoutubeDialog, type RenderCameraState } from "@/components/render-to-youtube-dialog"
 import {
   addComment,
   addDemoMoment,
@@ -960,6 +961,9 @@ export function DemoDetail({
   // Distinguishes "the engine has not answered yet" from "the engine says no".
   const [trimSettled, setTrimSettled] = useState(false)
   const [trimRange, setTrimRange] = useState<{ startMs: number; endMs: number } | null>(null)
+  // Handed up by the player once its engine is running. Same thunk wrapping as
+  // trimFn: React would otherwise treat the function as a state updater.
+  const [readCamera, setReadCamera] = useState<(() => RenderCameraState | null) | null>(null)
 
   return (
     <div className={cn("grid grid-cols-1 gap-6", !theater && "lg:grid-cols-[minmax(0,1fr)_20rem]")}>
@@ -985,6 +989,7 @@ export function DemoDetail({
               setTrimFn(() => fn)
               setTrimSettled(true)
             }}
+            onCameraStateReady={(read) => setReadCamera(() => read)}
             trimRange={trimRange}
             previousDemo={previousDemo}
             nextDemo={nextDemo}
@@ -1093,6 +1098,22 @@ export function DemoDetail({
             avgRating={demo.avgRating}
             ratingCount={demo.ratingCount}
           />
+
+          {/* Same gate as trimming and moments: the uploader or an admin.
+              requestRender enforces it again server-side through resolveEditor
+              rather than trusting that this did not render. */}
+          {canEditMoments && (
+            <div className="mt-3">
+              <RenderToYoutubeDialog
+                demoId={demo.id}
+                demoTitle={demo.title}
+                durationMs={demo.durationMs ?? 0}
+                protagonistId={demo.protagonist?.id ?? null}
+                protagonistName={demo.protagonist?.name}
+                getCameraState={readCamera}
+              />
+            </div>
+          )}
         </div>
 
         <DemoComments
