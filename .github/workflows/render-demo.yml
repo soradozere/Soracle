@@ -352,8 +352,12 @@ jobs:
         run: |
           set -u
           KEY="$JOB_ID.mp4"
+          # --content-type explicitly: without it the object can land as
+          # application/octet-stream, and the review player will not touch a
+          # video whose type it cannot recognise.
           aws s3 cp render.mp4 "s3://$RENDER_BUCKET/$KEY" \
             --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com" \
+            --content-type video/mp4 \
             --no-progress
           echo "KEY=$KEY" >> "$GITHUB_OUTPUT"
 
