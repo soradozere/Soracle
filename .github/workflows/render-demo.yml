@@ -42,7 +42,7 @@ env:
   # because the render config and the engine move together -- seekdemo below
   # only exists in the fork -- and this is how a change to one gets tested
   # against the other before either lands.
-  ENGINE_REF: "render-seek"
+  ENGINE_REF: "master"
   ASSET_VERSION: "20260805"
   R2_PUBLIC: "https://pub-76bff0ef02794a5d95b7e2a8b8660f61.r2.dev"
   SORACLE_URL: "https://jk2ctf.vercel.app"
