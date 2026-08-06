@@ -130,7 +130,14 @@ export function RenderToYoutubeDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogTrigger asChild>
-        <Button variant="outline" size="sm" className="w-full" disabled={waiting}>
+        {/* YouTube red rather than the outline default -- this is the one
+            control on the page that sends something off Soracle entirely, and
+            it should not look like the edit buttons beside it. */}
+        <Button
+          size="sm"
+          disabled={waiting}
+          className="bg-[#FF0033] text-white hover:bg-[#d9002b] disabled:bg-[#FF0033]/40"
+        >
           <Youtube className="mr-1.5 h-3.5 w-3.5" />
           {waiting ? "Upload to YouTube (starting player…)" : "Upload to YouTube"}
         </Button>
