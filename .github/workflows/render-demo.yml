@@ -58,8 +58,16 @@ env:
   # precedence, and anything here beats assets*.pk3. Renamed on upload for that
   # reason. Kept out of base-min.tar so a change here cannot damage a
   # known-good 127MB artifact -- and so this list reads as the changelog.
+  #
+  # z_basemin_chrome2.pk3 is the odd one out: not community content but a
+  # repair. base-min is trimmed and dropped gfx/effects/chrome2.jpg, which the
+  # bones shader maps additively over the whole model, so a missing texture
+  # resolved to the default white one and the model came out a grey blob. Nine
+  # kilobytes, restored. Anything else that pack reaches for and base-min lacks
+  # will look the same way, so this is the place to put the next one.
   EXTRAS_VERSION: "20260806"
   EXTRA_PK3S: >-
+    z_basemin_chrome2.pk3
     solar_yavinsky2.pk3
     eoi_imperialworker_v2_sounds.pk3
     x_kestis_sounds.pk3
@@ -165,11 +173,18 @@ jobs:
           path: assets/extras
           key: jk2-extras-${{ env.EXTRAS_VERSION }}
 
+      # Runs whether or not the cache hit, and fetches only what is missing.
+      #
+      # The cache key is the version prefix, so adding a pk3 to an existing
+      # prefix -- which is the cheap way to ship a 9KB fix without making every
+      # client re-download 20MB -- would restore a stale directory and quietly
+      # skip the new file. Checking per file costs one stat and cannot go stale.
       - name: Download community pk3s
-        if: steps.extracache.outputs.cache-hit != 'true'
         run: |
           mkdir -p assets/extras
           for P in $EXTRA_PK3S; do
+            [ -s "assets/extras/$P" ] && continue
+            echo "  fetching $P"
             curl -fsSL -o "assets/extras/$P" \
               "$R2_PUBLIC/render-assets/extras/$EXTRAS_VERSION/$P"
           done
