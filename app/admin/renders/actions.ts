@@ -5,18 +5,10 @@ import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { deleteRender } from "@/lib/r2-renders"
 import { dispatchPublishJob } from "@/lib/github-dispatch"
+import { DAILY_PUBLISH_CAP } from "@/lib/render-limits"
 
 type ActionResult = { success: true } | { success: false; error: string }
 
-/**
- * YouTube's daily upload allowance, expressed in videos rather than quota units.
- *
- * The API grants 10,000 units a day and an upload costs about 1,600, so six is
- * roughly what fits. Counted here rather than discovered from a 403, because a
- * failed upload still spends the quota -- the seventh attempt would burn the
- * allowance and publish nothing.
- */
-export const DAILY_PUBLISH_CAP = 6
 
 async function requireAdmin(): Promise<boolean> {
   const supabase = await createClient()
