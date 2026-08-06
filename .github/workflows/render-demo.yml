@@ -197,17 +197,28 @@ jobs:
             echo "set cg_fov $FOV"
             echo ""
             echo "demo job"
-            # Generous: the follow target has to appear in a snapshot before
-            # the camera can lock to it, or it silently renders the recorded
-            # view instead.
-            echo "wait 400"
+            # Deliberately tiny, and it must stay that way.
+            #
+            # wait counts FRAMES, and before capture starts the demo plays at
+            # whatever speed the renderer manages -- ~38fps at 720p but ~17fps
+            # at 1080p. A big wait therefore burns a different amount of demo
+            # depending on the resolution and the runner, so the same request
+            # produced 17.3s of footage at 720p30 and 14.1s at 1080p60. Which
+            # part of the demo you get must not depend on how fast the machine
+            # is; that is the whole point of rendering offline.
+            #
+            # Just enough for cgame to exist so the camera cvars land. If the
+            # follow target has not appeared in a snapshot yet the camera falls
+            # back for a moment and then locks on, which the ffmpeg cut below
+            # removes anyway.
+            echo "wait 20"
             echo "set cg_demoCam $DEMOCAM"
             echo "set cg_demoFollow $FOLLOW_VAL"
             echo "set cg_thirdPerson $THIRD"
             echo "set cg_thirdPersonRange 80"
             echo "set cg_thirdPersonAngle 0"
             echo "set cg_cameraOrbit 0"
-            echo "wait 30"
+            echo "wait 10"
             # Zero-padded so lexical order is chronological order -- part10
             # must not sort before part2, or chunks concat out of sequence.
             for i in $(seq 0 $(( CHUNKS - 1 ))); do
@@ -316,10 +327,13 @@ jobs:
           # Re-encode rather than copy: a stream copy can only cut on a
           # keyframe, which would drift the segment by up to a couple of
           # seconds from what the requester actually chose.
-          # crf 18 and a 192k audio track: YouTube re-encodes whatever it is
-          # given, so the upload wants headroom rather than a small file.
+          # crf 20 with a 192k audio track. YouTube re-encodes anything it is
+          # given and recommends ~12 Mbps for 1080p60, so this sits comfortably
+          # above their target without the ~35 Mbps that crf 18 produced -- a
+          # bitrate that buys nothing visible downstream and would make a long
+          # match unwieldy to store and upload.
           ffmpeg -nostdin -y -ss "$SS" -to "$TO" -i joined.mp4 \
-            -c:v libx264 -pix_fmt yuv420p -preset medium -crf 18 \
+            -c:v libx264 -pix_fmt yuv420p -preset medium -crf 20 \
             -c:a aac -b:a 192k -movflags +faststart render.mp4 2>&1 | tail -3
 
           ls -la render.mp4
