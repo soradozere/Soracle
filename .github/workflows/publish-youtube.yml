@@ -91,16 +91,22 @@ jobs:
           # Resumable upload: start a session, then stream the file to it.
           # curl uploads from disk, so a multi-gigabyte match never has to fit
           # in memory.
-          LOCATION=$(curl -sS -D - -o /dev/null -X POST \
+          # Headers and body both captured. Throwing the body away meant a
+          # rejected upload reported only "no session opened", when YouTube had
+          # actually said exactly what was wrong -- and the answer was in the
+          # part being discarded.
+          curl -sS -D session-headers.txt -o session-body.txt -X POST \
             "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status" \
             -H "Authorization: Bearer $ACCESS" \
             -H "Content-Type: application/json; charset=UTF-8" \
             -H "X-Upload-Content-Type: video/mp4" \
             -H "X-Upload-Content-Length: $SIZE" \
-            --data-binary @meta.json \
-            | tr -d '\r' | awk 'tolower($1) == "location:" { print $2 }')
+            --data-binary @meta.json
+          LOCATION=$(tr -d '\r' < session-headers.txt | awk 'tolower($1) == "location:" { print $2 }')
           if [ -z "$LOCATION" ]; then
-            echo "YouTube did not open an upload session." >&2
+            echo "YouTube refused to open an upload session. It said:" >&2
+            head -c 1200 session-body.txt >&2
+            echo >&2
             exit 1
           fi
 
@@ -130,8 +136,12 @@ jobs:
                   '{job_id:$j, status:"published", youtube_video_id:$v}')" \
             -o /dev/null
 
-      # Without this a failed upload leaves the row at 'publishing' forever,
-      # which looks exactly like an upload still in progress.
+      # Back to pending_review rather than failed. The render itself is fine --
+      # only the upload broke -- so it should stay approvable once the cause is
+      # fixed. Reporting 'failed' stranded it somewhere approve would not touch.
+      #
+      # Without this the row sits at 'publishing' forever, which looks exactly
+      # like an upload still in progress.
       - name: Report failure
         if: failure() || cancelled()
         env:
@@ -143,5 +153,5 @@ jobs:
             -H "Authorization: Bearer $SECRET" \
             -H "Content-Type: application/json" \
             -d "$(jq -nc --arg j "$JOB_ID" --arg e "Upload to YouTube failed. Logs: $RUN_URL" \
-                  '{job_id:$j, status:"failed", error:$e}')" \
+                  '{job_id:$j, status:"pending_review", error:$e}')" \
             -o /dev/null || true
