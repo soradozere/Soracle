@@ -269,6 +269,22 @@ const EXTRAS_VERSION = "20260806"
  * renderer as much as here, it simply had not come up in a render yet. Nine
  * kilobytes of retail texture, restored under the same version prefix so clients
  * holding the other six fetch only this one.
+ *
+ * zzz_transparent_flags.pk3 is the replacement flag, and doubles as an
+ * experiment. It is shaders only -- no textures, no models -- and every image it
+ * maps is already in base-min, so it cannot fail the way bones did. Against the
+ * stock flag shader it adds exactly three things: `sort seeThrough`, an additive
+ * GL_ONE GL_ONE blend (which is what makes it transparent), and `glow`.
+ *
+ * That narrows the earlier mystery either way. `glow` was one of four suspects
+ * for the flag vanishing, alongside deformVertexes wave, tcGen environment and a
+ * GL_ZERO/GL_ONE_MINUS_SRC_COLOR stage. This keeps only `glow`: if the flag
+ * shows, glow is exonerated and the cause is among the other three; if it
+ * vanishes again, glow is it. Cheaper than bisecting the old pack by hand.
+ *
+ * Viewer only for now. Renders keep the flag from
+ * z_flag-console-field-scoreboard.pk3, which works there and which Sam has seen,
+ * so the two disagree about flags until this is settled either way.
  */
 const EXTRA_PK3S = [
   // One 9KB texture the trimmed bundle dropped -- see the note above.
@@ -279,6 +295,7 @@ const EXTRA_PK3S = [
   "z_nightmares.pk3",
   "zzz_bones.pk3",
   "zzzTricolor_Sabers_by_Apple.pk3",
+  "zzz_transparent_flags.pk3",
 ]
 
 /**
