@@ -3,7 +3,7 @@ import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
-import { signedRenderUrl, downloadRenderUrl } from "@/lib/r2-renders"
+import { signedRenderUrl, downloadRenderUrl, headRender } from "@/lib/r2-renders"
 import { RenderQueue, type RenderJob } from "@/components/render-queue"
 import { publishedToday } from "./actions"
 import { DAILY_PUBLISH_CAP } from "@/lib/render-limits"
@@ -63,7 +63,19 @@ export default async function AdminRendersPage() {
    * fifty round trips to show at most a handful of players.
    */
   const jobs: RenderJob[] = await Promise.all(
-    (rows ?? []).map(async (r) => ({
+    (rows ?? []).map(async (r) => {
+      /*
+       * Confirm the object is really there before signing for it.
+       *
+       * Signing is local -- no request leaves the process -- so a key that was
+       * deleted, expired by the lifecycle rule, or never uploaded still yields
+       * a perfectly valid URL. The result is a broken player and a NoSuchKey
+       * XML page from the download button, rather than the plain "it is gone,
+       * render it again" this page already knows how to say.
+       */
+      const key = r.status === "pending_review" ? (r.render_r2_key as string | null) : null
+      const present = key ? (await headRender(key)) !== null : false
+      return {
       id: r.id as string,
       demoId: r.demo_id as string,
       demoTitle: demoById.get(r.demo_id as string) ?? "(demo deleted)",
@@ -83,15 +95,11 @@ export default async function AdminRendersPage() {
           ? "an admin"
           : (nameById.get(r.requested_by as string) ?? "unknown player"),
       createdAt: r.created_at as string,
-      previewUrl:
-        r.status === "pending_review" && r.render_r2_key
-          ? await signedRenderUrl(r.render_r2_key as string).catch(() => null)
-          : null,
+      previewUrl: present && key ? await signedRenderUrl(key).catch(() => null) : null,
       downloadUrl:
-        r.status === "pending_review" && r.render_r2_key
-          ? await downloadRenderUrl(r.render_r2_key as string, r.title as string).catch(() => null)
-          : null,
-    })),
+        present && key ? await downloadRenderUrl(key, r.title as string).catch(() => null) : null,
+      }
+    }),
   )
 
   const today = await publishedToday()
