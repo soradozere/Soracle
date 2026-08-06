@@ -188,9 +188,26 @@ jobs:
             # everything downstream re-encodes it. Compression artefacts baked
             # in here cannot be recovered later.
             echo "set cl_aviMotionJpegQuality 95"
-            echo "set cg_draw2D 0"
-            echo "set con_notifytime 0"
-            echo "set cl_noprint 1"
+            # The HUD, as the game draws it: health, shield, force, score, and
+            # the followed player's portrait and name. cg_draw2D 0 was hiding
+            # all of it at once for a "clean" picture nobody asked for.
+            echo "set cg_draw2D 1"
+
+            # Kill feed. Obituaries reach the notify area through the console,
+            # so cl_noprint must be 0 -- it returns early from Con_Print and
+            # silently takes the feed with it.
+            echo "set cl_noprint 0"
+            echo "set con_notifytime 10"
+
+            # Kills without the conversation. The notify area carries both and
+            # con_notifytime cannot separate them, which is why cg_drawChat
+            # exists in the fork's cgame -- it gates the chat print sites and
+            # leaves obituaries alone.
+            echo "set cg_drawChat 0"
+
+            # Clutter that belongs on a live screen, not a published video.
+            echo "set cg_drawFPS 0"
+            echo "set cg_lagometer 0"
             # The web viewer pins this (FIXED_FOV in jkd-client.ts). Without it
             # the engine default of 80 applies and renders come out visibly
             # tighter than the same demo looks on the site.
