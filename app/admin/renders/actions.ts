@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { deleteRender } from "@/lib/r2-renders"
+import { dispatchPublishJob } from "@/lib/github-dispatch"
 
 type ActionResult = { success: true } | { success: false; error: string }
 
@@ -79,14 +80,85 @@ export async function rejectRender(id: string): Promise<ActionResult> {
 }
 
 /**
+ * Approve, and hand the upload to a runner.
+ *
+ * The upload does not happen here. A full match is gigabytes, and a serverless
+ * function would hit its execution limit part way through -- so the row moves to
+ * `publishing`, a workflow does the resumable upload from local disk, and the
+ * callback records the video id.
+ *
+ * Videos arrive **private**. A Cloud project that has not passed YouTube's
+ * compliance audit has every upload forced private regardless of what is asked
+ * for, so asking for public would just make the result a surprise. Flip it in
+ * Studio; when the audit clears, change the privacy input here and that step
+ * disappears.
+ */
+export async function approveRender(id: string): Promise<ActionResult> {
+  if (!(await requireAdmin())) return { success: false, error: "Not authorized." }
+
+  const supabase = createServiceClient()
+  const { data: row } = await supabase
+    .from("youtube_render_queue")
+    .select("id, status, render_r2_key, title, description")
+    .eq("id", id)
+    .maybeSingle()
+  if (!row) return { success: false, error: "That job no longer exists." }
+  if (row.status !== "pending_review") {
+    return { success: false, error: `Can only approve a job awaiting review (this one is ${row.status}).` }
+  }
+  if (!row.render_r2_key) {
+    return { success: false, error: "There is no rendered file to upload -- it may have expired. Render it again." }
+  }
+
+  const today = await publishedToday()
+  if (today >= DAILY_PUBLISH_CAP) {
+    return {
+      success: false,
+      error: `${today} videos have gone out today, which is the daily cap. This one keeps until tomorrow.`,
+    }
+  }
+
+  // Claimed before dispatch, and only from pending_review, so two clicks a
+  // moment apart cannot both fire an upload of the same video.
+  const { data: claimed } = await supabase
+    .from("youtube_render_queue")
+    .update({ status: "publishing", error: null })
+    .eq("id", id)
+    .eq("status", "pending_review")
+    .select("id")
+    .maybeSingle()
+  if (!claimed) return { success: false, error: "Someone just acted on this one." }
+
+  const dispatch = await dispatchPublishJob({
+    job_id: id,
+    r2_key: row.render_r2_key as string,
+    title: row.title as string,
+    description: (row.description as string | null) ?? "",
+    privacy: "private",
+  })
+
+  if (!dispatch.ok) {
+    // Back to review rather than failed: the render is fine, only the handoff
+    // broke, and it should stay approvable once that is fixed.
+    await supabase
+      .from("youtube_render_queue")
+      .update({ status: "pending_review", error: dispatch.error })
+      .eq("id", id)
+      .eq("status", "publishing")
+    return { success: false, error: dispatch.error }
+  }
+
+  revalidatePath("/admin/renders")
+  return { success: true }
+}
+
+/**
  * Record that a render has been put on YouTube by hand.
  *
- * Uploading through the API is not available: a Cloud project created now has
- * not passed YouTube's compliance audit, so videos.insert would force every
- * upload to private, and an app in "Testing" is issued a refresh token that
- * expires weekly. Both are review processes measured in weeks. Rather than
- * wait on them, the render is downloaded and uploaded through YouTube Studio,
- * and this closes the loop so the row does not sit in review forever.
+ * Kept alongside approveRender as the way out when the automatic upload will
+ * not work -- a revoked token, a YouTube outage, or a file large enough to be
+ * worth uploading by hand. Download the mp4, put it up yourself, paste the
+ * link back.
  *
  * Takes the URL rather than assuming one: it is the only way back from a
  * published video to the demo it came from.

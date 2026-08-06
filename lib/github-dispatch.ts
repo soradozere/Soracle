@@ -1,6 +1,7 @@
 const OWNER = "soradozere"
 const REPO = "Soracle"
-const WORKFLOW = "render-demo.yml"
+const RENDER_WORKFLOW = "render-demo.yml"
+const PUBLISH_WORKFLOW = "publish-youtube.yml"
 const REF = "main"
 
 export type DispatchResult = { ok: true } | { ok: false; error: string }
@@ -35,7 +36,24 @@ export interface RenderJobInputs {
  * never created. A row stuck at pending_render is indistinguishable from one
  * that is merely queued, which is precisely the state nobody notices.
  */
+export interface PublishJobInputs {
+  job_id: string
+  r2_key: string
+  title: string
+  description: string
+  /** private until YouTube's compliance audit passes on the API project. */
+  privacy: "private" | "public" | "unlisted"
+}
+
 export async function dispatchRenderJob(inputs: RenderJobInputs): Promise<DispatchResult> {
+  return dispatch(RENDER_WORKFLOW, inputs as unknown as Record<string, string>)
+}
+
+export async function dispatchPublishJob(inputs: PublishJobInputs): Promise<DispatchResult> {
+  return dispatch(PUBLISH_WORKFLOW, inputs as unknown as Record<string, string>)
+}
+
+async function dispatch(workflow: string, inputs: Record<string, string>): Promise<DispatchResult> {
   const token = process.env.GITHUB_RENDER_PAT
   if (!token) {
     // Set on Production only, deliberately -- a preview deployment firing real
@@ -47,7 +65,7 @@ export async function dispatchRenderJob(inputs: RenderJobInputs): Promise<Dispat
   let response: Response
   try {
     response = await fetch(
-      `https://api.github.com/repos/${OWNER}/${REPO}/actions/workflows/${WORKFLOW}/dispatches`,
+      `https://api.github.com/repos/${OWNER}/${REPO}/actions/workflows/${workflow}/dispatches`,
       {
         method: "POST",
         headers: {
@@ -83,7 +101,7 @@ export async function dispatchRenderJob(inputs: RenderJobInputs): Promise<Dispat
   if (response.status === 404) {
     return {
       ok: false,
-      error: `GitHub returned 404 -- ${WORKFLOW} must exist on the ${REF} branch to be dispatchable, even when running from another ref.`,
+      error: `GitHub returned 404 -- ${workflow} must exist on the ${REF} branch to be dispatchable, even when running from another ref.`,
     }
   }
 
