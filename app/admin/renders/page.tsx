@@ -5,7 +5,8 @@ import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { signedRenderUrl, downloadRenderUrl } from "@/lib/r2-renders"
 import { RenderQueue, type RenderJob } from "@/components/render-queue"
-import { DAILY_PUBLISH_CAP, publishedToday } from "./actions"
+import { publishedToday } from "./actions"
+import { DAILY_PUBLISH_CAP } from "@/lib/render-limits"
 
 /*
  * Fully dynamic, and deliberately so.
