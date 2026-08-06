@@ -50,6 +50,33 @@ export async function signedRenderUrl(key: string, expiresInSeconds = 3600): Pro
   })
 }
 
+/**
+ * A signed URL that saves rather than plays.
+ *
+ * ResponseContentDisposition is set server-side because the download attribute
+ * on an anchor is ignored cross-origin -- without it the browser navigates to
+ * the video and plays it, and "save as" gives you a UUID with no extension.
+ * The filename is the video's title so the file is recognisable in Downloads
+ * when it comes to uploading it.
+ */
+export async function downloadRenderUrl(
+  key: string,
+  filename: string,
+  expiresInSeconds = 3600,
+): Promise<string> {
+  // Quotes would terminate the header value early, and titles are free text.
+  const safe = filename.replace(/["\\]/g, "").slice(0, 120) || "render"
+  return getSignedUrl(
+    client(),
+    new GetObjectCommand({
+      Bucket: BUCKET,
+      Key: key,
+      ResponseContentDisposition: `attachment; filename="${safe}.mp4"`,
+    }),
+    { expiresIn: expiresInSeconds },
+  )
+}
+
 export async function deleteRender(key: string): Promise<void> {
   await client().send(new DeleteObjectCommand({ Bucket: BUCKET, Key: key }))
 }
