@@ -27,7 +27,6 @@ const DESCRIPTION_LIMIT = 5000
 export const SITE_URL = "https://jk2ctf.vercel.app"
 
 export interface DemoMetadata {
-  demoId: string
   /** What the uploader called the video. */
   title: string
   /** Their own words, if they wrote any. */
@@ -106,7 +105,6 @@ export function buildYoutubeDescription(meta: DemoMetadata): string {
     opener + ".",
     own || null,
     facts.join("\n"),
-    `Watch this demo in your browser, with free camera and playback controls:\n${SITE_URL}/demos/${meta.demoId}`,
     `Community demos, stats and match history:\n${SITE_URL}`,
     "#JediKnight2 #JediOutcast #JK2",
   ].filter(Boolean)
