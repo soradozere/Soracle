@@ -1091,19 +1091,22 @@ export function DemoDetail({
               </div>
             )}
           </div>
-          <RatingWidget
-            demoId={demo.id}
-            canRate={canRate}
-            initial={ownRating}
-            avgRating={demo.avgRating}
-            ratingCount={demo.ratingCount}
-          />
+          {/* Column, so the button sits under the rating rather than beside it
+              -- the row this lives in would otherwise lay them out side by
+              side. Right-aligned to follow the rating above it. */}
+          <div className="flex flex-col items-end gap-3">
+            <RatingWidget
+              demoId={demo.id}
+              canRate={canRate}
+              initial={ownRating}
+              avgRating={demo.avgRating}
+              ratingCount={demo.ratingCount}
+            />
 
-          {/* Same gate as trimming and moments: the uploader or an admin.
-              requestRender enforces it again server-side through resolveEditor
-              rather than trusting that this did not render. */}
-          {canEditMoments && (
-            <div className="mt-3">
+            {/* Same gate as trimming and moments: the uploader or an admin.
+                requestRender enforces it again server-side through
+                resolveEditor rather than trusting that this did not render. */}
+            {canEditMoments && (
               <RenderToYoutubeDialog
                 demoId={demo.id}
                 demoTitle={demo.title}
@@ -1112,8 +1115,8 @@ export function DemoDetail({
                 protagonistName={demo.protagonist?.name}
                 getCameraState={readCamera}
               />
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <DemoComments
