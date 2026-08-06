@@ -392,8 +392,20 @@ jobs:
           # Anything the engine printed while capturing was also drawn on
           # screen, because the kill feed needs cl_noprint 0. Surfacing it here
           # is how a warning gets noticed in a log rather than in a video.
-          echo "=== console warnings, which are also in the picture ==="
           LOG=$(find "$ROOT" -name qconsole.log 2>/dev/null | head -1)
+
+          # A seek that stopped short renders the wrong part of the demo, and
+          # every other check here would still pass: the frames are all present,
+          # the chunks are all full length, the video is simply of somewhere
+          # else. Only the engine knows, so ask it.
+          if [ -n "$LOG" ] && grep -q "seekdemo: FAILED" "$LOG"; then
+            grep -h "seekdemo:" "$LOG" | tail -2 >&2
+            echo "the seek did not reach the requested moment -- refusing to stage the wrong footage" >&2
+            exit 1
+          fi
+          grep -h "seekdemo:" "$LOG" 2>/dev/null | tail -1 || true
+
+          echo "=== console warnings, which are also in the picture ==="
           if [ -n "$LOG" ]; then
             grep -ihE "WARNING|ERROR" "$LOG" \
               | grep -viE "mixed glWrapClampMode|R_FindImageFile|could not find" \
