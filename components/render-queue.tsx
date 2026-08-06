@@ -3,9 +3,10 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Check, X, ExternalLink, AlertTriangle } from "lucide-react"
+import { Download, X, ExternalLink, AlertTriangle } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { approveRender, rejectRender } from "@/app/admin/renders/actions"
+import { markPublished, rejectRender } from "@/app/admin/renders/actions"
+import { Input } from "@/components/ui/input"
 
 export interface RenderJob {
   id: string
@@ -33,6 +34,8 @@ export interface RenderJob {
   createdAt: string
   /** Signed and short-lived; only present while a job is awaiting review. */
   previewUrl: string | null
+  /** Same object, signed to save rather than play. */
+  downloadUrl: string | null
 }
 
 const STATUS_LABEL: Record<RenderJob["status"], string> = {
@@ -64,6 +67,7 @@ export function RenderQueue({ jobs, atCap }: { jobs: RenderJob[]; atCap: boolean
   const router = useRouter()
   const [busy, setBusy] = useState<string | null>(null)
   const [errors, setErrors] = useState<Record<string, string>>({})
+  const [urls, setUrls] = useState<Record<string, string>>({})
 
   async function act(id: string, fn: (id: string) => Promise<{ success: boolean; error?: string }>) {
     setBusy(id)
@@ -84,7 +88,8 @@ export function RenderQueue({ jobs, atCap }: { jobs: RenderJob[]; atCap: boolean
         <div className="flex gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
           <p className="text-sm">
-            Today&apos;s upload allowance is used up. Approvals will hold until tomorrow — the renders keep.
+            Six published today. Worth pacing the rest — the renders keep, and a channel that posts six at once
+            tends to get seen less than one that posts steadily.
           </p>
         </div>
       )}
@@ -159,20 +164,46 @@ export function RenderQueue({ jobs, atCap }: { jobs: RenderJob[]; atCap: boolean
           {errors[job.id] && <p className="mt-3 text-sm text-destructive">{errors[job.id]}</p>}
 
           {job.status === "pending_review" && (
-            <div className="mt-3 flex gap-2">
-              <Button size="sm" disabled={busy === job.id || atCap} onClick={() => act(job.id, approveRender)}>
-                <Check className="mr-1.5 h-3.5 w-3.5" />
-                Approve &amp; publish
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={busy === job.id}
-                onClick={() => act(job.id, rejectRender)}
-              >
-                <X className="mr-1.5 h-3.5 w-3.5" />
-                Reject
-              </Button>
+            <div className="mt-3 space-y-3">
+              <div className="flex gap-2">
+                {job.downloadUrl && (
+                  <Button size="sm" asChild>
+                    <a href={job.downloadUrl} download>
+                      <Download className="mr-1.5 h-3.5 w-3.5" />
+                      Download MP4
+                    </a>
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={busy === job.id}
+                  onClick={() => act(job.id, rejectRender)}
+                >
+                  <X className="mr-1.5 h-3.5 w-3.5" />
+                  Reject
+                </Button>
+              </div>
+
+              {/* Closes the loop once it is on YouTube. Without this the row
+                  sits in review forever and the demo page has no link back to
+                  the published video. */}
+              <div className="flex gap-2">
+                <Input
+                  className="h-8 text-sm"
+                  placeholder="Paste the YouTube link once it's up"
+                  value={urls[job.id] ?? ""}
+                  onChange={(e) => setUrls((u) => ({ ...u, [job.id]: e.target.value }))}
+                />
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  disabled={busy === job.id || !(urls[job.id] ?? "").trim()}
+                  onClick={() => act(job.id, (id) => markPublished(id, urls[job.id] ?? ""))}
+                >
+                  Mark published
+                </Button>
+              </div>
             </div>
           )}
         </div>

@@ -3,7 +3,7 @@ import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
-import { signedRenderUrl } from "@/lib/r2-renders"
+import { signedRenderUrl, downloadRenderUrl } from "@/lib/r2-renders"
 import { RenderQueue, type RenderJob } from "@/components/render-queue"
 import { DAILY_PUBLISH_CAP, publishedToday } from "./actions"
 
@@ -85,6 +85,10 @@ export default async function AdminRendersPage() {
       previewUrl:
         r.status === "pending_review" && r.render_r2_key
           ? await signedRenderUrl(r.render_r2_key as string).catch(() => null)
+          : null,
+      downloadUrl:
+        r.status === "pending_review" && r.render_r2_key
+          ? await downloadRenderUrl(r.render_r2_key as string, r.title as string).catch(() => null)
           : null,
     })),
   )
