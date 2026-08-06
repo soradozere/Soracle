@@ -244,11 +244,28 @@ const DATA_CACHE = "jkd-engine-data"
  */
 const EXTRAS_CACHE = "jkd-extras"
 const EXTRAS_VERSION = "20260806"
+
+/*
+ * A subset of what the renderer stages, deliberately.
+ *
+ * z_flag-console-field-scoreboard.pk3 is missing, and has to stay missing until
+ * someone works out why. Its flag shader renders correctly in the native render
+ * build and makes the flag vanish entirely in here -- not untextured, not
+ * mis-coloured, absent. The difference between the two is GL4ES translating to
+ * WebGL, and the shader leans on four things that are candidates for it:
+ * `deformVertexes wave`, `tcGen environment`, a `glow` stage, and a
+ * GL_ZERO/GL_ONE_MINUS_SRC_COLOR first stage. Which one is unknown; narrowing it
+ * costs a repack, an upload and a reload per guess, and the flag is a CTF
+ * viewer's least losable object.
+ *
+ * The rest of that pk3 -- HUD art, console overlay, forcefields -- goes with it,
+ * since pk3s are all-or-nothing. Renders keep the lot, so the two disagree about
+ * the flag until this is chased down.
+ */
 const EXTRA_PK3S = [
   "solar_yavinsky2.pk3",
   "eoi_imperialworker_v2_sounds.pk3",
   "x_kestis_sounds.pk3",
-  "z_flag-console-field-scoreboard.pk3",
   "z_nightmares.pk3",
   "zzz_bones.pk3",
   "zzzTricolor_Sabers_by_Apple.pk3",
