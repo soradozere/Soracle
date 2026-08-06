@@ -22,6 +22,19 @@
  * as written for a crawler. Those are what actually trip spam detection.
  */
 
+/**
+ * YouTube rejects angle brackets in titles and descriptions outright -- the
+ * upload fails before it starts, with no useful message unless you read the
+ * response body.
+ *
+ * Substituted rather than stripped, because they carry meaning in the names
+ * people actually use: "ret > cap > roll > dbs" reads as a sequence, and
+ * deleting the arrows would turn it into a word salad.
+ */
+function stripAngleBrackets(s: string): string {
+  return s.replace(/>/g, "›").replace(/</g, "‹")
+}
+
 const TITLE_LIMIT = 100
 const DESCRIPTION_LIMIT = 5000
 export const SITE_URL = "https://jk2ctf.vercel.app"
@@ -61,7 +74,7 @@ function seasonYear(recordedAt?: string | null): number {
 export function buildYoutubeTitle(meta: DemoMetadata): string {
   const suffix = ` | Jedi Knight II CTF ${seasonYear(meta.recordedAt)}`
   const room = TITLE_LIMIT - suffix.length
-  const base = (meta.title || "JK2 CTF").trim()
+  const base = stripAngleBrackets((meta.title || "JK2 CTF").trim())
   // Truncate the uploader's words, never the suffix -- a title ending in
   // "Jedi Knight II CT" would look broken and lose the game match.
   const trimmed = base.length > room ? base.slice(0, room - 1).trimEnd() + "…" : base
@@ -109,6 +122,6 @@ export function buildYoutubeDescription(meta: DemoMetadata): string {
     "#JediKnight2 #JediOutcast #JK2",
   ].filter(Boolean)
 
-  const out = parts.join("\n\n")
+  const out = stripAngleBrackets(parts.join("\n\n"))
   return out.length > DESCRIPTION_LIMIT ? out.slice(0, DESCRIPTION_LIMIT - 1) + "…" : out
 }

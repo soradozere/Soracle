@@ -30,14 +30,18 @@ export const dynamic = "force-dynamic"
  * when the upload moved to Actions, because a full match is gigabytes and a
  * serverless function cannot stream that within its execution limit.
  *
- * Note what is still absent: nothing can reach `pending_review` from
- * `publishing`, so a stray callback cannot walk an approved video back into the
- * queue, and nothing can reach `published` from `pending_review` -- approval
+ * `publishing` can fall back to `pending_review`, because a failed upload
+ * leaves a perfectly good render that should be retryable -- previously it
+ * landed on `failed`, where approve refuses to touch it and the only way out
+ * was editing the database. Safe because `published` is terminal: a late
+ * callback cannot walk an already-published video back into the queue.
+ *
+ * Still absent: `published` is unreachable from `pending_review`, so approval
  * has to go through Soracle, which is where the daily cap is counted.
  */
 const ALLOWED: Record<string, string[]> = {
   rendering: ["pending_render"],
-  pending_review: ["rendering"],
+  pending_review: ["rendering", "publishing"],
   published: ["publishing"],
   failed: ["pending_render", "rendering", "publishing"],
 }
