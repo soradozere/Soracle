@@ -14,9 +14,12 @@ type CamMode = (typeof CAM_MODES)[number]
 /*
  * Render settings are chosen from clip length, not asked for.
  *
- * Disk stopped being the constraint once chunked capture landed; wall clock is
- * the one that bites. Measured on a runner: llvmpipe renders ~38 frames/sec at
- * 720p, and cost scales with pixel count.
+ * Two limits, and both are real. Measured on a runner: llvmpipe renders ~38
+ * frames/sec at 720p, and cost scales with pixel count, against a six-hour job
+ * limit. Disk binds sooner than it looks -- the intermediate video measured
+ * 9 MB per second of footage at 1440p60, so a runner's ~14GB runs out after
+ * about 26 minutes, well before the clock does. Chunking bounds the *raw*
+ * capture on disk, not the encoded pieces waiting to be joined.
  *
  * 1440p rather than 1080p wherever it fits, because YouTube allocates bitrate
  * by resolution -- a 1440p upload gets a noticeably fatter encode and looks
@@ -24,19 +27,34 @@ type CamMode = (typeof CAM_MODES)[number]
  * YouTube keeps, so the graininess comes from their encoder, not ours, and
  * resolution is the lever that actually moves it.
  *
- * Against GitHub's six-hour job limit that gives, in preference order:
+ * Taking the tighter of the two, in preference order:
  *
- *   1440p60   6.3x realtime   good to ~48 min of footage
- *   1440p30   3.1x realtime   good to ~1.5h
- *   1080p30   1.8x realtime   good to ~2.7h
+ *   1440p60   ~26 min of footage   (disk)
+ *   1440p30   ~52 min              (disk)
+ *   1080p30   ~1.9h                (disk)
  *
- * A long match dropping to 30fps and 1080p beats one that runs out of clock at
- * hour six with nothing to show.
+ * A long match dropping to 30fps and 1080p beats one that dies at hour four
+ * with "no space left on device" and nothing to show.
  */
 const RENDER_FPS_720P = 38.2
 const JOB_LIMIT_MS = 6 * 60 * 60 * 1000
 /** Headroom for the build, asset staging, encode and upload around the render. */
 const SAFETY = 0.8
+
+/**
+ * Free disk on a runner, and what a second of footage costs there.
+ *
+ * 9 MB/s measured at 1440p60 (402MB for 44.8s at crf 16) and taken to scale
+ * with pixels and frame rate, which is how x264 behaves at fixed quality. The
+ * pieces have to survive until the concat at the end, so this is the total, not
+ * a working set -- chunking bounds the raw capture, nothing bounds these.
+ *
+ * The disk figure is deliberately conservative: refusing a render that would
+ * have fitted is recoverable, discovering the limit four hours in is not. The
+ * render workflow prints `df` so it can be replaced with a measurement.
+ */
+const RUNNER_DISK_BYTES = 13 * 1024 * 1024 * 1024
+const BYTES_PER_SECOND_1440P60 = 9_000_000
 
 interface RenderSettings {
   fps: 30 | 60
@@ -51,12 +69,17 @@ const SETTINGS_LADDER: RenderSettings[] = [
 ]
 
 function chooseSettings(durationMs: number): RenderSettings | null {
-  const budget = JOB_LIMIT_MS * SAFETY
+  const seconds = durationMs / 1000
   for (const s of SETTINGS_LADDER) {
     const pixelRatio = (s.width * s.height) / (1280 * 720)
     const throughput = RENDER_FPS_720P / pixelRatio
-    const estimateMs = (durationMs / 1000) * s.fps * (1000 / throughput)
-    if (estimateMs <= budget) return s
+    const estimateMs = seconds * s.fps * (1000 / throughput)
+    if (estimateMs > JOB_LIMIT_MS * SAFETY) continue
+
+    const scale = ((s.width * s.height) / (2560 * 1440)) * (s.fps / 60)
+    if (seconds * BYTES_PER_SECOND_1440P60 * scale > RUNNER_DISK_BYTES * SAFETY) continue
+
+    return s
   }
   return null
 }
@@ -99,14 +122,15 @@ export async function requestRender(demoId: string, params: RenderRequestParams)
     return { success: false, error: "That segment doesn't make sense." }
   }
 
-  // Capture always starts at the demo's beginning, so the cost is driven by
-  // endMs rather than by the length of the segment being kept.
-  const settings = chooseSettings(endMs)
+  // The segment, not how far into the demo it sits. The renderer seeks to the
+  // start rather than playing up to it, so a clip costs the same whether it is
+  // at the beginning of a match or an hour in.
+  const settings = chooseSettings(endMs - startMs)
   if (!settings) {
-    const hours = (endMs / 3600000).toFixed(1)
+    const hours = ((endMs - startMs) / 3600000).toFixed(1)
     return {
       success: false,
-      error: `That's ${hours} hours in. Rendering that far exceeds the six-hour limit on a job even at 30fps, so it would fail partway through rather than finish. Pick a segment nearer the start of the demo.`,
+      error: `That clip is ${hours} hours long. Even at 30fps and 1080p a render that long runs out of time or disk partway through rather than finishing. Pick a shorter segment.`,
     }
   }
 
