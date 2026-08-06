@@ -47,6 +47,22 @@ env:
   R2_PUBLIC: "https://pub-76bff0ef02794a5d95b7e2a8b8660f61.r2.dev"
   SORACLE_URL: "https://jk2ctf.vercel.app"
   RENDER_BUCKET: "jk2renders"
+  # Brightness, applied to the finished video as a gamma curve.
+  #
+  # Renders come out dark and the engine has no working lever for it. Gamma
+  # there is inert: postprocessing gamma needs ARB programs llvmpipe lacks, so
+  # it falls back to hardware gamma, which (a) forces overbrightBits to 0 in
+  # windowed mode -- the stop the picture is missing -- and (b) sends the curve
+  # to the display ramp, while an AVI is read back from the framebuffer, which
+  # never sees one. That leaves r_intensity, a flat multiply that clips at 255,
+  # which is why turning it up washed out the sky before it fixed the shadows.
+  #
+  # A curve here does what was wanted instead: measured against the same frames,
+  # mean luma 72 -> 97 while the high percentile moves 151 -> 173. Lifting the
+  # dark end roughly twice as hard as the bright end is the whole point.
+  #
+  # One number, tune freely. 1.0 disables it.
+  RENDER_GAMMA: "1.3"
   # Bytes of MJPEG per capture chunk, converted to a frame count below.
   #
   # Sized rather than timed, because the engine splits a capture itself the
@@ -481,7 +497,17 @@ jobs:
           # above their target without the ~35 Mbps that crf 18 produced -- a
           # bitrate that buys nothing visible downstream and would make a long
           # match unwieldy to store and upload.
-          ffmpeg -nostdin -y -i joined.mp4 -t "$DUR" \
+          #
+          # Brightness rides along with this pass rather than getting one of its
+          # own: the grade is a filter, the encode was happening anyway, and a
+          # separate pass would mean encoding the whole thing twice.
+          GRADE=""
+          if [ "$RENDER_GAMMA" != "1.0" ]; then
+            GRADE="-vf eq=gamma=$RENDER_GAMMA"
+          fi
+          echo "grading with: ${GRADE:-none}"
+          # shellcheck disable=SC2086
+          ffmpeg -nostdin -y -i joined.mp4 -t "$DUR" $GRADE \
             -c:v libx264 -pix_fmt yuv420p -preset medium -crf 20 \
             -c:a aac -b:a 192k -movflags +faststart render.mp4 2>&1 | tail -3
 
