@@ -916,11 +916,38 @@ export class JkdEngine {
  * so a case-insensitive match would eat the wrong number of characters.
  */
 function stripColourCodes(s: string): string {
-  return s
-    .replace(/\^Y[0-9a-fA-F]{8}/g, "")
-    .replace(/\^X[0-9a-fA-F]{6}/g, "")
-    .replace(/\^x[0-9a-fA-F]{3}/g, "")
-    .replace(/\^./g, "")
+  /*
+   * Scanned rather than regex-replaced, because a caret is not always a code.
+   *
+   * "^^" is JK2's escape for a literal caret, and the previous version's
+   * catch-all /\^./ ran last and swallowed it along with the character after
+   * it -- a real player called "^^x8afkaese" came out as "aese", quietly one
+   * letter short everywhere their name appeared on the site.
+   *
+   * Hex widths are checked longest first and case matters: ^x takes 3 digits,
+   * ^X takes 6, ^Y takes 8, so a case-insensitive match eats the wrong number.
+   */
+  let out = ""
+  let i = 0
+  while (i < s.length) {
+    if (s[i] !== "^" || i + 1 >= s.length) {
+      out += s[i++]
+      continue
+    }
+    const next = s[i + 1]
+    if (next === "^") {
+      out += "^" // an escaped caret is a caret
+      i += 2
+      continue
+    }
+    const hex = (mark: string, digits: number) =>
+      next === mark && new RegExp(`^[0-9a-fA-F]{${digits}}$`).test(s.substr(i + 2, digits))
+    if (hex("Y", 8)) { i += 10; continue }
+    if (hex("X", 6)) { i += 8; continue }
+    if (hex("x", 3)) { i += 5; continue }
+    i += 2 // an ordinary ^n colour code
+  }
+  return out
 }
 
 function playerNameFromConfigString(info: string, clientNum: number): string {
