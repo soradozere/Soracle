@@ -23,13 +23,22 @@ export const dynamic = "force-dynamic"
  * bug that only appears when two runs exist for one row, which is exactly when
  * it is hardest to reason about.
  *
- * Publishing states are absent on purpose: publishing is Soracle's job, not the
- * runner's, so a runner can never move a row to published.
+ * `published` is reachable only from `publishing`, and only a run that Soracle
+ * dispatched can be in that state. This was previously excluded on the grounds
+ * that publishing belonged to Soracle rather than the runner -- that changed
+ * when the upload moved to Actions, because a full match is gigabytes and a
+ * serverless function cannot stream that within its execution limit.
+ *
+ * Note what is still absent: nothing can reach `pending_review` from
+ * `publishing`, so a stray callback cannot walk an approved video back into the
+ * queue, and nothing can reach `published` from `pending_review` -- approval
+ * has to go through Soracle, which is where the daily cap is counted.
  */
 const ALLOWED: Record<string, string[]> = {
   rendering: ["pending_render"],
   pending_review: ["rendering"],
-  failed: ["pending_render", "rendering"],
+  published: ["publishing"],
+  failed: ["pending_render", "rendering", "publishing"],
 }
 
 interface CallbackBody {
@@ -38,6 +47,7 @@ interface CallbackBody {
   error?: string
   render_r2_key?: string
   github_run_id?: number | string
+  youtube_video_id?: string
 }
 
 export async function POST(request: Request) {
@@ -85,6 +95,9 @@ export async function POST(request: Request) {
   const update: Record<string, unknown> = { status }
   if (body.error !== undefined) update.error = String(body.error).slice(0, 2000)
   if (body.render_r2_key !== undefined) update.render_r2_key = String(body.render_r2_key)
+  if (body.youtube_video_id !== undefined) {
+    update.youtube_video_id = String(body.youtube_video_id).slice(0, 32)
+  }
   if (body.github_run_id !== undefined) {
     // bigint: Actions run ids are already past the int4 ceiling.
     const runId = Number(body.github_run_id)
