@@ -11,22 +11,40 @@ type ActionResult = { success: true; id: string } | { success: false; error: str
 const CAM_MODES = ["follow", "chase", "free"] as const
 type CamMode = (typeof CAM_MODES)[number]
 
-/**
- * Lengths that chunked capture does not exist for yet.
+/*
+ * Render settings are chosen from clip length, not asked for.
  *
- * There is no policy ceiling -- clips run from ~30s highlights to full ~2h
- * matches by design. This is a *capability* limit: the engine writes MJPEG at
- * roughly 4.3 MB/s, so an hour at 60fps is ~31GB against a runner's ~14GB of
- * free disk, and the job dies partway through with a disk error that looks
- * like anything but the real cause.
+ * Disk is no longer the constraint -- chunked capture keeps peak usage flat
+ * however long the demo runs. Wall clock is. Measured on a runner: llvmpipe
+ * renders ~38 frames/sec at 720p, and 1080p is 2.25x the pixels so ~17
+ * frames/sec. Against GitHub's hard six-hour job limit that gives:
  *
- * Chunked capture (stopvideo/video per segment, transcode and delete each
- * chunk, concat at the end) removes this entirely and is step 5. Until then,
- * refuse the job up front with a message that says why, rather than letting
- * someone queue a two-hour render that fails forty minutes in.
+ *   1080p60   3.5x realtime   good to ~1.7h of footage
+ *   1080p30   1.8x realtime   good to ~3.4h
+ *
+ * So highlights get the full 1080p60 -- a 60s clip renders in about 3.5
+ * minutes -- and anything long enough to run out of clock drops to 30fps
+ * rather than failing at hour six with nothing to show. YouTube would rather
+ * have a complete 30fps match than a truncated 60fps one.
  */
-const CHUNKING_LANDED = false
-const MAX_UNCHUNKED_MS = 10 * 60 * 1000
+const RENDER_FPS_720P = 38.2
+const PIXEL_RATIO_1080P = 2.25
+const JOB_LIMIT_MS = 6 * 60 * 60 * 1000
+/** Leave room for the build, asset staging, encode and upload around the render. */
+const SAFETY = 0.8
+
+function chooseSettings(durationMs: number): { fps: 30 | 60; width: number; height: number } | null {
+  const throughput1080 = RENDER_FPS_720P / PIXEL_RATIO_1080P
+  const budget = JOB_LIMIT_MS * SAFETY
+  for (const fps of [60, 30] as const) {
+    const estimateMs = (durationMs / 1000) * fps * (1000 / throughput1080)
+    if (estimateMs <= budget) return { fps, width: 1920, height: 1080 }
+  }
+  return null
+}
+
+/** Matches the web viewer's FIXED_FOV so a render looks like the site does. */
+const RENDER_FOV = 120
 
 export interface RenderRequestParams {
   title: string
@@ -37,7 +55,6 @@ export interface RenderRequestParams {
   followClientId?: number | null
   startMs: number
   endMs: number
-  fps?: 30 | 60
 }
 
 /**
@@ -64,11 +81,14 @@ export async function requestRender(demoId: string, params: RenderRequestParams)
     return { success: false, error: "That segment doesn't make sense." }
   }
 
-  if (!CHUNKING_LANDED && endMs - startMs > MAX_UNCHUNKED_MS) {
-    const minutes = Math.round((endMs - startMs) / 60000)
+  // Capture always starts at the demo's beginning, so the cost is driven by
+  // endMs rather than by the length of the segment being kept.
+  const settings = chooseSettings(endMs)
+  if (!settings) {
+    const hours = (endMs / 3600000).toFixed(1)
     return {
       success: false,
-      error: `That segment is ${minutes} minutes. Renders longer than 10 minutes need chunked capture, which isn't built yet -- it would run out of disk partway through. Trim it down for now.`,
+      error: `That's ${hours} hours in. Rendering that far exceeds the six-hour limit on a job even at 30fps, so it would fail partway through rather than finish. Pick a segment nearer the start of the demo.`,
     }
   }
 
@@ -124,7 +144,7 @@ export async function requestRender(demoId: string, params: RenderRequestParams)
       follow_client_id: followClientId,
       start_ms: startMs,
       end_ms: endMs,
-      fps: params.fps ?? 60,
+      fps: settings.fps,
     })
     .select("id")
     .single()
@@ -146,7 +166,10 @@ export async function requestRender(demoId: string, params: RenderRequestParams)
     demo_key: demo.file_path as string,
     start_ms: String(startMs),
     end_ms: String(endMs),
-    fps: String(params.fps ?? 60),
+    fps: String(settings.fps),
+    width: String(settings.width),
+    height: String(settings.height),
+    fov: String(RENDER_FOV),
     cam_mode: params.camMode,
     follow_client_id: followClientId === null ? "" : String(followClientId),
   })
