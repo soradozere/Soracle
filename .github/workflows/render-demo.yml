@@ -1,0 +1,349 @@
+name: Render Demo
+
+# Renders one queued demo segment to mp4 and stages it in R2 for review.
+#
+# Dispatched by Soracle's requestRender action, never by hand and never on
+# push: a run costs several minutes of compute and writes to the queue row it
+# was given. workflow_dispatch only.
+#
+# Every exit path reports back. A job that dies without calling back leaves its
+# row at 'rendering' forever, which looks identical to a job that is still
+# working -- so the failure step below is not optional politeness, it is the
+# only thing that makes a dead job visible.
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "youtube_render_queue row id"
+        required: true
+      demo_key:
+        description: "R2 object key of the .dm_15"
+        required: true
+      start_ms:
+        required: true
+      end_ms:
+        required: true
+      fps:
+        default: "60"
+      cam_mode:
+        default: "follow"
+      follow_client_id:
+        default: ""
+
+env:
+  ASSET_VERSION: "20260805"
+  R2_PUBLIC: "https://pub-76bff0ef02794a5d95b7e2a8b8660f61.r2.dev"
+  SORACLE_URL: "https://jk2ctf.vercel.app"
+  RENDER_BUCKET: "jk2renders"
+  # Seconds of video per capture chunk. The engine writes MJPEG at roughly
+  # 4.3 MB/s per 30fps, so 30s at 60fps is ~260MB -- small enough that peak
+  # disk stays flat however long the demo is.
+  CHUNK_SECONDS: "30"
+
+jobs:
+  render:
+    name: Render and stage
+    runs-on: ubuntu-22.04
+    steps:
+      # Nothing below interpolates ${{ }} into a shell script. Inputs reach the
+      # scripts through env only, and are referenced as "$VAR", because a title
+      # or description is attacker-influenced text and ${{ }} substitutes it
+      # into the command *before* the shell parses it -- which is a shell
+      # injection with access to this job's secrets.
+      - name: Report rendering
+        env:
+          SECRET: ${{ secrets.RENDER_CALLBACK_SECRET }}
+          JOB_ID: ${{ inputs.job_id }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "$SORACLE_URL/api/render/callback" \
+            -H "Authorization: Bearer $SECRET" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg j "$JOB_ID" --argjson r "$RUN_ID" \
+                  '{job_id:$j, status:"rendering", github_run_id:$r}')" \
+            -o /dev/null
+
+      - uses: actions/checkout@v4
+        with:
+          repository: soradozere/jk2mv
+          ref: master
+          submodules: true
+          fetch-depth: 0
+          path: jk2mv
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential cmake \
+            libsdl2-dev libgl1-mesa-dev libopenal-dev libjpeg-dev libpng-dev libminizip-dev \
+            xvfb libgl1-mesa-dri ffmpeg
+
+      - name: Build engine
+        run: |
+          cmake -S jk2mv -B jk2mv/build/actions \
+            -DCMAKE_BUILD_TYPE=Release -DUseInternalLibs=OFF -DBuildPortableVersion=ON
+          cmake --build jk2mv/build/actions -j"$(nproc)"
+
+      - name: Resolve game root
+        id: root
+        run: echo "ROOT=$GITHUB_WORKSPACE/jk2mv/build/actions/out/Release" >> "$GITHUB_OUTPUT"
+
+      - name: Restore game assets from cache
+        id: assetcache
+        uses: actions/cache@v4
+        with:
+          path: assets/base-min.tar
+          key: jk2-assets-${{ env.ASSET_VERSION }}
+
+      - name: Download game assets
+        if: steps.assetcache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p assets
+          curl -fsSL -o assets/base-min.tar "$R2_PUBLIC/render-assets/$ASSET_VERSION/base-min.tar"
+
+      - name: Stage assets and demo
+        env:
+          ROOT: ${{ steps.root.outputs.ROOT }}
+          DEMO_KEY: ${{ inputs.demo_key }}
+        run: |
+          mkdir -p "$ROOT/base/demos"
+          tar -xf assets/base-min.tar -C "$ROOT/base"
+          # Demos are publicly readable, so this needs no credentials. Only the
+          # upload at the end does.
+          curl -fsSL -o "$ROOT/base/demos/job.dm_15" "$R2_PUBLIC/demos/$DEMO_KEY"
+          ls -la "$ROOT/base/demos/job.dm_15"
+
+      - name: Write render config
+        id: cfg
+        env:
+          ROOT: ${{ steps.root.outputs.ROOT }}
+          START_MS: ${{ inputs.start_ms }}
+          END_MS: ${{ inputs.end_ms }}
+          FPS: ${{ inputs.fps }}
+          CAM_MODE: ${{ inputs.cam_mode }}
+          FOLLOW: ${{ inputs.follow_client_id }}
+        run: |
+          set -u
+          FPS=${FPS:-60}
+
+          # Camera, from cvars alone. Proven on a runner rather than assumed:
+          # cg_demoFollow retargets the camera, cg_thirdPersonAngle swings it,
+          # cg_demoCam switches to free. These are the same cvars the browser
+          # viewer drives through its JKD_* exports, so the two entry points
+          # cannot drift apart.
+          case "$CAM_MODE" in
+            free)   DEMOCAM=1; THIRD=0 ;;
+            chase)  DEMOCAM=0; THIRD=1 ;;
+            *)      DEMOCAM=0; THIRD=1 ;;
+          esac
+          FOLLOW_VAL="${FOLLOW:--1}"
+          [ -z "$FOLLOW" ] && FOLLOW_VAL=-1
+
+          # The command buffer ticks twice per rendered frame, measured -- so a
+          # chunk of N frames needs 2N waits.
+          CHUNK_FRAMES=$(( FPS * CHUNK_SECONDS ))
+          CHUNK_WAITS=$(( CHUNK_FRAMES * 2 ))
+
+          # How many chunks to ask for.
+          #
+          # Capture starts at the demo's beginning and the segment is cut out
+          # with ffmpeg afterwards, so this covers end_ms, not the segment
+          # length. That is wasteful when someone wants thirty seconds from the
+          # middle of a long match -- the fix is either engine-side fast-forward
+          # or trimming the .dm_15 before dispatch, and neither is built yet.
+          # Correct but slow beats fast but wrong for a first version.
+          TOTAL_FRAMES=$(( END_MS * FPS / 1000 ))
+          CHUNKS=$(( (TOTAL_FRAMES + CHUNK_FRAMES - 1) / CHUNK_FRAMES ))
+          [ "$CHUNKS" -lt 1 ] && CHUNKS=1
+          echo "fps=$FPS chunks=$CHUNKS frames=$TOTAL_FRAMES cam=$CAM_MODE follow=$FOLLOW_VAL"
+          echo "CHUNKS=$CHUNKS" >> "$GITHUB_OUTPUT"
+
+          CFG="$ROOT/base/render.cfg"
+          {
+            echo "set com_hunkMegs 256"
+            echo "set r_mode -1"
+            echo "set r_customwidth 1280"
+            echo "set r_customheight 720"
+            echo "set r_fullscreen 0"
+            echo "set r_swapInterval 0"
+            # Audio capture only works off the base DMA mixer; under OpenAL
+            # cl_avi.cpp disables it and the render comes out silent.
+            echo "set s_useOpenAL 0"
+            # Below 1: the gate clipped at max_volume 0.0 dB.
+            echo "set s_volume 0.8"
+            echo "set cl_aviFrameRate $FPS"
+            echo "set cl_aviMotionJpeg 1"
+            echo "set cl_aviMotionJpegQuality 90"
+            echo "set cg_draw2D 0"
+            echo "set con_notifytime 0"
+            echo "set cl_noprint 1"
+            echo ""
+            echo "demo job"
+            # Generous: the follow target has to appear in a snapshot before
+            # the camera can lock to it, or it silently renders the recorded
+            # view instead.
+            echo "wait 400"
+            echo "set cg_demoCam $DEMOCAM"
+            echo "set cg_demoFollow $FOLLOW_VAL"
+            echo "set cg_thirdPerson $THIRD"
+            echo "set cg_thirdPersonRange 80"
+            echo "set cg_thirdPersonAngle 0"
+            echo "set cg_cameraOrbit 0"
+            echo "wait 30"
+            # Zero-padded so lexical order is chronological order -- part10
+            # must not sort before part2, or chunks concat out of sequence.
+            for i in $(seq 0 $(( CHUNKS - 1 ))); do
+              printf 'video part%03d\n' "$i"
+              echo "wait $CHUNK_WAITS"
+              echo "stopvideo"
+            done
+            echo "quit"
+          } > "$CFG"
+          head -30 "$CFG"
+
+      - name: Render
+        timeout-minutes: 300
+        env:
+          ROOT: ${{ steps.root.outputs.ROOT }}
+          LIBGL_ALWAYS_SOFTWARE: "1"
+          SDL_AUDIODRIVER: "dummy"
+        run: |
+          set -u
+          VID="$ROOT/base/videos"
+          mkdir -p "$VID" chunks
+
+          # Transcode finished chunks while the engine is still writing.
+          #
+          # Waiting until the end would leave every AVI on disk at once, which
+          # is the whole problem chunking exists to solve -- 62GB for a 2h
+          # render at 60fps against a runner's ~14GB. This converts each chunk
+          # to mp4 and deletes the AVI as soon as the engine has moved past it,
+          # so peak disk stays at roughly one chunk.
+          #
+          # "Moved past it" means a newer AVI exists, hence the head -n -1
+          # below: the newest file is the one still being written to.
+          transcode () {
+            avi="$1"
+            out="chunks/$(basename "$avi" .avi).mp4"
+            [ -f "$out" ] && return 0
+            ffmpeg -nostdin -y -i "$avi" \
+              -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 21 \
+              -c:a aac -b:a 128k "$out" >/dev/null 2>&1 || return 1
+            # The engine writes a sidecar index beside each capture; glob it
+            # rather than guessing the exact suffix.
+            rm -f "$avi" "${avi%.avi}"*.index "$avi".index 2>/dev/null || true
+            echo "  chunked $(basename "$out")"
+          }
+
+          watcher () {
+            while [ ! -f .render-done ]; do
+              for avi in $(ls -1 "$VID"/part*.avi 2>/dev/null | sort | head -n -1); do
+                transcode "$avi" || true
+              done
+              sleep 3
+            done
+          }
+          watcher &
+          WATCHER=$!
+
+          START=$(date +%s)
+          xvfb-run --auto-servernum --server-args="-screen 0 1280x720x24" \
+            "$ROOT/jk2mvmp" \
+            +set fs_basepath "$ROOT" +set fs_homepath "$ROOT" \
+            +set logfile 2 \
+            +exec render.cfg 2>&1 | tail -40 || true
+          echo "=== engine finished in $(( $(date +%s) - START ))s ==="
+
+          touch .render-done
+          wait "$WATCHER" 2>/dev/null || true
+
+          # Whatever the watcher left, including the final chunk it was told
+          # not to touch.
+          for avi in $(ls -1 "$VID"/part*.avi 2>/dev/null | sort); do
+            transcode "$avi" || echo "  FAILED to transcode $avi"
+          done
+
+          echo "=== chunks ==="
+          ls -la chunks/ || true
+          if [ -z "$(ls -A chunks 2>/dev/null)" ]; then
+            echo "no chunks were produced -- the engine wrote nothing" >&2
+            exit 1
+          fi
+
+      - name: Concatenate and cut the segment
+        id: out
+        env:
+          START_MS: ${{ inputs.start_ms }}
+          END_MS: ${{ inputs.end_ms }}
+        run: |
+          set -u
+          : > concat.txt
+          for f in $(ls -1 chunks/part*.mp4 | sort); do
+            printf "file '%s'\n" "$PWD/$f" >> concat.txt
+          done
+          cat concat.txt
+
+          # Stream copy: every chunk was encoded with identical settings, so
+          # there is nothing to re-encode and nothing to lose.
+          ffmpeg -nostdin -y -f concat -safe 0 -i concat.txt -c copy joined.mp4 2>&1 | tail -3
+
+          SS=$(awk -v v="$START_MS" 'BEGIN{printf "%.3f", v/1000}')
+          TO=$(awk -v v="$END_MS" 'BEGIN{printf "%.3f", v/1000}')
+          # Re-encode rather than copy: a stream copy can only cut on a
+          # keyframe, which would drift the segment by up to a couple of
+          # seconds from what the requester actually chose.
+          ffmpeg -nostdin -y -ss "$SS" -to "$TO" -i joined.mp4 \
+            -c:v libx264 -pix_fmt yuv420p -preset medium -crf 21 \
+            -c:a aac -b:a 128k -movflags +faststart render.mp4 2>&1 | tail -3
+
+          ls -la render.mp4
+          ffprobe -v error -show_entries format=duration,size -of default=noprint_wrappers=1 render.mp4
+          echo "=== audio should not be silent ==="
+          ffmpeg -nostdin -i render.mp4 -af volumedetect -f null /dev/null 2>&1 | grep mean_volume || true
+
+      - name: Upload to R2
+        id: upload
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_RENDERS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_RENDERS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+          R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+          JOB_ID: ${{ inputs.job_id }}
+        run: |
+          set -u
+          KEY="$JOB_ID.mp4"
+          aws s3 cp render.mp4 "s3://$RENDER_BUCKET/$KEY" \
+            --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com" \
+            --no-progress
+          echo "KEY=$KEY" >> "$GITHUB_OUTPUT"
+
+      - name: Report ready for review
+        env:
+          SECRET: ${{ secrets.RENDER_CALLBACK_SECRET }}
+          JOB_ID: ${{ inputs.job_id }}
+          KEY: ${{ steps.upload.outputs.KEY }}
+        run: |
+          curl -fsS -X POST "$SORACLE_URL/api/render/callback" \
+            -H "Authorization: Bearer $SECRET" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg j "$JOB_ID" --arg k "$KEY" \
+                  '{job_id:$j, status:"pending_review", render_r2_key:$k}')" \
+            -o /dev/null
+
+      # Catches every failure above, including the timeout and a cancelled run.
+      # Without this the row sits at 'rendering' indefinitely and the only way
+      # to find out is to go looking in Actions.
+      - name: Report failure
+        if: failure() || cancelled()
+        env:
+          SECRET: ${{ secrets.RENDER_CALLBACK_SECRET }}
+          JOB_ID: ${{ inputs.job_id }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          curl -fsS -X POST "$SORACLE_URL/api/render/callback" \
+            -H "Authorization: Bearer $SECRET" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc --arg j "$JOB_ID" --arg e "The render job failed or was cancelled. Logs: $RUN_URL" \
+                  '{job_id:$j, status:"failed", error:$e}')" \
+            -o /dev/null || true
