@@ -95,7 +95,9 @@ export function HomeActivePlayers({ players }: { players: ActivePlayerRow[] }) {
   return (
     <div className="home-active-strip">
       {players.map((row) => (
-        <Link key={row.id} href={`/player/${playerSlug(row.name)}`} className="home-active-card">
+        // prefetch={false}: /player/[slug] renders per request, and this strip
+        // puts a dozen of them on the homepage -- see players-index.tsx.
+        <Link key={row.id} href={`/player/${playerSlug(row.name)}`} prefetch={false} className="home-active-card">
           <div className="flex items-center gap-3">
             <Avatar row={row} />
             <div className="min-w-0">

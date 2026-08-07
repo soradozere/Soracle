@@ -167,7 +167,16 @@ function OtherDemoRow({ demo }: { demo: DemoListItem }) {
     // Client-side on purpose: JkdEngine.start() re-attaches to the resident
     // engine, so switching demos this way reuses the loaded 120MB of assets
     // and swaps recordings in a couple of seconds instead of a full reboot.
-    <Link href={`/demos/${demo.id}`} className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-muted">
+    //
+    // prefetch={false} for the same reason as the library grid (DemoCard in
+    // demo-library.tsx), and this sidebar compounded it: every demo page lists
+    // a dozen more, so opening one demo prefetched twelve others, each of which
+    // would have done the same again. Client-side navigation is unaffected.
+    <Link
+      href={`/demos/${demo.id}`}
+      prefetch={false}
+      className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-muted"
+    >
       <GametypeBadge gametype={demo.gametype} />
       <div className="min-w-0 flex-1">
         <p className="truncate text-sm font-medium">{demo.title}</p>
@@ -1044,6 +1053,9 @@ export function DemoDetail({
                     <span key={p.id}>
                       <Link
                         href={`/player/${playerSlug(p.name)}`}
+                        // Same reason as the demo links above: /player/[slug]
+                        // is dynamic too, and a demo can tag a dozen people.
+                        prefetch={false}
                         title={isProtagonist ? `${p.name} — protagonist` : undefined}
                         className={cn(
                           "underline-offset-2 hover:underline",
