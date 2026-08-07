@@ -327,6 +327,10 @@ export function DemoViewer({
    */
   const touchPrimary = useTouchPrimary()
   const [tapShowsChrome, setTapShowsChrome] = useState(true)
+  /** Where and when a touch began, so a drag can be told from a tap. */
+  const tapStartRef = useRef<{ x: number; y: number; at: number } | null>(null)
+  /** Bumped whenever a control is touched, to restart the auto-hide timer. */
+  const [chromeBumpAt, setChromeBumpAt] = useState(0)
   /**
    * Phones are told, rather than shown a broken picture.
    *
@@ -1450,6 +1454,27 @@ export function DemoViewer({
   // pointer is locked (no cursor to hover with). Visible while paused, still
   // loading, mid-scrub or finished, so the controls that matter are never
   // hiding. On touch, where there is no hover, the tap state stands in.
+  /*
+   * On touch, the controls get out of the way on their own.
+   *
+   * A mouse has hover to say "I am still here", and the bar uses it. A thumb
+   * has nothing equivalent, so the bar would sit over the picture until it was
+   * deliberately dismissed -- and on a phone in landscape it covers most of
+   * what you came to watch. Sam found the clean view by accident and then had
+   * no way back to it.
+   *
+   * So playback hides it, and a tap brings it back. Only while genuinely
+   * playing: paused, seeking, still loading or ended all mean someone is
+   * looking for a control rather than watching, and those already force the bar
+   * on below.
+   */
+  useEffect(() => {
+    if (!touchOnly || !tapShowsChrome) return
+    if (!ready || paused || seeking || ended) return
+    const timer = setTimeout(() => setTapShowsChrome(false), 3500)
+    return () => clearTimeout(timer)
+  }, [touchOnly, tapShowsChrome, ready, paused, seeking, ended, chromeBumpAt])
+
   const showChrome =
     !unsupported &&
     !confirmNeeded &&
@@ -1461,9 +1486,44 @@ export function DemoViewer({
       ref={containerRef}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
-      // Only on touch: with a mouse this would fight the hover behaviour, and
-      // clicking the picture is how you enter free-fly.
-      onClick={touchOnly ? () => setTapShowsChrome((s) => !s) : undefined}
+      /*
+       * Tap the picture to show or hide the controls -- but only a real tap.
+       *
+       * This was a plain onClick, which fires at the end of any gesture that
+       * began here: a swipe, a scroll that did not take, a drag that started on
+       * the picture and ended somewhere else. So the controls flipped when
+       * nobody asked, and the one deliberate tap arrived looking like all the
+       * accidents. Measuring the gesture instead is what makes it predictable,
+       * and predictable is the whole feature: with no keyboard there is no
+       * other way back to a clean picture, or out of one.
+       *
+       * Still touch only -- with a mouse this fights the hover behaviour, and
+       * clicking the picture is how you enter free fly.
+       */
+      onPointerDown={
+        touchOnly
+          ? (e) => {
+              tapStartRef.current = { x: e.clientX, y: e.clientY, at: Date.now() }
+            }
+          : undefined
+      }
+      onPointerUp={
+        touchOnly
+          ? (e) => {
+              const start = tapStartRef.current
+              tapStartRef.current = null
+              if (!start) return
+              // Generous on distance because a thumb rolls, strict on time
+              // because a long press is a different intention.
+              const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y)
+              if (moved > 14 || Date.now() - start.at > 600) return
+              setTapShowsChrome((s) => !s)
+            }
+          : undefined
+      }
+      // A gesture the browser took over -- a scroll, a system edge swipe -- is
+      // not a tap, and must not be treated as one when it comes back.
+      onPointerCancel={touchOnly ? () => { tapStartRef.current = null } : undefined}
       className={cn(
         "relative h-full w-full overflow-hidden bg-black",
         fullscreen || pseudoFullscreen ? "rounded-none" : "rounded-xl",
@@ -1752,7 +1812,13 @@ export function DemoViewer({
          * phone at all: not the size of the target, which is a separate problem
          * fixed separately, but that touching it dismissed it.
          */
-        onClick={(e) => e.stopPropagation()}
+        onPointerDown={(e) => {
+          e.stopPropagation()
+          // Using a control counts as being here, so the bar should not time
+          // out from under a slider halfway through a drag.
+          setChromeBumpAt(Date.now())
+        }}
+        onPointerUp={(e) => e.stopPropagation()}
         className={cn(
           "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-4 pt-10 transition-opacity duration-300",
           showChrome ? "opacity-100" : "pointer-events-none opacity-0",
