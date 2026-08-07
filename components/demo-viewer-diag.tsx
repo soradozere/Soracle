@@ -27,7 +27,19 @@ import {
  * Deliberately not interactive. A panel that could be tapped would be a panel
  * competing with the tap-to-show-controls gesture underneath it.
  */
-export function DemoViewerDiag({ canvas }: { canvas: HTMLCanvasElement | null }) {
+export function DemoViewerDiag({
+  canvas,
+  engineReady,
+}: {
+  canvas: HTMLCanvasElement | null
+  /**
+   * Whether the engine has finished starting, and therefore already holds the
+   * canvas's one GL context. Nothing here may touch that canvas before this is
+   * true -- see readWebglInfo, where getting this wrong broke the engine and
+   * cost two device runs.
+   */
+  engineReady: boolean
+}) {
   const [fps, setFps] = useState<number | null>(null)
   const [heap, setHeap] = useState<{ now: number; peak: number } | null>(null)
   const [size, setSize] = useState<{ backing: string; css: string } | null>(null)
@@ -90,20 +102,19 @@ export function DemoViewerDiag({ canvas }: { canvas: HTMLCanvasElement | null })
   }, [canvas])
 
   /*
-   * Asked for repeatedly until it answers. The engine creates its GL context
-   * partway through boot, so the first look almost always finds nothing, and a
-   * one-shot read on mount would leave this blank for the whole session.
+   * Strictly after the engine is up, because asking earlier does not observe
+   * the canvas -- it takes it. getContext creates a context where none exists,
+   * a canvas holds only one, and the engine then cannot make its own. This
+   * polled from the moment the canvas appeared and silently killed the engine
+   * on iOS; see readWebglInfo for the full account.
+   *
+   * A single read now, not a poll: by the time the engine is ready the context
+   * exists, so there is nothing to wait for.
    */
   useEffect(() => {
-    if (!canvas || gl) return
-    const attempt = () => {
-      const info = readWebglInfo(canvas)
-      if (info) setGl(info)
-    }
-    attempt()
-    const timer = setInterval(attempt, 1000)
-    return () => clearInterval(timer)
-  }, [canvas, gl])
+    if (!canvas || !engineReady || gl) return
+    setGl(readWebglInfo(canvas))
+  }, [canvas, engineReady, gl])
 
   return (
     <div
@@ -118,9 +129,12 @@ export function DemoViewerDiag({ canvas }: { canvas: HTMLCanvasElement | null })
       <Row label="dpr" value={String(typeof window === "undefined" ? "?" : window.devicePixelRatio)} />
       <Row label="canvas" value={size ? size.backing : "…"} />
       <Row label="css" value={size ? size.css : "…"} />
-      <Row label="gl" value={gl ? gl.version : "…"} />
-      <Row label="gpu" value={gl ? gl.renderer : "…"} />
-      <Row label="maxtex" value={gl ? String(gl.maxTextureSize) : "…"} />
+      {/* Blank until the engine is up, and that is load-bearing rather than
+          cosmetic: reading these early would create the context the engine
+          needs. "engine has none" is therefore a real, meaningful reading. */}
+      <Row label="gl" value={gl ? gl.version : engineReady ? "engine has none" : "waiting for engine"} />
+      <Row label="gpu" value={gl ? gl.renderer : "—"} />
+      <Row label="maxtex" value={gl ? String(gl.maxTextureSize) : "—"} />
 
       {/* What the device grants when asked directly, independent of the engine.
           The point of comparison when the engine says it could not get a

@@ -369,10 +369,23 @@ export interface WebglInfo {
 /**
  * What the engine is actually drawing with.
  *
- * getContext returns the context the canvas already has rather than making a
- * second one, and returns null when asked for a type that does not match -- so
- * asking in order is a safe way to find out which the engine took, without
- * disturbing it.
+ * MUST NOT be called before the engine has its context. getContext returns an
+ * existing context of the requested type -- but where there is none, it
+ * *creates* one, and a canvas can only ever hold one kind. An earlier version
+ * of this polled the engine's canvas from the moment it appeared, which is some
+ * two minutes before the engine gets there behind a 141MB download, so the
+ * canvas was already holding a WebGL2 context by the time SDL asked for its
+ * own. SDL then failed with EGL_BAD_MATCH and the engine died in GLimp_Init
+ * with "could not load OpenGL subsystem".
+ *
+ * That looked exactly like an iOS capability limit and was investigated as one,
+ * twice. It was the diagnostic breaking the thing it was measuring -- the giveaway
+ * being an overlay reporting a healthy WebGL 2.0 context on the very canvas the
+ * engine said it could not get a context for.
+ *
+ * Once the engine holds its context this is harmless: the mismatched types
+ * return null and the matching one returns what is already there. Hence the
+ * caller gates on ready, and there is no safe way to relax that.
  */
 export function readWebglInfo(canvas: HTMLCanvasElement): WebglInfo | null {
   const gl =

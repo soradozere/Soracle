@@ -580,32 +580,23 @@ export function DemoViewer({
     // Read here rather than in a state initialiser: this only exists in the
     // browser, and the engine needs it before its first frame.
     /*
-     * A phone renders at CSS pixels, whatever the stored preference says.
+     * Read here rather than in a state initialiser: this only exists in the
+     * browser, and the engine needs it before its first frame.
      *
-     * r_highdpi multiplies the engine's framebuffer by devicePixelRatio, and
-     * the first iPhone this ran on reports 3 -- nine times the pixels of the
-     * element being drawn into. That device died in GLimp_Init with "could not
-     * load OpenGL subsystem", while its heap sat at exactly the 128MB it
-     * started with and the page held 60fps, so it was never short of memory: it
-     * could not get a context of the size being asked for.
+     * This briefly forced r_highdpi off on touch, on the theory that an iPhone
+     * reporting devicePixelRatio 3 was asking for a drawing buffer too large to
+     * grant. The device disproved it: it offers 4096x4096 with depth and
+     * stencil, against the 1512x852 the engine actually wanted. The real cause
+     * was the diagnostics overlay taking the canvas's context (see
+     * readWebglInfo), so the cap was reverted rather than left in resting on a
+     * dead argument -- and so the next device run changes one thing, not two.
      *
-     * Worth knowing that desktop fails the same call and recovers. The engine's
-     * console shows SDL_GL_CreateContext failing with EGL_BAD_MATCH, then "no
-     * display modes could be found", then r_mode -2 falling back to r_mode 3 --
-     * and only then succeeding. The mode-setting path is fragile under
-     * Emscripten everywhere; multiplying the request by nine is what pushes it
-     * past recovering.
-     *
-     * Forced rather than defaulted, because the preference is persisted and a
-     * phone that had once been set to high detail would carry the failure
-     * across visits with no way to see why. Untouched on desktop, which keeps
-     * its full pixel density.
-     *
-     * This is the page-side half of the brief's "cap effective devicePixelRatio
-     * at 1" -- no engine rebuild, no new R2 prefix. Whether it is sufficient is
-     * exactly what the next device run answers.
+     * Capping it may still be worth doing on its own merits, since a phone
+     * rendering nine times the pixels of the element it draws into is nine
+     * times the fill rate. That is a frame-rate question, and there is no
+     * frame-rate measurement from a phone yet to answer it with.
      */
-    const detail = touchPrimary ? false : readHighDetail()
+    const detail = readHighDetail()
     setHighDetail(detail)
     setGamma(readGamma())
 
@@ -1475,7 +1466,7 @@ export function DemoViewer({
       {/* Mounted only on request, and only once there is a canvas to measure.
           Reading the GL context or the backing-store size before the engine has
           made one answers nothing. */}
-      {diag && <DemoViewerDiag canvas={canvasEl} />}
+      {diag && <DemoViewerDiag canvas={canvasEl} engineReady={ready} />}
 
       {/* Match clock. Always up, not tied to the auto-hiding chrome: on a full
           match this is what tells you whether you're watching the first minute
