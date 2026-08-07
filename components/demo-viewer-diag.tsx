@@ -116,13 +116,52 @@ export function DemoViewerDiag({
     setGl(readWebglInfo(canvas))
   }, [canvas, engineReady, gl])
 
+  /*
+   * Folded away by default on a phone, because the panel is most of the
+   * picture there. On a 370pt-wide viewer the full readout covers the thing it
+   * is reporting on, which makes the two questions left to answer on a device
+   * -- does anything render black, and what happens after two minutes --
+   * impossible to see while it is open.
+   *
+   * Collapsed still shows the two figures worth watching continuously, so the
+   * common case needs no interaction at all.
+   */
+  const [open, setOpen] = useState(() => {
+    if (typeof window === "undefined") return true
+    return !window.matchMedia("(hover: none)").matches
+  })
+
+  if (!open) {
+    return (
+      <button
+        onClick={(e) => {
+          // The viewer toggles its control bar on any tap; without this the
+          // same tap would do both.
+          e.stopPropagation()
+          setOpen(true)
+        }}
+        className="absolute right-2 top-2 z-50 rounded-full bg-black/80 px-2.5 py-1 font-mono text-[10px] text-white/85 backdrop-blur-sm"
+      >
+        <span className="text-cyan-300/80">diag</span> {heap ? `${heap.now}MB` : "—"} ·{" "}
+        {fps === null ? "—" : `${fps}fps`}
+      </button>
+    )
+  }
+
   return (
     <div
-      // Above the viewer chrome, below nothing. pointer-events-none so every
-      // gesture underneath still reaches the picture.
-      className="pointer-events-none absolute right-2 top-2 z-50 max-w-[min(19rem,60vw)] rounded-lg bg-black/80 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-white/85 backdrop-blur-sm"
+      // Tappable only on its own footprint, so everything around it still
+      // reaches the picture underneath.
+      onClick={(e) => {
+        e.stopPropagation()
+        setOpen(false)
+      }}
+      className="absolute right-2 top-2 z-50 max-w-[min(19rem,60vw)] rounded-lg bg-black/80 px-2.5 py-2 font-mono text-[10px] leading-relaxed text-white/85 backdrop-blur-sm"
     >
-      <div className="mb-1 text-[9px] uppercase tracking-[0.16em] text-cyan-300/80">diagnostics</div>
+      <div className="mb-1 flex items-center justify-between gap-3 text-[9px] uppercase tracking-[0.16em] text-cyan-300/80">
+        diagnostics
+        <span className="text-white/35">tap to hide</span>
+      </div>
 
       <Row label="heap" value={heap ? `${heap.now} MB  (peak ${heap.peak})` : "unavailable"} />
       <Row label="fps" value={fps === null ? "…" : String(fps)} />
