@@ -532,3 +532,78 @@ export async function computePlayersDirectory(): Promise<PlayerRow[]> {
 
   return rows.sort((a, b) => b.score - a.score || a.name.localeCompare(b.name))
 }
+
+export interface HomeMatch {
+  id: string
+  red_team: string[] | null
+  blue_team: string[] | null
+  red_score: number
+  blue_score: number
+  created_at: string
+}
+
+export interface HomeSummary {
+  /** Newest first, and only matches with both teams -- what the feed counts. */
+  matches: HomeMatch[]
+  killsThisMonth: number
+  /** Keyed by player *name*, the way red_team/blue_team store them. */
+  monthlyPlayerStats: Record<string, { wins: number; losses: number; draws: number }>
+}
+
+/**
+ * The homepage's three aggregates, off the history rows already in cache.
+ *
+ * These used to be three separate queries against `matches` and `match_stats`
+ * (getMatches / getMatchStatsByMonth / getMonthlyPlayerStats in
+ * app/admin/actions.ts), which re-read tables fetchHistoryRows had already
+ * fetched for the ledger on the very same render -- and read them through the
+ * cookie-carrying client, which is what kept the homepage rendering per request
+ * no matter what its `revalidate` said. Deriving them here removes the round
+ * trips outright rather than merely making them cacheable, and the page inherits
+ * HISTORY_TAG with them, so approving a match still refreshes the homepage
+ * immediately instead of waiting out the window.
+ *
+ * The admin functions stay exactly as they are: they run behind auth where the
+ * session is the point, and this is not a caller they should have to serve.
+ */
+export async function computeHomeSummary(): Promise<HomeSummary> {
+  const { matches, stats } = await fetchHistoryRows()
+
+  // fetchHistoryRows pages through ascending (oldest first) because the
+  // achievement passes walk each player's career forwards. The homepage wants
+  // the opposite -- it slices the newest few for the feed and numbers them
+  // backwards from the total -- so this reverses rather than inheriting an
+  // order that would quietly surface the fifteen *oldest* matches.
+  const ordered = [...matches].reverse().filter((m) => m.red_team?.length && m.blue_team?.length)
+
+  const now = new Date()
+  const monthKey = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`
+  const inThisMonth = (iso: string) => {
+    const d = new Date(iso)
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}` === monthKey
+  }
+
+  const monthMatchIds = new Set(matches.filter((m) => inThisMonth(m.created_at)).map((m) => m.id))
+  let killsThisMonth = 0
+  for (const s of stats) {
+    if (monthMatchIds.has(s.match_id)) killsThisMonth += s.kills ?? 0
+  }
+
+  // Same tally as getMonthlyPlayerStats: a draw counts for both sides, and a
+  // player named on both teams in one match (it happens -- a partial player
+  // logged in two stints) is credited once per appearance, as it was before.
+  const tally: Record<string, { wins: number; losses: number; draws: number }> = {}
+  const credit = (name: string, outcome: "wins" | "losses" | "draws") => {
+    tally[name] ??= { wins: 0, losses: 0, draws: 0 }
+    tally[name][outcome]++
+  }
+  for (const m of matches) {
+    if (!inThisMonth(m.created_at)) continue
+    const redWon = m.red_score > m.blue_score
+    const blueWon = m.blue_score > m.red_score
+    for (const p of m.red_team ?? []) credit(p, redWon ? "wins" : blueWon ? "losses" : "draws")
+    for (const p of m.blue_team ?? []) credit(p, blueWon ? "wins" : redWon ? "losses" : "draws")
+  }
+
+  return { matches: ordered, killsThisMonth, monthlyPlayerStats: tally }
+}

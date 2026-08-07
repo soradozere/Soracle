@@ -356,10 +356,23 @@ export async function listComments(demoId: string): Promise<DemoComment[]> {
  * from a folder of old recordings, and none of those were news at the time
  * they landed (see 030_demo_comments_tags_feed.sql).
  */
-export async function listFeedDemoUploads(limit = 15): Promise<
+/**
+ * Invalidated by the demo writes that change what the feed says -- a new
+ * upload, a retitle, a deletion (see app/(main)/demos/actions.ts).
+ *
+ * Deliberately its own tag rather than riding on HISTORY_TAG: that one is held
+ * by 53 statically-rendered achievement routes, and hanging the demo feed off
+ * it would mean every upload rebuilt all of them. This tag is held by the
+ * homepage alone, which is the only page that reads the feed.
+ */
+export const DEMO_FEED_TAG = "demo-feed"
+
+async function listFeedDemoUploadsUncached(limit = 15): Promise<
   { id: string; title: string; uploaderName: string | null; createdAt: string; gametype: Gametype }[]
 > {
-  const supabase = await createClient()
+  // Anon, not the cookie client: the feed is the same for everyone, and reading
+  // cookies here is what used to force the homepage to render per request.
+  const supabase = createAnonClient()
   const { data, error } = await supabase
     .from("demos")
     .select("id, title, gametype, created_at, uploader_player_id")
@@ -389,6 +402,15 @@ export async function listFeedDemoUploads(limit = 15): Promise<
     uploaderName: r.uploader_player_id ? (nameById.get(r.uploader_player_id) ?? null) : null,
   }))
 }
+
+// Cached for the same reason as getDemoCard above: supabase-js issues a plain
+// uncached fetch, and one of those anywhere in a render is enough to stop the
+// page being prerendered at all -- anon alone would not have been enough. The
+// window is a safety net; DEMO_FEED_TAG is what actually keeps it current.
+export const listFeedDemoUploads = unstable_cache(listFeedDemoUploadsUncached, ["demo-feed"], {
+  tags: [DEMO_FEED_TAG],
+  revalidate: 3600,
+})
 
 /** Just enough of a demo to put its name on a button. */
 export interface DemoLink {
