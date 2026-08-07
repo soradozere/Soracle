@@ -244,6 +244,10 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
             <li key={row.id}>
               <Link
                 href={`/player/${slug(row.name)}`}
+                // The board lists the whole roster, and /player/[slug] renders
+                // per request -- prefetching every row as it scrolled into view
+                // was rendering profiles nobody had asked for.
+                prefetch={false}
                 className={`pl-row ${row.inactive ? "is-inactive" : ""}`}
                 style={{ ["--accent" as string]: accent }}
                 title={row.inactive ? `${row.name} — inactive` : undefined}

@@ -1,5 +1,6 @@
 import { ImageResponse } from "next/og"
-import { getDemo } from "@/lib/demos-server"
+import { unstable_cache } from "next/cache"
+import { getDemoCard } from "@/lib/demos-server"
 import { demoTagLabel } from "@/lib/demo-tags"
 
 // Social-share thumbnail for a demo, so a link dropped in Discord unfurls as
@@ -10,6 +11,32 @@ import { demoTagLabel } from "@/lib/demo-tags"
 export const alt = "JK2 demo"
 export const size = { width: 1200, height: 630 }
 export const contentType = "image/png"
+
+/**
+ * Cache the rendered PNG for a day.
+ *
+ * Drawing this costs ~471ms of CPU -- Satori laying the card out, rasterising
+ * it and encoding a 1200x630 PNG, plus a HEAD request against the avatar. That
+ * was the most expensive single invocation in the project, and it ran on every
+ * unfurl, because reading the demo through the cookie-carrying Supabase client
+ * made the route dynamic.
+ *
+ * Be warned that this line is not, on its own, what caches anything. Next
+ * declined to give this route an ISR entry either way -- a metadata image on a
+ * dynamic segment with no generateStaticParams gets served on demand, and the
+ * build reports it as dynamic whether or not the render touches dynamic data.
+ * The Cache-Control header on the ImageResponse below is what actually keeps
+ * the function from being invoked; this is here to agree with it, and so that
+ * the value lives next to the reasoning.
+ *
+ * A day rather than an hour because the card only changes when someone edits a
+ * demo's title, protagonist or tags -- rare, and Discord caches unfurls on its
+ * own side for far longer anyway, so a shorter window would buy accuracy
+ * nobody would ever see. Deliberately no generateStaticParams: rendering all of
+ * these on every deploy would trade a CPU problem for an ISR-write one, and
+ * demand is what should decide which cards are worth having.
+ */
+export const revalidate = 86400
 
 const BG = "#0b0c10"
 const CYAN = "#66fcf1"
@@ -30,7 +57,7 @@ function initials(name: string): string {
  * Checked by content type rather than by extension, since plenty of these URLs
  * carry no extension at all.
  */
-async function avatarIsDrawable(url: string | null): Promise<boolean> {
+async function avatarIsDrawableUncached(url: string | null): Promise<boolean> {
   if (!url) return false
   try {
     const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(2500) })
@@ -41,9 +68,15 @@ async function avatarIsDrawable(url: string | null): Promise<boolean> {
   }
 }
 
+// Cached for the same reason as getDemoCard: an uncached fetch is dynamic data
+// as far as Next is concerned, and one of them anywhere in this render is
+// enough to stop the PNG being cached at all. Someone's avatar changing format
+// is about as rare as an edit to the demo itself, so it shares that window.
+const avatarIsDrawable = unstable_cache(avatarIsDrawableUncached, ["og-avatar-drawable"], { revalidate: 86400 })
+
 export default async function Image({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  const demo = await getDemo(id).catch(() => null)
+  const demo = await getDemoCard(id).catch(() => null)
 
   const lead = demo?.protagonist ?? null
   const others = (demo?.players ?? []).filter((p) => p.id !== lead?.id).slice(0, 6)
@@ -162,6 +195,26 @@ export default async function Image({ params }: { params: Promise<{ id: string }
         </div>
       </div>
     ),
-    size,
+    {
+      ...size,
+      /*
+       * Belt and braces over the `revalidate` above.
+       *
+       * Next decides for itself whether a metadata image on a dynamic segment
+       * gets an ISR entry, and that decision is not something this file can
+       * assert -- it flipped between builds here purely on how the data was
+       * read. An explicit s-maxage does not depend on any of that: Vercel's CDN
+       * caches the PNG on its own terms and the function stops being invoked,
+       * which is the whole objective. The card is byte-identical for every
+       * viewer (see getDemoCard), so a shared cache is correct here.
+       *
+       * stale-while-revalidate lets a week-old card keep serving instantly
+       * while a fresh one renders behind it -- an unfurl should never wait on
+       * Satori, and a slightly stale share image is worth nobody's latency.
+       */
+      headers: {
+        "Cache-Control": "public, max-age=0, s-maxage=86400, stale-while-revalidate=604800",
+      },
+    },
   )
 }
