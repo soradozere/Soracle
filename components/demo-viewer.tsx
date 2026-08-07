@@ -30,6 +30,7 @@ import {
   type DemoPlayerInfo,
 } from "@/lib/demo-viewer/jkd-client"
 import { readLinkState } from "@/lib/demo-link-state"
+import { useTouchPrimary } from "@/hooks/use-touch-primary"
 import { diagRequested } from "@/lib/demo-viewer/diagnostics"
 import { DemoViewerDiag } from "@/components/demo-viewer-diag"
 import { cn } from "@/lib/utils"
@@ -318,6 +319,13 @@ export function DemoViewer({
   // A touch device has no hover to react to, so the bar would either never
   // appear or never leave. There, tapping the picture toggles it instead.
   const [touchOnly, setTouchOnly] = useState(false)
+  /**
+   * Distinct from touchOnly above, which asks only about hover and governs how
+   * the control bar behaves. This is the same test the boot gate uses, and it
+   * governs what is worth offering at all -- a laptop with a touchscreen is
+   * touchOnly=false, touchPrimary=false, and wants the full desktop viewer.
+   */
+  const touchPrimary = useTouchPrimary()
   const [tapShowsChrome, setTapShowsChrome] = useState(true)
   /**
    * Phones are told, rather than shown a broken picture.
@@ -1442,10 +1450,21 @@ export function DemoViewer({
           tab on cellular and losing 141MB to it. */}
       {confirmNeeded && (
         <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-black/70 px-6 text-center">
-          <p className="text-sm font-medium text-white/90">Start the engine on this device?</p>
+          <p className="text-sm font-medium text-white/90">Watch this demo on your phone?</p>
+          {/*
+            Both facts up front, because both are things someone would want to
+            know before committing rather than discover afterwards: what it
+            costs to load, and what will not be here when it has. Naming the
+            missing features by name beats "some features are unavailable" --
+            the whole point is that a person can tell whether the ones they
+            came for are in the list.
+          */}
           <p className="max-w-xs text-xs leading-relaxed text-white/50">
-            Diagnostics mode. This downloads about 141MB and may run out of memory and reload the
-            tab — that outcome is itself a result worth recording. Prefer wi-fi.
+            This loads the game itself — about 141MB the first time, then cached. Playback, the
+            timeline and switching between players all work.
+          </p>
+          <p className="max-w-xs text-xs leading-relaxed text-white/40">
+            The free-fly camera and trimming clips are desktop only: both need a mouse and keyboard.
           </p>
           <button
             onClick={(e) => {
@@ -1458,7 +1477,7 @@ export function DemoViewer({
             }}
             className="mt-1 rounded-full bg-white/10 px-5 py-3 text-sm font-medium text-white ring-1 ring-white/20 transition-colors hover:bg-white/20"
           >
-            Start anyway
+            Load and watch
           </button>
         </div>
       )}
@@ -1884,7 +1903,18 @@ export function DemoViewer({
 
           <div className="flex items-center gap-1">
             <span className="mr-1 text-[11px] uppercase tracking-wider text-white/50">Camera</span>
-            {CAMERAS.map(({ id, label, icon: Icon }) => (
+            {/*
+              Free fly is not offered on touch, and this is a decision rather
+              than an omission. The engine takes its camera from mouse-look
+              deltas and WASD through the usercmd, so flying needs pointer lock
+              and a keyboard -- neither of which a phone has. Reaching it would
+              mean a virtual stick synthesising SDL input, quite possibly a new
+              engine export and a rebuild, for a camera nobody wants to fly with
+              their thumbs. The button is removed rather than disabled: a
+              greyed-out control invites asking why, and the honest answer is
+              that it is not coming.
+            */}
+            {CAMERAS.filter((c) => !(touchPrimary && c.id === "free")).map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 onClick={() => chooseCamera(id)}

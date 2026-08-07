@@ -1078,7 +1078,18 @@ export function DemoDetail({
               </div>
             )}
             {canEditMoments && (
-              <div className="mt-2">
+              /*
+               * Never offered on a phone, on top of the canTrim engine gate.
+               * Trimming writes a new file over the old one; it is the one
+               * destructive thing in here, it wants a precise scrub to frame
+               * the cut, and neither is something to attempt with a thumb.
+               *
+               * Hidden in CSS rather than by asking JavaScript what device this
+               * is, because that answer only arrives after the first render --
+               * so a touch device would be shown the cut controls for a frame
+               * before they were taken away. Not a risk worth a tidier hook.
+               */
+              <div className="mt-2 [@media(hover:none)_and_(pointer:coarse)]:hidden">
                 <TrimControl
                   demoId={demo.id}
                   currentMs={() => playbackMsRef.current}
