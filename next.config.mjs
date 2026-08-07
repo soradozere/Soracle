@@ -1,5 +1,31 @@
+import { networkInterfaces } from "node:os"
 import { PHASE_PRODUCTION_BUILD } from "next/constants.js"
 import { EXPECTED_ENGINE_VERSION } from "./engine-version.mjs"
+
+/**
+ * This machine's own LAN addresses, so a phone can reach `next dev`.
+ *
+ * Testing the viewer on a real device means loading the dev server over the
+ * network rather than localhost, and Next blocks cross-origin requests to its
+ * dev resources by default. The failure is the worst possible shape: the
+ * document and the server-rendered markup arrive fine, so the page looks like
+ * it loaded, but hydration never completes and no effect ever runs. For the
+ * demo viewer that means it sits forever on the initial status text --
+ * "Starting the engine…" -- which is indistinguishable from an engine that
+ * failed to boot, and sent us looking for an iOS memory problem that was not
+ * there. It reproduces identically in desktop Chromium over a LAN IP, which is
+ * what proved it had nothing to do with the phone.
+ *
+ * Read off the interfaces rather than hard-coded, because DHCP moves it and a
+ * stale literal here would resurrect exactly the same dead end. Dev only --
+ * Next ignores this outside `next dev`.
+ */
+function lanOrigins() {
+  return Object.values(networkInterfaces())
+    .flat()
+    .filter((i) => i && i.family === "IPv4" && !i.internal)
+    .map((i) => i.address)
+}
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
@@ -9,6 +35,7 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  allowedDevOrigins: lanOrigins(),
 }
 
 /**

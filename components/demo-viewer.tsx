@@ -30,6 +30,9 @@ import {
   type DemoPlayerInfo,
 } from "@/lib/demo-viewer/jkd-client"
 import { readLinkState } from "@/lib/demo-link-state"
+import { useTouchPrimary } from "@/hooks/use-touch-primary"
+import { canRunEngine, diagRequested, logDiagEvent } from "@/lib/demo-viewer/diagnostics"
+import { DemoViewerDiag } from "@/components/demo-viewer-diag"
 import { cn } from "@/lib/utils"
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4]
@@ -241,7 +244,26 @@ export function DemoViewer({
   const engineRef = useRef<JkdEngine | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
 
-  const [status, setStatus] = useState<string | null>("Starting the engine…")
+  /**
+   * Two words apart, because they fail differently.
+   *
+   * This initial value is what the server renders, before any of this
+   * component's code has run. "Starting the engine…" used to sit here, and it
+   * claimed something untrue: on a page whose hydration never completed, no
+   * effect ever ran, no engine was ever asked for, and the viewer sat on that
+   * sentence indefinitely. It reads exactly like an engine failing to boot, and
+   * cost a real debugging session on an iPhone that turned out to be fine --
+   * the dev server was blocking cross-origin dev resources over the LAN (see
+   * allowedDevOrigins in next.config.mjs) and the same thing reproduced in
+   * desktop Chromium.
+   *
+   * So the server-rendered state now says only that the page is loading, and
+   * the engine is not mentioned until the boot effect actually starts one.
+   * Stuck on "Loading…" is a page problem; stuck on "Starting the engine…" is
+   * an engine problem. That distinction costs one string and is the difference
+   * between reading the symptom right and looking in the wrong place.
+   */
+  const [status, setStatus] = useState<string | null>("Loading…")
   // -1 when there is nothing measurable to show, otherwise 0..1.
   const [progress, setProgress] = useState(-1)
   const [failed, setFailed] = useState<string | null>(null)
@@ -297,7 +319,24 @@ export function DemoViewer({
   // A touch device has no hover to react to, so the bar would either never
   // appear or never leave. There, tapping the picture toggles it instead.
   const [touchOnly, setTouchOnly] = useState(false)
+  /**
+   * Distinct from touchOnly above, which asks only about hover and governs how
+   * the control bar behaves. This is the same test the boot gate uses, and it
+   * governs what is worth offering at all -- a laptop with a touchscreen is
+   * touchOnly=false, touchPrimary=false, and wants the full desktop viewer.
+   */
+  const touchPrimary = useTouchPrimary()
   const [tapShowsChrome, setTapShowsChrome] = useState(true)
+  /** Where and when a touch began, so a drag can be told from a tap. */
+  const tapStartRef = useRef<{ x: number; y: number; at: number } | null>(null)
+  /** Bumped whenever a control is touched, to restart the auto-hide timer. */
+  const [chromeBumpAt, setChromeBumpAt] = useState(0)
+  /**
+   * The browser took the GL context back. Terminal for this page load: the
+   * engine builds its GL state once at startup and cannot be made to do it
+   * again from here.
+   */
+  const [contextLost, setContextLost] = useState(false)
   /**
    * Phones are told, rather than shown a broken picture.
    *
@@ -307,6 +346,35 @@ export function DemoViewer({
    * started, so nobody on a phone pays for a 120MB download to find out.
    */
   const [unsupported, setUnsupported] = useState(false)
+  /**
+   * `?diag=1`: show the instrumentation, and let the engine start on a phone.
+   *
+   * The gate above is the reason mobile behaviour is unmeasured -- every figure
+   * worth having (heap at boot, heap after two minutes, frame rate, whether the
+   * GL context survives) requires the engine to be running on the device, and
+   * on a phone it currently never is. This is the way past it, opt-in per
+   * visit, so an ordinary visitor's experience is untouched.
+   */
+  const [diag, setDiag] = useState(false)
+  /**
+   * On a phone, starting means downloading ~141MB (a 121MB bundle plus 20MB of
+   * community pk3s), and the gate has until now meant nobody could do that by
+   * accident. Reopening a diagnostics tab on cellular should not silently spend
+   * that, so the phone path asks first. Desktop is not asked: it was always
+   * going to download this, and nothing has changed there.
+   */
+  const [confirmNeeded, setConfirmNeeded] = useState(false)
+  const [confirmed, setConfirmed] = useState(false)
+  /**
+   * The same canvas as canvasRef, as state.
+   *
+   * The overlay has to re-render when the canvas arrives -- it reads the GL
+   * context and the backing-store size off it -- and assigning a ref does not
+   * cause that. Held in both places rather than converting the ref: everything
+   * else that touches the canvas reads it from callbacks that must not be
+   * rebuilt, which is what the ref is for.
+   */
+  const [canvasEl, setCanvasEl] = useState<HTMLCanvasElement | null>(null)
 
   const [elapsed, setElapsed] = useState(0)
   // The match clock, which is what anyone discussing the game would quote --
@@ -496,14 +564,41 @@ export function DemoViewer({
 
   useEffect(() => {
     if (!holderRef.current) return
+    const wantsDiag = diagRequested(window.location.search)
+    setDiag(wantsDiag)
     // The standard "touch is the primary input" test: true on phones and
     // tablets, false on a laptop with a touchscreen (which can still hover).
     // Checked here, first thing, so the engine is never started on one.
-    if (window.matchMedia("(hover: none) and (pointer: coarse)").matches) {
+    const touchPrimary = window.matchMedia("(hover: none) and (pointer: coarse)").matches
+    /*
+     * This used to refuse every touch device outright, on the grounds that the
+     * engine wanted a keyboard, a mouse and more memory than a phone would
+     * give it. Two of those turned out to be wrong. Measured on an iPhone: the
+     * heap sits at 207MB against a budget that never complained, and it holds
+     * 64fps at devicePixelRatio 3. What it genuinely cannot do -- fly the free
+     * camera, cut a clip -- is now simply not offered, and the card that used
+     * to say no has become a card that says what it costs and what is missing.
+     *
+     * What is refused now is a device that actually cannot run this, tested
+     * rather than inferred from having a touchscreen. Note it does not catch
+     * everything: Firefox on iOS passes both checks and still dies later in
+     * GLimp_Init, so the failure path has to stay readable too.
+     */
+    if (!canRunEngine()) {
       setUnsupported(true)
       setStatus(null)
       return
     }
+    // Both of these return before the engine is constructed, so re-running this
+    // effect when the answer changes cannot start a second one.
+    if (touchPrimary && !confirmed) {
+      setConfirmNeeded(true)
+      setStatus(null)
+      return
+    }
+    // Past every gate, so an engine really is about to be started -- which is
+    // the point at which saying so stops being a guess. See the status state.
+    setStatus("Starting the engine…")
     let cancelled = false
 
     // Reclaim the page's one canvas. On a first visit this creates it; on a
@@ -512,9 +607,27 @@ export function DemoViewer({
     const canvas = getEngineCanvas()
     holderRef.current.appendChild(canvas)
     canvasRef.current = canvas
+    setCanvasEl(canvas)
 
     // Read here rather than in a state initialiser: this only exists in the
     // browser, and the engine needs it before its first frame.
+    /*
+     * Read here rather than in a state initialiser: this only exists in the
+     * browser, and the engine needs it before its first frame.
+     *
+     * This briefly forced r_highdpi off on touch, on the theory that an iPhone
+     * reporting devicePixelRatio 3 was asking for a drawing buffer too large to
+     * grant. The device disproved it: it offers 4096x4096 with depth and
+     * stencil, against the 1512x852 the engine actually wanted. The real cause
+     * was the diagnostics overlay taking the canvas's context (see
+     * readWebglInfo), so the cap was reverted rather than left in resting on a
+     * dead argument -- and so the next device run changes one thing, not two.
+     *
+     * Capping it may still be worth doing on its own merits, since a phone
+     * rendering nine times the pixels of the element it draws into is nine
+     * times the fill rate. That is a frame-rate question, and there is no
+     * frame-rate measurement from a phone yet to answer it with.
+     */
     const detail = readHighDetail()
     setHighDetail(detail)
     setGamma(readGamma())
@@ -613,9 +726,11 @@ export function DemoViewer({
       engine.suspend()
     }
     // The engine is a singleton for the lifetime of the page; re-running this
-    // on a prop change would try to boot a second one over the first.
+    // on a prop change would try to boot a second one over the first. The one
+    // exception is the phone confirmation above, which is answered after mount
+    // and which bails out long before an engine exists.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [confirmed])
 
   /**
    * Moving between demos, without rebooting the engine.
@@ -805,10 +920,41 @@ export function DemoViewer({
     setFollow(target)
   }, [])
 
+  /**
+   * Full screen, or the closest thing the browser will allow.
+   *
+   * iPhone Safari has no Fullscreen API on ordinary elements at all -- only
+   * <video> gets webkitEnterFullscreen, and a WebGL canvas is not that. So
+   * `containerRef.current.requestFullscreen` is simply undefined there, and the
+   * old code called it through an optional chain: the button did nothing, said
+   * nothing, and looked exactly like a button that worked. That is precisely
+   * the trap the brief warns about, and it is why a phone in landscape was
+   * stuck watching a sliver of picture under the site masthead.
+   *
+   * So: use the real API where it exists, and otherwise pin the player over the
+   * viewport with CSS. The pseudo version is not as good -- the browser's own
+   * chrome stays -- but it is the difference between a usable landscape picture
+   * and a letterbox.
+   */
+  const [pseudoFullscreen, setPseudoFullscreen] = useState(false)
+
   const toggleFullscreen = useCallback(() => {
-    if (document.fullscreenElement) void document.exitFullscreen()
-    else void containerRef.current?.requestFullscreen()
-  }, [])
+    const el = containerRef.current
+    if (document.fullscreenElement) {
+      void document.exitFullscreen()
+      return
+    }
+    if (pseudoFullscreen) {
+      setPseudoFullscreen(false)
+      return
+    }
+    // Tested rather than assumed: the method's absence is the whole point.
+    if (el && typeof el.requestFullscreen === "function") {
+      void el.requestFullscreen().catch(() => setPseudoFullscreen(true))
+      return
+    }
+    setPseudoFullscreen(true)
+  }, [pseudoFullscreen])
 
   // Track it from the event rather than from the click: Escape and the browser's
   // own controls leave fullscreen too, and the button would otherwise lie.
@@ -817,6 +963,20 @@ export function DemoViewer({
     document.addEventListener("fullscreenchange", onChange)
     return () => document.removeEventListener("fullscreenchange", onChange)
   }, [])
+
+  /*
+   * Stop the page behind scrolling while the player is pinned over it.
+   * Without this, dragging the scrubber near the edge scrolls the article
+   * underneath and the gesture is lost to the page.
+   */
+  useEffect(() => {
+    if (!pseudoFullscreen) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.body.style.overflow = previous
+    }
+  }, [pseudoFullscreen])
 
   /**
    * Scrubbing.
@@ -1300,8 +1460,121 @@ export function DemoViewer({
   // pointer is locked (no cursor to hover with). Visible while paused, still
   // loading, mid-scrub or finished, so the controls that matter are never
   // hiding. On touch, where there is no hover, the tap state stands in.
+  /*
+   * On touch, the controls get out of the way on their own.
+   *
+   * A mouse has hover to say "I am still here", and the bar uses it. A thumb
+   * has nothing equivalent, so the bar would sit over the picture until it was
+   * deliberately dismissed -- and on a phone in landscape it covers most of
+   * what you came to watch. Sam found the clean view by accident and then had
+   * no way back to it.
+   *
+   * So playback hides it, and a tap brings it back. Only while genuinely
+   * playing: paused, seeking, still loading or ended all mean someone is
+   * looking for a control rather than watching, and those already force the bar
+   * on below.
+   */
+  useEffect(() => {
+    if (!touchOnly || !tapShowsChrome) return
+    if (!ready || paused || seeking || ended) return
+    const timer = setTimeout(() => setTapShowsChrome(false), 3500)
+    return () => clearTimeout(timer)
+  }, [touchOnly, tapShowsChrome, ready, paused, seeking, ended, chromeBumpAt])
+
+  /*
+   * Spend every user gesture on unlocking the sound until it takes.
+   *
+   * iOS refuses to start an AudioContext outside a gesture, and the obvious one
+   * -- the tap on the confirmation card -- is spent long before SDL creates the
+   * context, which is well into a 141MB boot. So it arrives suspended and
+   * playback is silent, with nothing logged anywhere to say why.
+   *
+   * Listening on the window in the capture phase, so it works wherever the tap
+   * lands and cannot be swallowed by a handler that stops propagation -- the
+   * control bar stops pointer events, and the controls are exactly where a
+   * first tap tends to go. Removed as soon as the context is running.
+   */
+  useEffect(() => {
+    if (!ready) return
+    const engine = engineRef.current
+    if (!engine) return
+    const unlock = () => {
+      engine.unlockAudio()
+      // Cheap to leave attached, but there is no reason to keep asking once
+      // the browser has stopped saying no.
+      if (window.Module?.SDL2?.audioContext?.state === "running") detach()
+    }
+    const detach = () => {
+      window.removeEventListener("pointerdown", unlock, true)
+      window.removeEventListener("keydown", unlock, true)
+    }
+    window.addEventListener("pointerdown", unlock, true)
+    window.addEventListener("keydown", unlock, true)
+    // The mount itself may follow a gesture closely enough to count.
+    unlock()
+    return detach
+  }, [ready])
+
+  /*
+   * Backgrounding the tab stops playback rather than letting it run on.
+   *
+   * requestAnimationFrame already stops when the tab is hidden, so the frame
+   * loop halts on its own -- but the engine's audio does not, because SDL mixes
+   * from a Web Audio callback that is not tied to the frame loop. Left alone, a
+   * phone that switches apps keeps talking. Worse, the demo clock is driven off
+   * real time, so a demo left "running" through five minutes in the background
+   * comes back five minutes further on with nothing rendered in between.
+   *
+   * Deliberately does not resume on return: coming back to a paused picture and
+   * pressing play is predictable, whereas sound restarting by itself when a
+   * phone is unlocked is not.
+   */
+  useEffect(() => {
+    const onVisibility = () => {
+      if (!document.hidden) return
+      const engine = engineRef.current
+      if (!engine || !engine.isReady) return
+      engine.setPaused(true)
+      setPaused(true)
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => document.removeEventListener("visibilitychange", onVisibility)
+  }, [])
+
+  /*
+   * A lost GL context is a dead canvas, and it must not look like a stall.
+   *
+   * The browser takes the context back under memory pressure -- likeliest on
+   * exactly the phones this work is for -- and once it is gone the engine
+   * cannot draw again. preventDefault is what allows a restore to be attempted
+   * at all; without it the browser will not bother. But the engine reads its GL
+   * state once at startup and there is no page-side way to rebuild it, so even
+   * a restored context comes back to an engine that has stopped drawing. Saying
+   * so and offering a reload is the honest option, and the one the brief asks
+   * for: never a dead canvas with no explanation.
+   */
+  useEffect(() => {
+    if (!canvasEl) return
+    const onLost = (e: Event) => {
+      e.preventDefault()
+      logDiagEvent("webglcontextlost")
+      engineRef.current?.setPaused(true)
+      setPaused(true)
+      setContextLost(true)
+    }
+    const onRestored = () => logDiagEvent("webglcontextrestored")
+    canvasEl.addEventListener("webglcontextlost", onLost)
+    canvasEl.addEventListener("webglcontextrestored", onRestored)
+    return () => {
+      canvasEl.removeEventListener("webglcontextlost", onLost)
+      canvasEl.removeEventListener("webglcontextrestored", onRestored)
+    }
+  }, [canvasEl])
+
   const showChrome =
     !unsupported &&
+    !confirmNeeded &&
+    !contextLost &&
     !pointerLocked &&
     ((touchOnly ? tapShowsChrome : hovering) || paused || !ready || seeking || ended)
 
@@ -1310,12 +1583,51 @@ export function DemoViewer({
       ref={containerRef}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
-      // Only on touch: with a mouse this would fight the hover behaviour, and
-      // clicking the picture is how you enter free-fly.
-      onClick={touchOnly ? () => setTapShowsChrome((s) => !s) : undefined}
+      /*
+       * Tap the picture to show or hide the controls -- but only a real tap.
+       *
+       * This was a plain onClick, which fires at the end of any gesture that
+       * began here: a swipe, a scroll that did not take, a drag that started on
+       * the picture and ended somewhere else. So the controls flipped when
+       * nobody asked, and the one deliberate tap arrived looking like all the
+       * accidents. Measuring the gesture instead is what makes it predictable,
+       * and predictable is the whole feature: with no keyboard there is no
+       * other way back to a clean picture, or out of one.
+       *
+       * Still touch only -- with a mouse this fights the hover behaviour, and
+       * clicking the picture is how you enter free fly.
+       */
+      onPointerDown={
+        touchOnly
+          ? (e) => {
+              tapStartRef.current = { x: e.clientX, y: e.clientY, at: Date.now() }
+            }
+          : undefined
+      }
+      onPointerUp={
+        touchOnly
+          ? (e) => {
+              const start = tapStartRef.current
+              tapStartRef.current = null
+              if (!start) return
+              // Generous on distance because a thumb rolls, strict on time
+              // because a long press is a different intention.
+              const moved = Math.hypot(e.clientX - start.x, e.clientY - start.y)
+              if (moved > 14 || Date.now() - start.at > 600) return
+              setTapShowsChrome((s) => !s)
+            }
+          : undefined
+      }
+      // A gesture the browser took over -- a scroll, a system edge swipe -- is
+      // not a tap, and must not be treated as one when it comes back.
+      onPointerCancel={touchOnly ? () => { tapStartRef.current = null } : undefined}
       className={cn(
         "relative h-full w-full overflow-hidden bg-black",
-        fullscreen ? "rounded-none" : "rounded-xl",
+        fullscreen || pseudoFullscreen ? "rounded-none" : "rounded-xl",
+        // Pinned over the viewport where the real API is unavailable. Fixed
+        // rather than absolute so it escapes the aspect-video box the page
+        // gives it, which is what was squeezing landscape into a letterbox.
+        pseudoFullscreen && "fixed inset-0 z-[100] h-auto w-auto",
       )}
     >
       {/* The curve the brightness slider drives, referenced by the canvas's CSS
@@ -1344,13 +1656,79 @@ export function DemoViewer({
       {unsupported && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
           <Monitor className="h-7 w-7 text-white/40" />
-          <p className="text-sm font-medium text-white/90">Watching needs a computer</p>
+          <p className="text-sm font-medium text-white/90">This browser can&rsquo;t run the demo player</p>
           <p className="max-w-xs text-xs leading-relaxed text-white/50">
-            The demo player runs the actual game, which wants a keyboard, a mouse and rather more
-            memory than a phone will give it. Everything else on this page works fine here.
+            It needs WebGL and WebAssembly, and this browser is missing one of them. A current
+            Safari, Chrome or Firefox will play it — phones included. Everything else on this page
+            works fine here.
           </p>
         </div>
       )}
+
+      {/* The diagnostics path onto a phone: say what it costs before spending
+          it. Nobody arrives here without ?diag=1 in the URL, so this is not a
+          consent banner for visitors -- it is a guard against reopening a test
+          tab on cellular and losing 141MB to it. */}
+      {confirmNeeded && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-black/70 px-6 text-center">
+          <p className="text-sm font-medium text-white/90">Watch this demo on your phone?</p>
+          {/*
+            Both facts up front, because both are things someone would want to
+            know before committing rather than discover afterwards: what it
+            costs to load, and what will not be here when it has. Naming the
+            missing features by name beats "some features are unavailable" --
+            the whole point is that a person can tell whether the ones they
+            came for are in the list.
+          */}
+          <p className="max-w-xs text-xs leading-relaxed text-white/50">
+            This loads the game itself — about 141MB the first time, then cached. Playback, the
+            timeline and switching between players all work.
+          </p>
+          <p className="max-w-xs text-xs leading-relaxed text-white/40">
+            The free-fly camera and trimming clips are desktop only: both need a mouse and keyboard.
+          </p>
+          <button
+            onClick={(e) => {
+              // The container's own onClick toggles the control bar on touch;
+              // without this the same tap would do both.
+              e.stopPropagation()
+              setConfirmNeeded(false)
+              setStatus("Starting the engine…")
+              setConfirmed(true)
+            }}
+            className="mt-1 rounded-full bg-white/10 px-5 py-3 text-sm font-medium text-white ring-1 ring-white/20 transition-colors hover:bg-white/20"
+          >
+            Load and watch
+          </button>
+        </div>
+      )}
+
+      {/* The GPU took its context back. Nothing will draw again on this page
+          load, so say so and offer the one thing that does fix it. */}
+      {contextLost && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-black/80 px-6 text-center">
+          <p className="text-sm font-medium text-white/90">The viewer lost the graphics context</p>
+          <p className="max-w-xs text-xs leading-relaxed text-white/50">
+            The browser reclaimed it, usually because something else needed the memory. Reloading
+            starts it again — the demo will be cached, so it won&rsquo;t download twice.
+          </p>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              window.location.reload()
+            }}
+            className="mt-1 flex items-center gap-2 rounded-full bg-white/10 px-5 py-3 text-sm font-medium text-white ring-1 ring-white/20 transition-colors hover:bg-white/20"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Reload the viewer
+          </button>
+        </div>
+      )}
+
+      {/* Mounted only on request, and only once there is a canvas to measure.
+          Reading the GL context or the backing-store size before the engine has
+          made one answers nothing. */}
+      {diag && <DemoViewerDiag canvas={canvasEl} engineReady={ready} />}
 
       {/* Match clock. Always up, not tied to the auto-hiding chrome: on a full
           match this is what tells you whether you're watching the first minute
@@ -1434,8 +1812,17 @@ export function DemoViewer({
       )}
 
       {(status || failed) && (
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3">
-          <div className={cn("text-sm", failed ? "text-red-300" : "text-white/70")}>
+        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center gap-3 px-6">
+          {/* A failure used to be one short line. The boot-failure message now
+              carries the numbers behind it -- what the engine asked for, what
+              the device would grant -- so it needs room to wrap rather than
+              running off both edges of a phone. */}
+          <div
+            className={cn(
+              "max-w-md text-center text-sm leading-relaxed",
+              failed ? "text-red-300" : "text-white/70",
+            )}
+          >
             {failed ?? status}
           </div>
           {!failed && progress >= 0 && (
@@ -1533,6 +1920,24 @@ export function DemoViewer({
 
       {/* Controls. */}
       <div
+        /*
+         * Taps that land on a control stop here.
+         *
+         * On touch the picture toggles this whole bar, and the bar sits on top
+         * of the picture -- so without this, the tap that grabs the scrubber
+         * also bubbles up and hides the thing being grabbed, mid-gesture. The
+         * bar goes to opacity-0 and pointer-events-none, so the drag dies at
+         * the moment it starts. That is why the scrubber could not be used on a
+         * phone at all: not the size of the target, which is a separate problem
+         * fixed separately, but that touching it dismissed it.
+         */
+        onPointerDown={(e) => {
+          e.stopPropagation()
+          // Using a control counts as being here, so the bar should not time
+          // out from under a slider halfway through a drag.
+          setChromeBumpAt(Date.now())
+        }}
+        onPointerUp={(e) => e.stopPropagation()}
         className={cn(
           "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-4 pt-10 transition-opacity duration-300",
           showChrome ? "opacity-100" : "pointer-events-none opacity-0",
@@ -1688,7 +2093,14 @@ export function DemoViewer({
               if (draggingRef.current) return
               onScrubEnd((Number((e.target as HTMLInputElement).value) / 1000) * span)
             }}
-            className="relative h-1 w-full cursor-pointer bg-transparent accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+            /*
+             * Four pixels tall is a mouse target, not a thumb one. A range
+             * input centres its track in whatever box it is given and treats
+             * the whole box as grabbable, so height here buys hit area without
+             * thickening the line or moving the markers, which are centred on
+             * the same axis. Touch only, so desktop keeps the thin bar it has.
+             */
+            className="relative h-1 w-full cursor-pointer bg-transparent accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-40 [@media(hover:none)_and_(pointer:coarse)]:h-9"
           />
           </div>
           <span className="tabular-nums">{formatTime(span)}</span>
@@ -1759,7 +2171,18 @@ export function DemoViewer({
 
           <div className="flex items-center gap-1">
             <span className="mr-1 text-[11px] uppercase tracking-wider text-white/50">Camera</span>
-            {CAMERAS.map(({ id, label, icon: Icon }) => (
+            {/*
+              Free fly is not offered on touch, and this is a decision rather
+              than an omission. The engine takes its camera from mouse-look
+              deltas and WASD through the usercmd, so flying needs pointer lock
+              and a keyboard -- neither of which a phone has. Reaching it would
+              mean a virtual stick synthesising SDL input, quite possibly a new
+              engine export and a rebuild, for a camera nobody wants to fly with
+              their thumbs. The button is removed rather than disabled: a
+              greyed-out control invites asking why, and the honest answer is
+              that it is not coming.
+            */}
+            {CAMERAS.filter((c) => !(touchPrimary && c.id === "free")).map(({ id, label, icon: Icon }) => (
               <button
                 key={id}
                 onClick={() => chooseCamera(id)}
@@ -1767,6 +2190,12 @@ export function DemoViewer({
                 className={cn(
                   "flex items-center gap-1 rounded px-2 py-1 text-xs",
                   camera === id ? "bg-cyan-500 text-black" : "bg-white/10 text-white hover:bg-white/20",
+                  // The filter above removes this once React knows what device
+                  // it is on, which is one render too late -- the server-rendered
+                  // markup offers Free fly to everyone, so a phone shows it for
+                  // a beat and then takes it away. The same query in CSS covers
+                  // that window.
+                  id === "free" && "[@media(hover:none)_and_(pointer:coarse)]:hidden",
                 )}
               >
                 <Icon className="h-3 w-3" />
@@ -1789,7 +2218,10 @@ export function DemoViewer({
               max={100}
               value={muted ? 0 : Math.round(volume * 100)}
               onChange={(e) => changeVolume(Number(e.target.value) / 100)}
-              className="h-1 w-16 cursor-pointer accent-cyan-400"
+              // Its own input rather than a SettingSlider, so it needs the
+              // same touch hit area spelled out here. Wider too: 64px of track
+              // is a fiddly drag with a thumb even once it is tall enough.
+              className="h-1 w-16 cursor-pointer accent-cyan-400 [@media(hover:none)_and_(pointer:coarse)]:h-9 [@media(hover:none)_and_(pointer:coarse)]:w-24"
               aria-label="Volume"
             />
             <button
@@ -1815,21 +2247,38 @@ export function DemoViewer({
 
           <button
             onClick={toggleFullscreen}
-            title={fullscreen ? "Exit full screen" : "Full screen"}
+            title={fullscreen || pseudoFullscreen ? "Exit full screen" : "Full screen"}
             className="rounded-md bg-white/10 p-1.5 text-white hover:bg-white/20"
           >
-            {fullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+            {fullscreen || pseudoFullscreen ? (
+              <Minimize className="h-4 w-4" />
+            ) : (
+              <Maximize className="h-4 w-4" />
+            )}
           </button>
         </div>
 
         {players.length > 0 && (
           <div className="mt-3">
             <div className="mb-1 text-[11px] uppercase tracking-wider text-white/50">Watching</div>
-            <div className="flex flex-wrap gap-1.5">
+            {/*
+              Wrapping is right with a mouse and wrong with a thumb. Thirteen
+              names wrap to three rows, and in landscape on a phone that is a
+              third of the screen spent on a list, over the picture. One row
+              that scrolls sideways costs a fixed 40pt instead, and scrolling it
+              is a drag rather than a tap so it cannot be confused for one.
+
+              overscroll-contain so reaching the end of the names does not hand
+              the gesture to the page and start scrolling the article behind.
+            */}
+            <div className="flex flex-wrap gap-1.5 [@media(hover:none)_and_(pointer:coarse)]:flex-nowrap [@media(hover:none)_and_(pointer:coarse)]:overflow-x-auto [@media(hover:none)_and_(pointer:coarse)]:overscroll-x-contain [@media(hover:none)_and_(pointer:coarse)]:pb-1">
               <button
                 onClick={() => chooseFollow(-1)}
                 className={cn(
                   "rounded px-2 py-1 text-xs",
+                  // shrink-0 or flex squeezes every name to nothing rather than
+                  // letting the row scroll; nowrap or they break mid-name.
+                  "[@media(hover:none)_and_(pointer:coarse)]:shrink-0 [@media(hover:none)_and_(pointer:coarse)]:whitespace-nowrap [@media(hover:none)_and_(pointer:coarse)]:px-3 [@media(hover:none)_and_(pointer:coarse)]:py-2",
                   follow === -1 ? "bg-cyan-500 text-black" : "bg-white/10 text-white hover:bg-white/20",
                 )}
               >
@@ -1842,6 +2291,7 @@ export function DemoViewer({
                   title={p.visible ? undefined : "Not in view at this moment"}
                   className={cn(
                     "rounded border px-2 py-1 text-xs",
+                    "[@media(hover:none)_and_(pointer:coarse)]:shrink-0 [@media(hover:none)_and_(pointer:coarse)]:whitespace-nowrap [@media(hover:none)_and_(pointer:coarse)]:px-3 [@media(hover:none)_and_(pointer:coarse)]:py-2",
                     follow === p.clientNum
                       ? "border-transparent bg-cyan-500 text-black"
                       : "bg-white/10 text-white hover:bg-white/20",
@@ -1986,7 +2436,9 @@ function SettingSlider({
           }
           onChange(Number(e.target.value))
         }}
-        className="h-1 w-full cursor-pointer accent-cyan-400"
+        // Same reasoning as the scrubber: the box is the hit area, the track
+        // stays where it is. Touch only, so desktop is unchanged.
+        className="h-1 w-full cursor-pointer accent-cyan-400 [@media(hover:none)_and_(pointer:coarse)]:h-9"
       />
     </label>
   )
