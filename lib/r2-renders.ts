@@ -12,9 +12,19 @@
  * they are different keys with different reach.
  *
  * Contents are disposable by design -- publish and reject each delete their
- * object, with a one-day lifecycle rule on the bucket as a backstop for jobs
+ * object, with a two-day lifecycle rule on the bucket as a backstop for jobs
  * that die without cleaning up. YouTube is the storage; this is a staging area
  * that should sit near-empty.
+ *
+ * That rule is unprefixed, which is safe only because this bucket holds nothing
+ * but unreviewed renders. The same rule on jk2demos once destroyed 13 demos;
+ * any rule there must be scoped to a prefix.
+ *
+ * The two days are also a review deadline, not just cleanup: a render nobody
+ * approves in that window is collected, and the row is left in pending_review
+ * pointing at an object that no longer exists. Approve then fails -- see
+ * app/admin/renders/actions.ts, which reads the object back to upload it -- and
+ * the only way forward is to reject it and render again.
  */
 import { S3Client, DeleteObjectCommand, HeadObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3"
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
