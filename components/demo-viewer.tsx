@@ -31,7 +31,7 @@ import {
 } from "@/lib/demo-viewer/jkd-client"
 import { readLinkState } from "@/lib/demo-link-state"
 import { useTouchPrimary } from "@/hooks/use-touch-primary"
-import { diagRequested } from "@/lib/demo-viewer/diagnostics"
+import { canRunEngine, diagRequested } from "@/lib/demo-viewer/diagnostics"
 import { DemoViewerDiag } from "@/components/demo-viewer-diag"
 import { cn } from "@/lib/utils"
 
@@ -560,7 +560,21 @@ export function DemoViewer({
     // tablets, false on a laptop with a touchscreen (which can still hover).
     // Checked here, first thing, so the engine is never started on one.
     const touchPrimary = window.matchMedia("(hover: none) and (pointer: coarse)").matches
-    if (touchPrimary && !wantsDiag) {
+    /*
+     * This used to refuse every touch device outright, on the grounds that the
+     * engine wanted a keyboard, a mouse and more memory than a phone would
+     * give it. Two of those turned out to be wrong. Measured on an iPhone: the
+     * heap sits at 207MB against a budget that never complained, and it holds
+     * 64fps at devicePixelRatio 3. What it genuinely cannot do -- fly the free
+     * camera, cut a clip -- is now simply not offered, and the card that used
+     * to say no has become a card that says what it costs and what is missing.
+     *
+     * What is refused now is a device that actually cannot run this, tested
+     * rather than inferred from having a touchscreen. Note it does not catch
+     * everything: Firefox on iOS passes both checks and still dies later in
+     * GLimp_Init, so the failure path has to stay readable too.
+     */
+    if (!canRunEngine()) {
       setUnsupported(true)
       setStatus(null)
       return
@@ -1436,10 +1450,11 @@ export function DemoViewer({
       {unsupported && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
           <Monitor className="h-7 w-7 text-white/40" />
-          <p className="text-sm font-medium text-white/90">Watching needs a computer</p>
+          <p className="text-sm font-medium text-white/90">This browser can&rsquo;t run the demo player</p>
           <p className="max-w-xs text-xs leading-relaxed text-white/50">
-            The demo player runs the actual game, which wants a keyboard, a mouse and rather more
-            memory than a phone will give it. Everything else on this page works fine here.
+            It needs WebGL and WebAssembly, and this browser is missing one of them. A current
+            Safari, Chrome or Firefox will play it — phones included. Everything else on this page
+            works fine here.
           </p>
         </div>
       )}
@@ -1922,6 +1937,12 @@ export function DemoViewer({
                 className={cn(
                   "flex items-center gap-1 rounded px-2 py-1 text-xs",
                   camera === id ? "bg-cyan-500 text-black" : "bg-white/10 text-white hover:bg-white/20",
+                  // The filter above removes this once React knows what device
+                  // it is on, which is one render too late -- the server-rendered
+                  // markup offers Free fly to everyone, so a phone shows it for
+                  // a beat and then takes it away. The same query in CSS covers
+                  // that window.
+                  id === "free" && "[@media(hover:none)_and_(pointer:coarse)]:hidden",
                 )}
               >
                 <Icon className="h-3 w-3" />

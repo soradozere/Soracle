@@ -502,6 +502,34 @@ export function probeWebgl(): GlProbe | null {
   return { webgl2, webgl1: true, depthStencil, antialias, maxTexture, maxRenderbuffer, maxBuffer }
 }
 
+/**
+ * Whether it is worth downloading 141MB to find out.
+ *
+ * Asked before anything is fetched, because the alternative is a device
+ * spending the whole bundle to reach a failure that was knowable up front.
+ * Deliberately only the two things whose absence is certain to be fatal and
+ * cheap to test -- WebAssembly, and a WebGL context of any kind. It is not a
+ * prediction that the engine will work: an iPhone running Firefox passes both
+ * of these and still fails later in GLimp_Init, which is why the failure path
+ * has to stay honest rather than being replaced by this.
+ *
+ * Uses a throwaway canvas and releases the context immediately. Never the
+ * engine's canvas -- taking that one is what broke the engine on iOS and cost
+ * two device runs (see readWebglInfo).
+ */
+export function canRunEngine(): boolean {
+  if (typeof WebAssembly === "undefined") return false
+  try {
+    const c = document.createElement("canvas")
+    const gl = (c.getContext("webgl") ?? c.getContext("experimental-webgl")) as WebGLRenderingContext | null
+    if (!gl) return false
+    gl.getExtension("WEBGL_lose_context")?.loseContext()
+    return true
+  } catch {
+    return false
+  }
+}
+
 // ---- the engine's own words -----------------------------------------------
 
 /**

@@ -535,7 +535,30 @@ export class JkdEngine {
        */
       onAbort: (what: unknown) => {
         if (!sawInstantiateFailure()) {
-          failBoot(new Error(`The demo engine stopped: ${String(what)}`))
+          /*
+           * The renderer failing to start is now a case worth naming, because
+           * touch devices are no longer refused up front and this is what the
+           * ones that cannot cope actually hit. Firefox on iOS is the known
+           * example: it has WebAssembly, it has WebGL, it passes the pre-boot
+           * check, and it still cannot give SDL the context it asks for.
+           *
+           * There is no page-side test that predicts this -- the same probe
+           * that passes on Firefox passes on Safari, where it works -- so the
+           * honest place to say so is here, after the fact, rather than by
+           * guessing from the user agent beforehand.
+           */
+          const text = String(what)
+          if (/GLimp_Init|OpenGL subsystem|could not load OpenGL/i.test(text)) {
+            failBoot(
+              new Error(
+                "This browser couldn't start the 3D view. It has WebGL, but not in a form the " +
+                  "game engine can use. On iPhone and iPad, Safari works where other browsers " +
+                  "currently don't — the rest of this page is fine either way.",
+              ),
+            )
+            return
+          }
+          failBoot(new Error(`The demo engine stopped: ${text}`))
           return
         }
         describeBootFailure(baseUrl)
