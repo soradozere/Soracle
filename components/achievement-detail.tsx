@@ -51,7 +51,9 @@ function HolderTable({ holders }: { holders: HolderRow[] }) {
             <tr key={`${h.playerName}-${h.matchId}`}>
               <td className="ach-ord">{ord(i + 1)}</td>
               <td>
-                <Link href={`/player/${slug(h.playerName)}`} className="ach-who">
+                {/* prefetch={false}: a popular crest's holder table is long,
+                    and /player/[slug] renders per request -- see players-index.tsx. */}
+                <Link href={`/player/${slug(h.playerName)}`} prefetch={false} className="ach-who">
                   {h.playerName}
                 </Link>
               </td>

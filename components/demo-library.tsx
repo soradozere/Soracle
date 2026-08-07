@@ -70,7 +70,17 @@ export function DemoCard({ demo }: { demo: DemoListItem }) {
     // resident module instead of booting a second one -- so moving between
     // demos reuses the engine (and its 120MB of loaded assets) rather than
     // paying the full boot on every click.
-    <Link href={`/demos/${demo.id}`}>
+    //
+    // prefetch={false} because the library renders every demo it is showing at
+    // once (no pagination), and Next prefetches a Link as it enters the
+    // viewport -- so scrolling the grid fired one request per card. /demos/[id]
+    // is dynamic, and the nearest loading boundary is app/loading.tsx, which
+    // returns null: the prefetch was fetching an empty shell, not the demo, so
+    // it bought nothing a click doesn't do anyway. It cost 1.5K invocations in
+    // 12h -- 40% of the project's Fluid CPU -- against 169 actual visits here.
+    // This does NOT make the link a full page load; client-side navigation and
+    // the resident engine above are unaffected.
+    <Link href={`/demos/${demo.id}`} prefetch={false}>
       <Card className="h-full transition-colors hover:border-foreground/30">
         <CardHeader>
           <div className="flex items-center justify-between gap-2">

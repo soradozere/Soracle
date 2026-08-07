@@ -277,6 +277,9 @@ function HistoryTeam({
             <Link
               key={`${name}-${i}`}
               href={`/player/${playerSlug(name)}`}
+              // prefetch={false}: every match row lists both teams, so a busy
+              // profile carries hundreds of these -- see players-index.tsx.
+              prefetch={false}
               className="text-xs text-[#c5c6c7] bg-[#1f2833] px-2 py-0.5 rounded hover:text-[var(--pa,#66fcf1)] transition-colors"
             >
               {name}

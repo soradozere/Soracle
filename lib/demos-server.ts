@@ -1,4 +1,6 @@
+import { unstable_cache } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
+import { createAnonClient } from "@/lib/supabase/anon"
 import { normaliseTags, type DemoTagId } from "@/lib/demo-tags"
 import { demoFileUrl } from "@/lib/r2"
 
@@ -175,6 +177,78 @@ export async function getDemo(id: string): Promise<DemoDetail | null> {
   }
 }
 
+
+/** Just the fields a social share card draws. */
+export interface DemoCard {
+  title: string
+  map: string
+  gametype: Gametype
+  tags: DemoTagId[]
+  protagonist: DemoPlayerTag | null
+  players: DemoPlayerTag[]
+}
+
+/**
+ * A demo's share card, read without a session.
+ *
+ * Everything else in this file goes through lib/supabase/server.ts, which reads
+ * cookies -- and that opts the calling route out of static rendering entirely
+ * (see lib/supabase/anon.ts). That is correct for the demo pages, which show an
+ * edit affordance to whoever owns the recording. It is wrong for the OG image:
+ * that card is identical for every viewer, and the things fetching it are
+ * Discord and Twitter's crawlers, which have no session to carry.
+ *
+ * The PNG itself is kept out of the renderer by a Cache-Control header on the
+ * route, not by anything here. What this buys is the two round-trips behind it:
+ * on the misses that do reach the function -- a cold card, or a revalidation --
+ * the read is served from the Data Cache rather than hitting Supabase again.
+ * unstable_cache for the same reason the achievement pages use it (see
+ * fetchHistoryRowsUncached in lib/achievements-server.ts): supabase-js issues a
+ * plain uncached fetch, which counts as dynamic data and would otherwise leave
+ * the render unable to be prerendered at all.
+ */
+async function fetchDemoCardUncached(id: string): Promise<DemoCard | null> {
+  const supabase = createAnonClient()
+  const { data, error } = await supabase
+    .from("demos")
+    .select("title, map, gametype, tags, protagonist_player_id")
+    .eq("id", id)
+    .maybeSingle()
+  if (error || !data) return null
+  const row = data as {
+    title: string
+    map: string
+    gametype: Gametype
+    tags: string[] | null
+    protagonist_player_id: string | null
+  }
+
+  const [{ data: tagRows }, leadResult] = await Promise.all([
+    supabase.from("demo_players").select("player:players(id, name, avatar_url)").eq("demo_id", id),
+    row.protagonist_player_id
+      ? supabase.from("players").select("id, name, avatar_url").eq("id", row.protagonist_player_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ])
+
+  // Same to-one-embed-typed-as-array caveat as attachRelations above.
+  const embedded = (tagRows ?? []) as unknown as { player: DemoPlayerTag | null }[]
+  const lead = leadResult.data as { id: string; name: string; avatar_url: string | null } | null
+
+  return {
+    title: row.title,
+    map: row.map,
+    gametype: row.gametype,
+    tags: normaliseTags(row.tags ?? []),
+    protagonist: lead ? { id: lead.id, name: lead.name, avatarUrl: lead.avatar_url } : null,
+    players: embedded.filter((r) => r.player).map((r) => r.player!),
+  }
+}
+
+// Keyed on the demo id, which unstable_cache folds into the key alongside the
+// name below. Plain objects and arrays only -- a Map would come back as `{}`
+// through the JSON round-trip, which is the trap documented in
+// lib/achievements-server.ts.
+export const getDemoCard = unstable_cache(fetchDemoCardUncached, ["demo-card"], { revalidate: 86400 })
 
 export async function getOwnRating(demoId: string, playerId: string): Promise<number | null> {
   const supabase = await createClient()
