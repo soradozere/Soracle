@@ -1,7 +1,8 @@
 "use server"
 
 import { cookies } from "next/headers"
-import type { DemoMoment } from "@/lib/demos-server"
+import { updateTag } from "next/cache"
+import { DEMO_FEED_TAG, type DemoMoment } from "@/lib/demos-server"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
@@ -186,6 +187,10 @@ export async function finishDemoUpload(storagePath: string, formData: FormData):
     await supabase.from("demo_players").insert(taggedPlayerIds.map((player_id) => ({ demo_id: inserted.id, player_id })))
   }
 
+  // The homepage feed is cached now (see DEMO_FEED_TAG), and this is the write
+  // that puts a demo in it -- without this a new upload would sit unannounced
+  // until the hour's safety net expired.
+  updateTag(DEMO_FEED_TAG)
   return { success: true, id: inserted.id as string }
 }
 
@@ -300,6 +305,8 @@ export async function updateDemo(demoId: string, formData: FormData): Promise<Ac
     if (tagError) return { success: false, error: tagError.message }
   }
 
+  // Title and gametype both show in the feed, so an edit can change it.
+  updateTag(DEMO_FEED_TAG)
   return { success: true, id: demoId }
 }
 
@@ -344,6 +351,8 @@ export async function deleteDemo(demoId: string): Promise<ActionResult> {
   const { error: deleteError } = await supabase.from("demos").delete().eq("id", demoId)
   if (deleteError) return { success: false, error: deleteError.message }
 
+  // Otherwise the feed keeps advertising a demo that 404s.
+  updateTag(DEMO_FEED_TAG)
   return { success: true, id: demoId }
 }
 
