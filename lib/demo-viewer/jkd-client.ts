@@ -10,7 +10,7 @@
  * the engine, so the UI cannot drift out of sync with what is actually on screen.
  */
 
-import { describeBootFailure, installWasmProbe, sawInstantiateFailure } from "./diagnostics"
+import { describeBootFailure, installWasmProbe, noteEngineLine, sawInstantiateFailure } from "./diagnostics"
 
 export type CameraMode = "follow" | "free"
 
@@ -550,8 +550,16 @@ export class JkdEngine {
       locateFile: (path: string) => `${baseUrl}/${path}`,
       // The engine is chatty, but swallowing its output means a failure to open
       // a demo or a map looks identical to nothing happening at all.
-      print: (text: string) => console.log("[jk2]", text),
-      printErr: (text: string) => console.warn("[jk2]", text),
+      // Tapped as well as logged: the console is unreachable on the phone this
+      // has to be diagnosed on, so complaints are also kept for the overlay.
+      print: (text: string) => {
+        noteEngineLine(text)
+        console.log("[jk2]", text)
+      },
+      printErr: (text: string) => {
+        noteEngineLine(text)
+        console.warn("[jk2]", text)
+      },
       // Only when the pre-fetch worked; otherwise the loader downloads the
       // bundle itself and nothing has changed from the old behaviour.
       ...(dataBuffer ? { getPreloadedPackage: () => dataBuffer } : {}),

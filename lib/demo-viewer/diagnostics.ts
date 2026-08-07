@@ -399,6 +399,125 @@ export function readWebglInfo(canvas: HTMLCanvasElement): WebglInfo | null {
   }
 }
 
+// ---- what GL this device will actually grant ------------------------------
+
+export interface GlProbe {
+  webgl2: boolean
+  webgl1: boolean
+  depthStencil: boolean
+  antialias: boolean
+  maxTexture: number
+  maxRenderbuffer: number
+  /** Largest square drawing buffer that allocated without the context dying. */
+  maxBuffer: number
+}
+
+/**
+ * Ask the device for GL directly, before the engine does.
+ *
+ * Written after an iPhone reported `GLimp_Init() - could not load OpenGL
+ * subsystem` while its heap sat at exactly the 128MB it started with and the
+ * page held a steady 60fps -- so memory was never the constraint and the engine
+ * died creating a context. The engine's own retry loop already degrades colour,
+ * depth and stencil bits and still fails, and its reasons go to a console
+ * nobody can read off a phone.
+ *
+ * This asks the same questions the engine asks, from the page, where the answer
+ * can be put on screen: which context versions exist at all, whether a
+ * depth+stencil buffer is grantable, whether antialiasing is, and how large a
+ * drawing buffer actually survives allocation. That last one is the suspicious
+ * case on a device reporting devicePixelRatio 3, where the engine's framebuffer
+ * is nine times the pixel count of the element it is drawn into.
+ *
+ * Every context made here is released immediately via WEBGL_lose_context. iOS
+ * Safari keeps very few live WebGL contexts and reclaims them reluctantly, so a
+ * probe that leaked them would cause exactly the failure it is investigating.
+ */
+export function probeWebgl(): GlProbe | null {
+  const make = (attrs: WebGLContextAttributes, type = "webgl") => {
+    const c = document.createElement("canvas")
+    c.width = 64
+    c.height = 64
+    const gl = c.getContext(type, attrs) as WebGLRenderingContext | null
+    return gl
+  }
+  const release = (gl: WebGLRenderingContext | null) => {
+    if (gl) gl.getExtension("WEBGL_lose_context")?.loseContext()
+  }
+
+  const base = make({}, "webgl")
+  if (!base) return null
+
+  const two = make({}, "webgl2")
+  const webgl2 = !!two
+  release(two)
+
+  // The engine asks for both a depth and a stencil buffer; a device that will
+  // not grant them together is a device its retry loop cannot satisfy.
+  const ds = make({ depth: true, stencil: true })
+  const depthStencil = !!ds
+  release(ds)
+
+  const aa = make({ antialias: true })
+  const antialias = !!aa
+  release(aa)
+
+  const maxTexture = base.getParameter(base.MAX_TEXTURE_SIZE) as number
+  const maxRenderbuffer = base.getParameter(base.MAX_RENDERBUFFER_SIZE) as number
+
+  /*
+   * Sizes are declared and then checked, because a refused drawing buffer does
+   * not throw: WebGL silently clamps to something smaller, or loses the context
+   * outright. Comparing what came back against what was asked for is the only
+   * honest test.
+   */
+  let maxBuffer = 0
+  for (const size of [4096, 2048, 1536, 1024, 512, 256]) {
+    const c = document.createElement("canvas")
+    c.width = size
+    c.height = size
+    const gl = c.getContext("webgl", { depth: true, stencil: true }) as WebGLRenderingContext | null
+    if (gl && !gl.isContextLost() && gl.drawingBufferWidth === size && gl.drawingBufferHeight === size) {
+      maxBuffer = size
+      release(gl)
+      break
+    }
+    release(gl)
+  }
+
+  release(base)
+  return { webgl2, webgl1: true, depthStencil, antialias, maxTexture, maxRenderbuffer, maxBuffer }
+}
+
+// ---- the engine's own words -----------------------------------------------
+
+/**
+ * The tail of the engine console, kept so it can be read off a phone.
+ *
+ * The engine explains itself perfectly well -- `SDL_GL_CreateContext failed:
+ * <reason>`, once per attempt of its degrade-and-retry loop -- but it explains
+ * itself to console.log, which on an iPhone attached to nothing is a place no
+ * answer can come back from. Only lines that look like a complaint are kept:
+ * the engine prints thousands of ordinary lines at boot and the useful ones
+ * would be lost among them on a screen this size.
+ */
+const engineLog: string[] = []
+const COMPLAINT = /error|fail|could not|unable|invalid|unsupported|out of|abort/i
+
+export function noteEngineLine(text: string): void {
+  if (!text || !COMPLAINT.test(text)) return
+  // The engine colour-codes its console with ^N escapes and pads with ANSI.
+  const clean = text.replace(/\^\d/g, "").replace(/\[[0-9;]*m/g, "").trim()
+  if (!clean) return
+  if (engineLog[engineLog.length - 1] === clean) return // the retry loop repeats itself
+  engineLog.push(clean)
+  if (engineLog.length > 8) engineLog.shift()
+}
+
+export function getEngineLog(): string[] {
+  return [...engineLog]
+}
+
 // ---- context loss ---------------------------------------------------------
 
 export interface DiagEvent {

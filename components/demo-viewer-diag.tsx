@@ -3,13 +3,16 @@
 import { useEffect, useState } from "react"
 import {
   bytesToMb,
+  getEngineLog,
   getHeapBytes,
   getPeakHeapBytes,
+  probeWebgl,
   readWebglInfo,
   startFpsMeter,
   subscribeDiagEvents,
   watchContextLoss,
   type DiagEvent,
+  type GlProbe,
   type WebglInfo,
 } from "@/lib/demo-viewer/diagnostics"
 
@@ -30,6 +33,29 @@ export function DemoViewerDiag({ canvas }: { canvas: HTMLCanvasElement | null })
   const [size, setSize] = useState<{ backing: string; css: string } | null>(null)
   const [gl, setGl] = useState<WebglInfo | null>(null)
   const [events, setEvents] = useState<DiagEvent[]>([])
+  const [probe, setProbe] = useState<GlProbe | null | "failed">(null)
+  const [engineLog, setEngineLog] = useState<string[]>([])
+
+  /*
+   * Run once, as early as possible, and deliberately before the engine has had
+   * a chance to take contexts of its own -- the question is what the device
+   * offers in a clean state, which is not answerable once something else is
+   * holding the answer.
+   */
+  useEffect(() => {
+    try {
+      setProbe(probeWebgl() ?? "failed")
+    } catch {
+      setProbe("failed")
+    }
+  }, [])
+
+  // Polled rather than pushed: the engine writes these from wasm, and a
+  // subscription would mean touching its console hook on every line it prints.
+  useEffect(() => {
+    const timer = setInterval(() => setEngineLog(getEngineLog()), 700)
+    return () => clearInterval(timer)
+  }, [])
 
   useEffect(() => startFpsMeter(setFps), [])
   useEffect(() => subscribeDiagEvents(setEvents), [])
@@ -95,6 +121,36 @@ export function DemoViewerDiag({ canvas }: { canvas: HTMLCanvasElement | null })
       <Row label="gl" value={gl ? gl.version : "…"} />
       <Row label="gpu" value={gl ? gl.renderer : "…"} />
       <Row label="maxtex" value={gl ? String(gl.maxTextureSize) : "…"} />
+
+      {/* What the device grants when asked directly, independent of the engine.
+          The point of comparison when the engine says it could not get a
+          context: if these all pass, the engine is asking for something else. */}
+      <div className="mt-1.5 border-t border-white/15 pt-1.5">
+        {probe === "failed" || probe === null ? (
+          <Row label="offers" value={probe === "failed" ? "no WebGL at all" : "…"} />
+        ) : (
+          <>
+            <Row
+              label="offers"
+              value={`${probe.webgl2 ? "webgl2" : "webgl1 only"}${probe.depthStencil ? " +depth/stencil" : " NO depth/stencil"}${probe.antialias ? " +aa" : " NO aa"}`}
+            />
+            <Row label="maxbuf" value={probe.maxBuffer ? `${probe.maxBuffer}²` : "none allocated"} />
+            <Row label="maxrb" value={String(probe.maxRenderbuffer)} />
+          </>
+        )}
+      </div>
+
+      {/* The engine's own complaints, which otherwise only exist in a console
+          that cannot be reached from the device this has to be diagnosed on. */}
+      {engineLog.length > 0 && (
+        <div className="mt-1.5 border-t border-white/15 pt-1.5">
+          {engineLog.map((line, i) => (
+            <div key={`${i}-${line}`} className="text-red-300/90">
+              {line}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Only once something has happened -- an empty log is noise. */}
       {events.length > 0 && (

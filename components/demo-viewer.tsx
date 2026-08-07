@@ -579,7 +579,33 @@ export function DemoViewer({
 
     // Read here rather than in a state initialiser: this only exists in the
     // browser, and the engine needs it before its first frame.
-    const detail = readHighDetail()
+    /*
+     * A phone renders at CSS pixels, whatever the stored preference says.
+     *
+     * r_highdpi multiplies the engine's framebuffer by devicePixelRatio, and
+     * the first iPhone this ran on reports 3 -- nine times the pixels of the
+     * element being drawn into. That device died in GLimp_Init with "could not
+     * load OpenGL subsystem", while its heap sat at exactly the 128MB it
+     * started with and the page held 60fps, so it was never short of memory: it
+     * could not get a context of the size being asked for.
+     *
+     * Worth knowing that desktop fails the same call and recovers. The engine's
+     * console shows SDL_GL_CreateContext failing with EGL_BAD_MATCH, then "no
+     * display modes could be found", then r_mode -2 falling back to r_mode 3 --
+     * and only then succeeding. The mode-setting path is fragile under
+     * Emscripten everywhere; multiplying the request by nine is what pushes it
+     * past recovering.
+     *
+     * Forced rather than defaulted, because the preference is persisted and a
+     * phone that had once been set to high detail would carry the failure
+     * across visits with no way to see why. Untouched on desktop, which keeps
+     * its full pixel density.
+     *
+     * This is the page-side half of the brief's "cap effective devicePixelRatio
+     * at 1" -- no engine rebuild, no new R2 prefix. Whether it is sufficient is
+     * exactly what the next device run answers.
+     */
+    const detail = touchPrimary ? false : readHighDetail()
     setHighDetail(detail)
     setGamma(readGamma())
 
