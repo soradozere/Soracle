@@ -243,7 +243,26 @@ export function DemoViewer({
   const engineRef = useRef<JkdEngine | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
 
-  const [status, setStatus] = useState<string | null>("Starting the engine…")
+  /**
+   * Two words apart, because they fail differently.
+   *
+   * This initial value is what the server renders, before any of this
+   * component's code has run. "Starting the engine…" used to sit here, and it
+   * claimed something untrue: on a page whose hydration never completed, no
+   * effect ever ran, no engine was ever asked for, and the viewer sat on that
+   * sentence indefinitely. It reads exactly like an engine failing to boot, and
+   * cost a real debugging session on an iPhone that turned out to be fine --
+   * the dev server was blocking cross-origin dev resources over the LAN (see
+   * allowedDevOrigins in next.config.mjs) and the same thing reproduced in
+   * desktop Chromium.
+   *
+   * So the server-rendered state now says only that the page is loading, and
+   * the engine is not mentioned until the boot effect actually starts one.
+   * Stuck on "Loading…" is a page problem; stuck on "Starting the engine…" is
+   * an engine problem. That distinction costs one string and is the difference
+   * between reading the symptom right and looking in the wrong place.
+   */
+  const [status, setStatus] = useState<string | null>("Loading…")
   // -1 when there is nothing measurable to show, otherwise 0..1.
   const [progress, setProgress] = useState(-1)
   const [failed, setFailed] = useState<string | null>(null)
@@ -545,6 +564,9 @@ export function DemoViewer({
       setStatus(null)
       return
     }
+    // Past every gate, so an engine really is about to be started -- which is
+    // the point at which saying so stops being a guess. See the status state.
+    setStatus("Starting the engine…")
     let cancelled = false
 
     // Reclaim the page's one canvas. On a first visit this creates it; on a
