@@ -10,6 +10,8 @@
  * the engine, so the UI cannot drift out of sync with what is actually on screen.
  */
 
+import { describeBootFailure, installWasmProbe, noteEngineLine, sawInstantiateFailure } from "./diagnostics"
+
 export type CameraMode = "follow" | "free"
 
 /**
@@ -504,8 +506,65 @@ export class JkdEngine {
       loadExtraPk3s(baseUrl, onStatus),
     ])
 
+    /*
+     * A boot that dies has to reach the caller, and on its own it does not.
+     *
+     * Emscripten answers an instantiation failure by calling abort(), which
+     * throws inside its own loader. JKD_ready is never reached, so the promise
+     * this method awaits stays pending for the life of the page: the viewer
+     * shows "Starting the engine…" and a progress bar forever, which is the
+     * dead page an out-of-memory phone actually presents. Nothing in the glue
+     * rejects anything, so the only route out is onAbort.
+     */
+    let failBoot: (err: Error) => void = () => {}
+    const abortedPromise = new Promise<never>((_, reject) => {
+      failBoot = reject
+    })
+
     window.Module = {
       canvas,
+      /*
+       * Called by the engine on any fatal error, instantiation included.
+       *
+       * The text it passes is not something to put in front of a visitor --
+       * "Aborted(RuntimeError: Aborted(...))" and similar -- so the message is
+       * built from what the diagnostics module can establish about the device
+       * instead, and only when the failure really was the wasm refusing to
+       * instantiate. Anything else keeps the engine's own words, which are at
+       * least accurate about what broke.
+       */
+      onAbort: (what: unknown) => {
+        if (!sawInstantiateFailure()) {
+          /*
+           * The renderer failing to start is now a case worth naming, because
+           * touch devices are no longer refused up front and this is what the
+           * ones that cannot cope actually hit. Firefox on iOS is the known
+           * example: it has WebAssembly, it has WebGL, it passes the pre-boot
+           * check, and it still cannot give SDL the context it asks for.
+           *
+           * There is no page-side test that predicts this -- the same probe
+           * that passes on Firefox passes on Safari, where it works -- so the
+           * honest place to say so is here, after the fact, rather than by
+           * guessing from the user agent beforehand.
+           */
+          const text = String(what)
+          if (/GLimp_Init|OpenGL subsystem|could not load OpenGL/i.test(text)) {
+            failBoot(
+              new Error(
+                "This browser couldn't start the 3D view. It has WebGL, but not in a form the " +
+                  "game engine can use. On iPhone and iPad, Safari works where other browsers " +
+                  "currently don't — the rest of this page is fine either way.",
+              ),
+            )
+            return
+          }
+          failBoot(new Error(`The demo engine stopped: ${text}`))
+          return
+        }
+        describeBootFailure(baseUrl)
+          .then((detail) => failBoot(new Error(`This device could not start the demo engine. ${detail}`)))
+          .catch(() => failBoot(new Error("This device could not start the demo engine.")))
+      },
       // Read by Com_Init as if they were command-line arguments, which is the
       // only way to land a cvar before the renderer starts.
       arguments: ["+set", "r_highdpi", this.opts.highDetail === false ? "0" : "1"],
@@ -514,8 +573,16 @@ export class JkdEngine {
       locateFile: (path: string) => `${baseUrl}/${path}`,
       // The engine is chatty, but swallowing its output means a failure to open
       // a demo or a map looks identical to nothing happening at all.
-      print: (text: string) => console.log("[jk2]", text),
-      printErr: (text: string) => console.warn("[jk2]", text),
+      // Tapped as well as logged: the console is unreachable on the phone this
+      // has to be diagnosed on, so complaints are also kept for the overlay.
+      print: (text: string) => {
+        noteEngineLine(text)
+        console.log("[jk2]", text)
+      },
+      printErr: (text: string) => {
+        noteEngineLine(text)
+        console.warn("[jk2]", text)
+      },
       // Only when the pre-fetch worked; otherwise the loader downloads the
       // bundle itself and nothing has changed from the old behaviour.
       ...(dataBuffer ? { getPreloadedPackage: () => dataBuffer } : {}),
@@ -580,7 +647,17 @@ export class JkdEngine {
 
     this.installHooks()
 
-    bootPromise = loadScript(`${baseUrl}/jk2mv_wasm.js`).then(() => readyPromise)
+    /*
+     * In place before the engine script runs, because the instantiation it
+     * watches for happens during that script's own boot -- there is no later
+     * moment at which the heap can still be caught. Removed as soon as boot
+     * settles either way, so nothing else on the page meets the wrapper.
+     */
+    const removeProbe = installWasmProbe()
+
+    bootPromise = loadScript(`${baseUrl}/jk2mv_wasm.js`)
+      .then(() => Promise.race([readyPromise, abortedPromise]))
+      .finally(removeProbe)
     await bootPromise
   }
 
@@ -703,6 +780,24 @@ export class JkdEngine {
     if (!M) return
     M.resumeMainLoop?.()
     void M.SDL2?.audioContext?.resume()
+  }
+
+  /**
+   * Let the sound out, if the browser is holding it.
+   *
+   * iOS will not start an AudioContext outside a user gesture, and the tap that
+   * would have counted -- the one on the confirmation card -- happens long
+   * before SDL creates the context, which is well into a 141MB boot. So the
+   * context arrives suspended, the engine mixes into nothing, and playback is
+   * silent with no error anywhere: exactly the failure the brief warns about.
+   *
+   * Safe to call as often as a gesture arrives. Resuming a running context is a
+   * no-op, and the promise is ignored deliberately -- a refusal means there was
+   * no gesture to spend, and the next one will do.
+   */
+  unlockAudio() {
+    const ctx = window.Module?.SDL2?.audioContext
+    if (ctx && ctx.state === "suspended") void ctx.resume()
   }
 
   /** Run a console command. JKD_Exec terminates it engine-side. */
