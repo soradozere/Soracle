@@ -910,10 +910,41 @@ export function DemoViewer({
     setFollow(target)
   }, [])
 
+  /**
+   * Full screen, or the closest thing the browser will allow.
+   *
+   * iPhone Safari has no Fullscreen API on ordinary elements at all -- only
+   * <video> gets webkitEnterFullscreen, and a WebGL canvas is not that. So
+   * `containerRef.current.requestFullscreen` is simply undefined there, and the
+   * old code called it through an optional chain: the button did nothing, said
+   * nothing, and looked exactly like a button that worked. That is precisely
+   * the trap the brief warns about, and it is why a phone in landscape was
+   * stuck watching a sliver of picture under the site masthead.
+   *
+   * So: use the real API where it exists, and otherwise pin the player over the
+   * viewport with CSS. The pseudo version is not as good -- the browser's own
+   * chrome stays -- but it is the difference between a usable landscape picture
+   * and a letterbox.
+   */
+  const [pseudoFullscreen, setPseudoFullscreen] = useState(false)
+
   const toggleFullscreen = useCallback(() => {
-    if (document.fullscreenElement) void document.exitFullscreen()
-    else void containerRef.current?.requestFullscreen()
-  }, [])
+    const el = containerRef.current
+    if (document.fullscreenElement) {
+      void document.exitFullscreen()
+      return
+    }
+    if (pseudoFullscreen) {
+      setPseudoFullscreen(false)
+      return
+    }
+    // Tested rather than assumed: the method's absence is the whole point.
+    if (el && typeof el.requestFullscreen === "function") {
+      void el.requestFullscreen().catch(() => setPseudoFullscreen(true))
+      return
+    }
+    setPseudoFullscreen(true)
+  }, [pseudoFullscreen])
 
   // Track it from the event rather than from the click: Escape and the browser's
   // own controls leave fullscreen too, and the button would otherwise lie.
@@ -922,6 +953,20 @@ export function DemoViewer({
     document.addEventListener("fullscreenchange", onChange)
     return () => document.removeEventListener("fullscreenchange", onChange)
   }, [])
+
+  /*
+   * Stop the page behind scrolling while the player is pinned over it.
+   * Without this, dragging the scrubber near the edge scrolls the article
+   * underneath and the gesture is lost to the page.
+   */
+  useEffect(() => {
+    if (!pseudoFullscreen) return
+    const previous = document.body.style.overflow
+    document.body.style.overflow = "hidden"
+    return () => {
+      document.body.style.overflow = previous
+    }
+  }, [pseudoFullscreen])
 
   /**
    * Scrubbing.
@@ -1421,7 +1466,11 @@ export function DemoViewer({
       onClick={touchOnly ? () => setTapShowsChrome((s) => !s) : undefined}
       className={cn(
         "relative h-full w-full overflow-hidden bg-black",
-        fullscreen ? "rounded-none" : "rounded-xl",
+        fullscreen || pseudoFullscreen ? "rounded-none" : "rounded-xl",
+        // Pinned over the viewport where the real API is unavailable. Fixed
+        // rather than absolute so it escapes the aspect-video box the page
+        // gives it, which is what was squeezing landscape into a letterbox.
+        pseudoFullscreen && "fixed inset-0 z-[100] h-auto w-auto",
       )}
     >
       {/* The curve the brightness slider drives, referenced by the canvas's CSS
@@ -1692,6 +1741,18 @@ export function DemoViewer({
 
       {/* Controls. */}
       <div
+        /*
+         * Taps that land on a control stop here.
+         *
+         * On touch the picture toggles this whole bar, and the bar sits on top
+         * of the picture -- so without this, the tap that grabs the scrubber
+         * also bubbles up and hides the thing being grabbed, mid-gesture. The
+         * bar goes to opacity-0 and pointer-events-none, so the drag dies at
+         * the moment it starts. That is why the scrubber could not be used on a
+         * phone at all: not the size of the target, which is a separate problem
+         * fixed separately, but that touching it dismissed it.
+         */
+        onClick={(e) => e.stopPropagation()}
         className={cn(
           "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 to-transparent p-4 pt-10 transition-opacity duration-300",
           showChrome ? "opacity-100" : "pointer-events-none opacity-0",
@@ -1847,7 +1908,14 @@ export function DemoViewer({
               if (draggingRef.current) return
               onScrubEnd((Number((e.target as HTMLInputElement).value) / 1000) * span)
             }}
-            className="relative h-1 w-full cursor-pointer bg-transparent accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-40"
+            /*
+             * Four pixels tall is a mouse target, not a thumb one. A range
+             * input centres its track in whatever box it is given and treats
+             * the whole box as grabbable, so height here buys hit area without
+             * thickening the line or moving the markers, which are centred on
+             * the same axis. Touch only, so desktop keeps the thin bar it has.
+             */
+            className="relative h-1 w-full cursor-pointer bg-transparent accent-cyan-400 disabled:cursor-not-allowed disabled:opacity-40 [@media(hover:none)_and_(pointer:coarse)]:h-9"
           />
           </div>
           <span className="tabular-nums">{formatTime(span)}</span>
@@ -1965,7 +2033,10 @@ export function DemoViewer({
               max={100}
               value={muted ? 0 : Math.round(volume * 100)}
               onChange={(e) => changeVolume(Number(e.target.value) / 100)}
-              className="h-1 w-16 cursor-pointer accent-cyan-400"
+              // Its own input rather than a SettingSlider, so it needs the
+              // same touch hit area spelled out here. Wider too: 64px of track
+              // is a fiddly drag with a thumb even once it is tall enough.
+              className="h-1 w-16 cursor-pointer accent-cyan-400 [@media(hover:none)_and_(pointer:coarse)]:h-9 [@media(hover:none)_and_(pointer:coarse)]:w-24"
               aria-label="Volume"
             />
             <button
@@ -1991,10 +2062,14 @@ export function DemoViewer({
 
           <button
             onClick={toggleFullscreen}
-            title={fullscreen ? "Exit full screen" : "Full screen"}
+            title={fullscreen || pseudoFullscreen ? "Exit full screen" : "Full screen"}
             className="rounded-md bg-white/10 p-1.5 text-white hover:bg-white/20"
           >
-            {fullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
+            {fullscreen || pseudoFullscreen ? (
+              <Minimize className="h-4 w-4" />
+            ) : (
+              <Maximize className="h-4 w-4" />
+            )}
           </button>
         </div>
 
@@ -2162,7 +2237,9 @@ function SettingSlider({
           }
           onChange(Number(e.target.value))
         }}
-        className="h-1 w-full cursor-pointer accent-cyan-400"
+        // Same reasoning as the scrubber: the box is the hit area, the track
+        // stays where it is. Touch only, so desktop is unchanged.
+        className="h-1 w-full cursor-pointer accent-cyan-400 [@media(hover:none)_and_(pointer:coarse)]:h-9"
       />
     </label>
   )
