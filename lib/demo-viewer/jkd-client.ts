@@ -782,6 +782,24 @@ export class JkdEngine {
     void M.SDL2?.audioContext?.resume()
   }
 
+  /**
+   * Let the sound out, if the browser is holding it.
+   *
+   * iOS will not start an AudioContext outside a user gesture, and the tap that
+   * would have counted -- the one on the confirmation card -- happens long
+   * before SDL creates the context, which is well into a 141MB boot. So the
+   * context arrives suspended, the engine mixes into nothing, and playback is
+   * silent with no error anywhere: exactly the failure the brief warns about.
+   *
+   * Safe to call as often as a gesture arrives. Resuming a running context is a
+   * no-op, and the promise is ignored deliberately -- a refusal means there was
+   * no gesture to spend, and the next one will do.
+   */
+  unlockAudio() {
+    const ctx = window.Module?.SDL2?.audioContext
+    if (ctx && ctx.state === "suspended") void ctx.resume()
+  }
+
   /** Run a console command. JKD_Exec terminates it engine-side. */
   private command(cmd: string) {
     if (!this.ready) return

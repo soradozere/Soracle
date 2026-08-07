@@ -31,7 +31,7 @@ import {
 } from "@/lib/demo-viewer/jkd-client"
 import { readLinkState } from "@/lib/demo-link-state"
 import { useTouchPrimary } from "@/hooks/use-touch-primary"
-import { canRunEngine, diagRequested } from "@/lib/demo-viewer/diagnostics"
+import { canRunEngine, diagRequested, logDiagEvent } from "@/lib/demo-viewer/diagnostics"
 import { DemoViewerDiag } from "@/components/demo-viewer-diag"
 import { cn } from "@/lib/utils"
 
@@ -331,6 +331,12 @@ export function DemoViewer({
   const tapStartRef = useRef<{ x: number; y: number; at: number } | null>(null)
   /** Bumped whenever a control is touched, to restart the auto-hide timer. */
   const [chromeBumpAt, setChromeBumpAt] = useState(0)
+  /**
+   * The browser took the GL context back. Terminal for this page load: the
+   * engine builds its GL state once at startup and cannot be made to do it
+   * again from here.
+   */
+  const [contextLost, setContextLost] = useState(false)
   /**
    * Phones are told, rather than shown a broken picture.
    *
@@ -1475,9 +1481,100 @@ export function DemoViewer({
     return () => clearTimeout(timer)
   }, [touchOnly, tapShowsChrome, ready, paused, seeking, ended, chromeBumpAt])
 
+  /*
+   * Spend every user gesture on unlocking the sound until it takes.
+   *
+   * iOS refuses to start an AudioContext outside a gesture, and the obvious one
+   * -- the tap on the confirmation card -- is spent long before SDL creates the
+   * context, which is well into a 141MB boot. So it arrives suspended and
+   * playback is silent, with nothing logged anywhere to say why.
+   *
+   * Listening on the window in the capture phase, so it works wherever the tap
+   * lands and cannot be swallowed by a handler that stops propagation -- the
+   * control bar stops pointer events, and the controls are exactly where a
+   * first tap tends to go. Removed as soon as the context is running.
+   */
+  useEffect(() => {
+    if (!ready) return
+    const engine = engineRef.current
+    if (!engine) return
+    const unlock = () => {
+      engine.unlockAudio()
+      // Cheap to leave attached, but there is no reason to keep asking once
+      // the browser has stopped saying no.
+      if (window.Module?.SDL2?.audioContext?.state === "running") detach()
+    }
+    const detach = () => {
+      window.removeEventListener("pointerdown", unlock, true)
+      window.removeEventListener("keydown", unlock, true)
+    }
+    window.addEventListener("pointerdown", unlock, true)
+    window.addEventListener("keydown", unlock, true)
+    // The mount itself may follow a gesture closely enough to count.
+    unlock()
+    return detach
+  }, [ready])
+
+  /*
+   * Backgrounding the tab stops playback rather than letting it run on.
+   *
+   * requestAnimationFrame already stops when the tab is hidden, so the frame
+   * loop halts on its own -- but the engine's audio does not, because SDL mixes
+   * from a Web Audio callback that is not tied to the frame loop. Left alone, a
+   * phone that switches apps keeps talking. Worse, the demo clock is driven off
+   * real time, so a demo left "running" through five minutes in the background
+   * comes back five minutes further on with nothing rendered in between.
+   *
+   * Deliberately does not resume on return: coming back to a paused picture and
+   * pressing play is predictable, whereas sound restarting by itself when a
+   * phone is unlocked is not.
+   */
+  useEffect(() => {
+    const onVisibility = () => {
+      if (!document.hidden) return
+      const engine = engineRef.current
+      if (!engine || !engine.isReady) return
+      engine.setPaused(true)
+      setPaused(true)
+    }
+    document.addEventListener("visibilitychange", onVisibility)
+    return () => document.removeEventListener("visibilitychange", onVisibility)
+  }, [])
+
+  /*
+   * A lost GL context is a dead canvas, and it must not look like a stall.
+   *
+   * The browser takes the context back under memory pressure -- likeliest on
+   * exactly the phones this work is for -- and once it is gone the engine
+   * cannot draw again. preventDefault is what allows a restore to be attempted
+   * at all; without it the browser will not bother. But the engine reads its GL
+   * state once at startup and there is no page-side way to rebuild it, so even
+   * a restored context comes back to an engine that has stopped drawing. Saying
+   * so and offering a reload is the honest option, and the one the brief asks
+   * for: never a dead canvas with no explanation.
+   */
+  useEffect(() => {
+    if (!canvasEl) return
+    const onLost = (e: Event) => {
+      e.preventDefault()
+      logDiagEvent("webglcontextlost")
+      engineRef.current?.setPaused(true)
+      setPaused(true)
+      setContextLost(true)
+    }
+    const onRestored = () => logDiagEvent("webglcontextrestored")
+    canvasEl.addEventListener("webglcontextlost", onLost)
+    canvasEl.addEventListener("webglcontextrestored", onRestored)
+    return () => {
+      canvasEl.removeEventListener("webglcontextlost", onLost)
+      canvasEl.removeEventListener("webglcontextrestored", onRestored)
+    }
+  }, [canvasEl])
+
   const showChrome =
     !unsupported &&
     !confirmNeeded &&
+    !contextLost &&
     !pointerLocked &&
     ((touchOnly ? tapShowsChrome : hovering) || paused || !ready || seeking || ended)
 
@@ -1602,6 +1699,28 @@ export function DemoViewer({
             className="mt-1 rounded-full bg-white/10 px-5 py-3 text-sm font-medium text-white ring-1 ring-white/20 transition-colors hover:bg-white/20"
           >
             Load and watch
+          </button>
+        </div>
+      )}
+
+      {/* The GPU took its context back. Nothing will draw again on this page
+          load, so say so and offer the one thing that does fix it. */}
+      {contextLost && (
+        <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-3 bg-black/80 px-6 text-center">
+          <p className="text-sm font-medium text-white/90">The viewer lost the graphics context</p>
+          <p className="max-w-xs text-xs leading-relaxed text-white/50">
+            The browser reclaimed it, usually because something else needed the memory. Reloading
+            starts it again — the demo will be cached, so it won&rsquo;t download twice.
+          </p>
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              window.location.reload()
+            }}
+            className="mt-1 flex items-center gap-2 rounded-full bg-white/10 px-5 py-3 text-sm font-medium text-white ring-1 ring-white/20 transition-colors hover:bg-white/20"
+          >
+            <RotateCcw className="h-4 w-4" />
+            Reload the viewer
           </button>
         </div>
       )}
@@ -2142,11 +2261,24 @@ export function DemoViewer({
         {players.length > 0 && (
           <div className="mt-3">
             <div className="mb-1 text-[11px] uppercase tracking-wider text-white/50">Watching</div>
-            <div className="flex flex-wrap gap-1.5">
+            {/*
+              Wrapping is right with a mouse and wrong with a thumb. Thirteen
+              names wrap to three rows, and in landscape on a phone that is a
+              third of the screen spent on a list, over the picture. One row
+              that scrolls sideways costs a fixed 40pt instead, and scrolling it
+              is a drag rather than a tap so it cannot be confused for one.
+
+              overscroll-contain so reaching the end of the names does not hand
+              the gesture to the page and start scrolling the article behind.
+            */}
+            <div className="flex flex-wrap gap-1.5 [@media(hover:none)_and_(pointer:coarse)]:flex-nowrap [@media(hover:none)_and_(pointer:coarse)]:overflow-x-auto [@media(hover:none)_and_(pointer:coarse)]:overscroll-x-contain [@media(hover:none)_and_(pointer:coarse)]:pb-1">
               <button
                 onClick={() => chooseFollow(-1)}
                 className={cn(
                   "rounded px-2 py-1 text-xs",
+                  // shrink-0 or flex squeezes every name to nothing rather than
+                  // letting the row scroll; nowrap or they break mid-name.
+                  "[@media(hover:none)_and_(pointer:coarse)]:shrink-0 [@media(hover:none)_and_(pointer:coarse)]:whitespace-nowrap [@media(hover:none)_and_(pointer:coarse)]:px-3 [@media(hover:none)_and_(pointer:coarse)]:py-2",
                   follow === -1 ? "bg-cyan-500 text-black" : "bg-white/10 text-white hover:bg-white/20",
                 )}
               >
@@ -2159,6 +2291,7 @@ export function DemoViewer({
                   title={p.visible ? undefined : "Not in view at this moment"}
                   className={cn(
                     "rounded border px-2 py-1 text-xs",
+                    "[@media(hover:none)_and_(pointer:coarse)]:shrink-0 [@media(hover:none)_and_(pointer:coarse)]:whitespace-nowrap [@media(hover:none)_and_(pointer:coarse)]:px-3 [@media(hover:none)_and_(pointer:coarse)]:py-2",
                     follow === p.clientNum
                       ? "border-transparent bg-cyan-500 text-black"
                       : "bg-white/10 text-white hover:bg-white/20",
