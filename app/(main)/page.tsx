@@ -1,9 +1,8 @@
 import type { Metadata } from "next"
 import Link from "next/link"
 import { Zap, BarChart3, Server } from "lucide-react"
-import { computeAchievementLedger, computePlayersDirectory } from "@/lib/achievements-server"
+import { computeAchievementLedger, computePlayersDirectory, computeHomeSummary } from "@/lib/achievements-server"
 import { resolveEquippedTitles } from "@/lib/titles-server"
-import { getMatches, getMatchStatsByMonth, getMonthlyPlayerStats } from "@/app/admin/actions"
 import { listFeedDemoUploads } from "@/lib/demos-server"
 import { HomeActivityFeed, type ActivityItem } from "@/components/home-activity-feed"
 import { HomeCrestGrid } from "@/components/home-crest-grid"
@@ -29,16 +28,17 @@ export const metadata: Metadata = {
 // direct cause of a Vercel usage flag on Fluid CPU and ISR Writes both
 // (5 Aug 2026 audit). Long now that on-demand invalidation carries the real
 // freshness requirement.
+//
+// Worth knowing that this line did nothing at all until 7 Aug 2026. Every
+// reader below now avoids cookies, but three of them (getMatches,
+// getMatchStatsByMonth, getMonthlyPlayerStats) used to go through the
+// cookie-carrying Supabase client, and a single cookie read anywhere in a
+// render opts the whole route out of static rendering -- so this page was
+// rebuilt from scratch on every single visit, at ~538ms of CPU each, for its
+// entire life. It never once honoured the window it declares. If you add a
+// reader here, use an anonymous, cached one (see lib/supabase/anon.ts) or this
+// silently goes back to being a lie.
 export const revalidate = 3600
-
-interface RawMatch {
-  id: string
-  red_team: string[] | null
-  blue_team: string[] | null
-  red_score: number
-  blue_score: number
-  created_at: string
-}
 
 // Everything here is bucketed in UTC, matching the rest of the site's monthly
 // splits (lib/player-profile.ts, the bot's monthly-report route).
@@ -53,30 +53,25 @@ const ACTIVE_PLAYERS_SIZE = 12
 
 export default async function HomePage() {
   const now = new Date()
-  const year = now.getUTCFullYear()
-  const month = now.getUTCMonth() + 1
   const currentKey = monthKeyOf(now.toISOString())
   const monthName = now.toLocaleString("en-GB", { month: "long" })
 
-  const [ledger, directory, matchesRes, statsMonthRes, monthlyPlayerStatsRes, demoUploads] = await Promise.all([
+  const [ledger, directory, home, demoUploads] = await Promise.all([
     computeAchievementLedger(),
     computePlayersDirectory(),
-    getMatches(),
-    getMatchStatsByMonth(year, month),
-    getMonthlyPlayerStats(),
+    computeHomeSummary(),
     listFeedDemoUploads(FEED_SIZE),
   ])
 
-  const allMatches = (matchesRes.success ? (matchesRes.data as RawMatch[]) : []).filter(
-    (m) => m.red_team?.length && m.blue_team?.length,
-  )
+  // Already filtered to matches with both teams, and already newest-first --
+  // computeHomeSummary reverses the ledger's chronological order for exactly
+  // the two uses below (the feed slice, and numbering backwards from the total).
+  const allMatches = home.matches
   const totalMatches = allMatches.length
 
   const matchesThisMonth = allMatches.filter((m) => monthKeyOf(m.created_at) === currentKey)
   const crestsThisMonth = ledger.recent.filter((e) => monthKeyOf(e.date) === currentKey)
-  const killsThisMonth = statsMonthRes.success
-    ? (statsMonthRes.data as { kills: number }[]).reduce((sum, row) => sum + (row.kills ?? 0), 0)
-    : 0
+  const killsThisMonth = home.killsThisMonth
 
   const matchItems: ActivityItem[] = allMatches.slice(0, FEED_SIZE).map((m, i) => ({
     type: "match",
@@ -101,9 +96,7 @@ export default async function HomePage() {
     .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
     .slice(0, FEED_SIZE)
 
-  const monthlyStats = monthlyPlayerStatsRes.success
-    ? (monthlyPlayerStatsRes.data as Record<string, { wins: number; losses: number; draws: number }>)
-    : {}
+  const monthlyStats = home.monthlyPlayerStats
   const activePlayersRanked = directory
     .map((row) => {
       const s = monthlyStats[row.name]
