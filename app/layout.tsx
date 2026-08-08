@@ -4,6 +4,7 @@ import { Inter, Oxanium, Orbitron } from "next/font/google"
 import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
 import { Toaster } from "@/components/ui/toaster"
+import { SITE_URL } from "@/lib/site-url"
 
 const inter = Inter({
   subsets: ["latin"],
@@ -29,7 +30,7 @@ const orbitron = Orbitron({
 const SITE_DESCRIPTION = "6v6 Capture the Flag team balancer for Star Wars Jedi Knight 2: Jedi Outcast"
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://jk2ctf.vercel.app"),
+  metadataBase: new URL(SITE_URL),
   title: "JK2 Capture the Flag",
   description: SITE_DESCRIPTION,
   // og:image / twitter:image are wired automatically from app/opengraph-image.tsx.
