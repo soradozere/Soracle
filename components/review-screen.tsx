@@ -12,7 +12,8 @@ import {
   getPendingMatch,
   rejectPendingMatch,
 } from "@/app/admin/actions"
-import { parseScoreboardCsvText, type ParseSummary } from "@/lib/scoreboard-csv"
+import { type ParseSummary } from "@/lib/scoreboard-csv"
+import { isJsonScoreboard, parseScoreboardFile } from "@/lib/scoreboard-json"
 import type { CsvMatchData } from "@/lib/types"
 
 // The full-page match review. Loads a pending entry + its raw CSV, hands both to
@@ -76,9 +77,13 @@ export function ReviewScreen({ pendingId }: { pendingId: string }) {
         return
       }
       const filename = csv.filename || "scoreboard.csv"
-      setCsvFile(new File([csv.text], filename, { type: "text/csv" }))
+      setCsvFile(
+        new File([csv.text], filename, {
+          type: isJsonScoreboard(filename) ? "application/json" : "text/csv",
+        }),
+      )
       try {
-        const result = parseScoreboardCsvText(csv.text, filename)
+        const result = parseScoreboardFile(csv.text, filename)
         if (!result.ok) {
           if (result.missingColumns.length > 0) setMissingColumns(result.missingColumns)
           setParseError(result.error || "The scoreboard file could not be parsed.")

@@ -11,7 +11,8 @@ import {
 } from "@/components/ui/dialog"
 import { ScoreboardReview } from "@/components/scoreboard-review"
 import { createPendingFromUpload } from "@/app/admin/actions"
-import { parseScoreboardCsvText, summarizeParsedRows, type CsvRow, type ParseSummary } from "@/lib/scoreboard-csv"
+import { summarizeParsedRows, type CsvRow, type ParseSummary } from "@/lib/scoreboard-csv"
+import { isJsonScoreboard, parseScoreboardFile } from "@/lib/scoreboard-json"
 import type { CsvMatchData } from "@/lib/types"
 
 // Thin Dialog wrapper around <ScoreboardReview>. Everything the review actually
@@ -107,9 +108,13 @@ export function MatchStatsCsvModal({
     if (!open || pendingCsvText === undefined) return
     reset()
     const filename = pendingCsvFilename || "scoreboard.csv"
-    setCsvFile(new File([pendingCsvText], filename, { type: "text/csv" }))
+    setCsvFile(
+      new File([pendingCsvText], filename, {
+        type: isJsonScoreboard(filename) ? "application/json" : "text/csv",
+      }),
+    )
     try {
-      const result = parseScoreboardCsvText(pendingCsvText, filename)
+      const result = parseScoreboardFile(pendingCsvText, filename)
       if (!result.ok) {
         if (result.missingColumns.length > 0) setMissingColumns(result.missingColumns)
         if (result.error) setError(result.error)
@@ -117,7 +122,7 @@ export function MatchStatsCsvModal({
       }
       setSummary(result.summary)
     } catch {
-      setError("Something went wrong while reading the CSV.")
+      setError("Something went wrong while reading the scoreboard.")
     }
   }, [open, pendingCsvText, pendingCsvFilename])
 
@@ -126,6 +131,25 @@ export function MatchStatsCsvModal({
     const file = event.target.files?.[0]
     if (!file) return
     setCsvFile(file)
+    const label = isJsonScoreboard(file.name) ? "JSON" : "CSV"
+
+    // JSON is read whole and handed to the shared parser; CSV keeps streaming
+    // through PapaParse on the File, which is what it's good at.
+    if (isJsonScoreboard(file.name)) {
+      file
+        .text()
+        .then((text) => {
+          const result = parseScoreboardFile(text, file.name)
+          if (!result.ok) {
+            if (result.missingColumns.length > 0) setMissingColumns(result.missingColumns)
+            if (result.error) setError(result.error)
+            return
+          }
+          setSummary(result.summary)
+        })
+        .catch(() => setError(`Something went wrong while reading the ${label}. Try another file.`))
+      return
+    }
 
     Papa.parse<CsvRow>(file, {
       header: true,
@@ -154,7 +178,7 @@ export function MatchStatsCsvModal({
       <DialogContent className="bg-[var(--color-surface)]/95 backdrop-blur-md border-[#66fcf1]/30 text-white sm:max-w-6xl max-h-[85vh] flex flex-col">
         <DialogHeader className="shrink-0">
           <DialogTitle className="text-xl" style={{ color: "var(--color-primary)" }}>
-            {isPendingMode ? "Review Pending Match" : logMode ? "Log a Match" : "Upload Match Stats CSV"}
+            {isPendingMode ? "Review Pending Match" : logMode ? "Log a Match" : "Upload Match Stats"}
           </DialogTitle>
         </DialogHeader>
 
@@ -188,14 +212,14 @@ export function MatchStatsCsvModal({
           {!isPendingMode && (
             <input
               type="file"
-              accept=".csv"
+              accept=".csv,.json"
               onChange={handleFileChange}
               className="block w-full text-sm text-[#c5c6c7] file:mr-3 file:cursor-pointer file:rounded-md file:border file:border-[#66fcf1]/40 file:bg-transparent file:px-3 file:py-1.5 file:text-sm file:text-[#66fcf1] hover:file:bg-[#66fcf1]/10"
             />
           )}
           {!summary && missingColumns.length === 0 && !error && !isPendingMode && (
             <p className="text-xs text-[#8892a0]">
-              Select a stats CSV to parse, validate and map players.
+              Select a stats CSV or JSON to parse, validate and map players.
             </p>
           )}
         </ScoreboardReview>
