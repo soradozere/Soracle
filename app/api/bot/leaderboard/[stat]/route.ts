@@ -2,8 +2,10 @@ import { NextResponse } from "next/server"
 import { createClient } from "@/lib/supabase/server"
 import { fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
 
-// Top players by a single match-stat for the current calendar month. Powers bot
-// leaderboards like =dbs. Only allow-listed stat columns are queryable.
+// Top players by a single match-stat. Defaults to the current calendar month;
+// `?range=all` sums the whole history instead, for stats too rare to fill a
+// monthly board (doom kills run about one a week community-wide). Powers bot
+// leaderboards like =dbs and =doom. Only allow-listed stat columns are queryable.
 const ALLOWED_STATS: Record<string, string> = {
   dbs_kills: "DBS kills",
   dbs_returns: "DBS return kills",
@@ -15,6 +17,7 @@ const ALLOWED_STATS: Record<string, string> = {
   flag_grabs: "flag grabs",
   kills: "kills",
   score: "score",
+  doom_kills: "doom kills",
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ stat: string }> }) {
@@ -25,6 +28,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ stat
   if (!(stat in ALLOWED_STATS)) {
     return NextResponse.json({ error: "unknown stat" }, { status: 400 })
   }
+  const allTime = new URL(request.url).searchParams.get("range") === "all"
 
   let players
   try {
@@ -39,34 +43,48 @@ export async function GET(request: Request, { params }: { params: Promise<{ stat
   const now = new Date()
   const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1))
 
-  const { data: monthMatches, error: matchError } = await supabase
-    .from("matches")
-    .select("id")
-    .gte("created_at", monthStart.toISOString())
-  if (matchError) {
-    console.error(matchError)
-    return NextResponse.json({ error: "Failed to fetch matches" }, { status: 500 })
+  const rangeLabel = allTime ? "all time" : monthLabel(now)
+
+  // All-time wants every match, so skip the id filter entirely rather than
+  // building an .in() out of hundreds of UUIDs — that would be a ~10KB query
+  // string for no benefit, since every match_stats row qualifies anyway.
+  let matchIds: string[] | null = null
+  if (!allTime) {
+    const { data: monthMatches, error: matchError } = await supabase
+      .from("matches")
+      .select("id")
+      .gte("created_at", monthStart.toISOString())
+    if (matchError) {
+      console.error(matchError)
+      return NextResponse.json({ error: "Failed to fetch matches" }, { status: 500 })
+    }
+    matchIds = (monthMatches || []).map((m) => m.id)
+    if (matchIds.length === 0) {
+      return NextResponse.json({ stat, label: ALLOWED_STATS[stat], month: rangeLabel, top: [] })
+    }
   }
 
-  const matchIds = (monthMatches || []).map((m) => m.id)
-  if (matchIds.length === 0) {
-    return NextResponse.json({ stat, label: ALLOWED_STATS[stat], month: monthLabel(now), top: [] })
-  }
-
-  const { data, error } = await supabase
-    .from("match_stats")
-    .select(`player_id, ${stat}`)
-    .in("match_id", matchIds)
-  if (error) {
-    console.error(error)
-    return NextResponse.json({ error: "Failed to fetch stats" }, { status: 500 })
-  }
-  const rows = (data ?? []) as unknown as Array<{ player_id: string } & Record<string, number>>
-
+  // Paged: supabase-js caps a select at 1000 rows and match_stats is already
+  // past that all-time, so an unpaged read would silently drop the oldest games
+  // and under-count the board.
+  const PAGE = 1000
   const totals = new Map<string, number>()
-  for (const row of rows) {
-    const value = row[stat] ?? 0
-    totals.set(row.player_id, (totals.get(row.player_id) ?? 0) + value)
+  for (let from = 0; ; from += PAGE) {
+    let q = supabase
+      .from("match_stats")
+      .select(`player_id, ${stat}`)
+      .range(from, from + PAGE - 1)
+    if (matchIds) q = q.in("match_id", matchIds)
+    const { data, error } = await q
+    if (error) {
+      console.error(error)
+      return NextResponse.json({ error: "Failed to fetch stats" }, { status: 500 })
+    }
+    const rows = (data ?? []) as unknown as Array<{ player_id: string } & Record<string, number>>
+    for (const row of rows) {
+      totals.set(row.player_id, (totals.get(row.player_id) ?? 0) + (row[stat] ?? 0))
+    }
+    if (rows.length < PAGE) break
   }
 
   const top = [...totals.entries()]
@@ -75,7 +93,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ stat
     .sort((a, b) => b.value - a.value)
     .slice(0, 5)
 
-  return NextResponse.json({ stat, label: ALLOWED_STATS[stat], month: monthLabel(now), top })
+  return NextResponse.json({ stat, label: ALLOWED_STATS[stat], month: rangeLabel, top })
 }
 
 function monthLabel(d: Date) {
