@@ -165,13 +165,12 @@ export function MatchStatsCsvModal({
           summary={summary}
           csvFile={csvFile}
           showMatchType={showMatchType}
-          // Inline editing is on here too, not just the full-page screen: the
-          // failure this exists for (a warmup player's kills bleeding into the
-          // final scoreboard) can land through any upload path, so a quick fix
-          // shouldn't need a detour. The per-row expander with every remaining
-          // counter stays off — no room for it in a dialog, and needing it is
-          // exactly when "Review in full" is the right move.
-          editable
+          // Read-only on purpose. This screen is the fast lane — glance at the
+          // numbers, sort out any subs/merges, publish. Changing a stat is a
+          // deliberate act and belongs on the full-page review, where there's
+          // room to see what you're changing and the rest of the counters are
+          // reachable. Editing in a cramped dialog invites the wrong kind of
+          // accident on the highest-stakes write in the app.
           onEscalate={allowEscalate ? handleEscalate : undefined}
           escalating={escalating}
           error={error}
