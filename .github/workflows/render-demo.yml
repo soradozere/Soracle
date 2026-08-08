@@ -76,7 +76,10 @@ env:
     zzz_bones.pk3
     zzzTricolor_Sabers_by_Apple.pk3
   R2_PUBLIC: "https://pub-76bff0ef02794a5d95b7e2a8b8660f61.r2.dev"
-  SORACLE_URL: "https://jk2ctf.vercel.app"
+  # Where the callbacks below report back to. A wrong value here fails
+  # silently: the render finishes, the POST goes nowhere, and the job just
+  # looks stuck. Change it and watch one render through end to end.
+  SORACLE_URL: "https://jk2ctf.com"
   RENDER_BUCKET: "jk2renders"
   # Brightness, applied to the finished video as a gamma curve.
   #
