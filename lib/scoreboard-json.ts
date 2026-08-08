@@ -24,9 +24,20 @@ import {
 // The fields we read off the wrapper. Everything else in the file (killed/
 // killedBy matrices, GUIDs, glicko ratings, blocks breakdowns) is deliberately
 // ignored for now — storing those needs schema changes.
+interface JsonKillEdge {
+  name?: string
+  guid?: string
+  kills?: number
+  rets?: number
+  killTypes?: Record<string, number>
+  retTypes?: Record<string, number>
+}
+
 interface JsonPlayerEntry {
   csvData?: Record<string, string>
   killTypes?: Record<string, number>
+  guid?: string
+  killed?: JsonKillEdge[]
 }
 
 interface JsonScoreboard {
@@ -148,4 +159,82 @@ export function parseScoreboardFile(
 ): ParseResult & Partial<JsonParseExtras> {
   if (isJsonScoreboard(filename)) return parseScoreboardJsonText(text, filename)
   return parseScoreboardCsvText(text, filename)
+}
+
+// ---------------------------------------------------------------------------
+// Kill matrix
+// ---------------------------------------------------------------------------
+
+/** One killer → victim pair in a match, identified by session guid. */
+export interface KillEdge {
+  killerGuid: string
+  victimGuid: string
+  kills: number
+  rets: number
+  killTypes: Record<string, number>
+  retTypes: Record<string, number>
+}
+
+export interface KillMatrix {
+  /** Session guid → that player's NAME-CLEAN, for resolving edges to players. */
+  nameByGuid: Record<string, string>
+  edges: KillEdge[]
+}
+
+/**
+ * Pull the per-opponent kill/return matrix out of a JSON scoreboard.
+ *
+ * Read from `killed[]` only. `killedBy[]` is the same data mirrored, so taking
+ * both would double every pair — times-returned for a player is the sum of
+ * `rets` across edges where they are the VICTIM.
+ *
+ * Edges are keyed by session guid rather than name, because `killed[].name` is
+ * the RAW name with colour codes ("^1^1|^7DefiancE^1| ^7Canon") while csvData
+ * carries NAME-CLEAN. The guid is exact and needs no un-colouring. It is only
+ * a session id — useless as a player identity — but within one match it is a
+ * reliable join key, which is all this needs.
+ *
+ * Returns null for a CSV or anything unparseable: the matrix is a JSON-only
+ * feature and its absence is normal, not an error.
+ */
+export function extractKillMatrix(text: string, filename: string): KillMatrix | null {
+  if (!isJsonScoreboard(filename)) return null
+  let parsed: JsonScoreboard
+  try {
+    parsed = JSON.parse(text) as JsonScoreboard
+  } catch {
+    return null
+  }
+  const entries = parsed.playerData
+  if (!Array.isArray(entries)) return null
+
+  const nameByGuid: Record<string, string> = {}
+  for (const e of entries) {
+    const guid = e?.guid
+    const name = e?.csvData?.["NAME-CLEAN"]
+    if (guid && typeof name === "string") nameByGuid[guid] = name.trim()
+  }
+
+  const edges: KillEdge[] = []
+  for (const e of entries) {
+    const killerGuid = e?.guid
+    if (!killerGuid || !Array.isArray(e.killed)) continue
+    for (const k of e.killed) {
+      const victimGuid = k?.guid
+      if (!victimGuid || victimGuid === killerGuid) continue
+      const kills = k.kills ?? 0
+      const rets = k.rets ?? 0
+      // A pair with neither is noise; the scoreboard lists some empty entries.
+      if (kills === 0 && rets === 0) continue
+      edges.push({
+        killerGuid,
+        victimGuid,
+        kills,
+        rets,
+        killTypes: k.killTypes ?? {},
+        retTypes: k.retTypes ?? {},
+      })
+    }
+  }
+  return { nameByGuid, edges }
 }
