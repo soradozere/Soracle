@@ -1,10 +1,11 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
-import { getPendingMatches, rejectPendingMatch } from "@/app/admin/actions"
+import { approvePendingMatch, getPendingCsv, getPendingMatches, rejectPendingMatch } from "@/app/admin/actions"
+import { MatchStatsCsvModal } from "@/components/match-stats-csv-modal"
 import { Button } from "@/components/ui/button"
 import { Inbox, Loader2, Pencil, X } from "lucide-react"
+import type { CsvMatchData } from "@/lib/types"
 
 interface PendingParsedRow {
   in_game_name: string
@@ -42,19 +43,27 @@ function formatDate(iso: string | null): string {
 }
 
 // "Approval needed" queue at the top of Match History, for admins + match admins.
-// Lists games the Discord bot uploaded; Review opens the full-page
-// /admin/review/[id] screen (name mapping, reconnect/sub resolution, stat
-// editing, approval), Reject discards duplicates/junk. Renders nothing for users
+// Lists games the Discord bot uploaded; Review opens the CSV modal for name
+// editing + approval, Reject discards duplicates/junk. Renders nothing for users
 // who can't manage matches or when the queue is empty.
+//
+// Review stays a MODAL on purpose. Approving is usually "glance, publish", and
+// routing that through a page load made a two-second job feel like a process.
+// The modal's "Review in full" button escalates to /admin/review/[id] when a
+// scoreboard actually needs picking apart.
 export function PendingApprovalBin({
   canManage,
+  onApproved,
 }: {
   canManage: boolean
-  /** @deprecated approval now happens on its own route and reloads on return. */
-  onApproved?: () => void
+  onApproved: () => void
 }) {
   const [pending, setPending] = useState<PendingMatch[]>([])
   const [loading, setLoading] = useState(true)
+  const [reviewing, setReviewing] = useState<PendingMatch | null>(null)
+  const [csvText, setCsvText] = useState<string | undefined>(undefined)
+  const [csvFilename, setCsvFilename] = useState<string | undefined>(undefined)
+  const [loadingCsvId, setLoadingCsvId] = useState<string | null>(null)
   const [rejectConfirmId, setRejectConfirmId] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -71,6 +80,54 @@ export function PendingApprovalBin({
   }, [canManage])
 
   if (!canManage || loading || pending.length === 0) return null
+
+  const startReview = async (p: PendingMatch) => {
+    setError(null)
+    setLoadingCsvId(p.id)
+    const result = await getPendingCsv(p.id)
+    setLoadingCsvId(null)
+    if (!result.success || result.text === undefined) {
+      setError(result.error || "Failed to load the scoreboard CSV.")
+      return
+    }
+    setCsvText(result.text)
+    setCsvFilename(result.filename)
+    setReviewing(p)
+  }
+
+  const closeReview = () => {
+    setReviewing(null)
+    setCsvText(undefined)
+    setCsvFilename(undefined)
+  }
+
+  const handleApprove = async (data: CsvMatchData) => {
+    if (!reviewing) return
+    const formData = new FormData()
+    formData.append("file", data.csvFile)
+    formData.append("pending_id", reviewing.id)
+    formData.append(
+      "payload",
+      JSON.stringify({
+        uuid: crypto.randomUUID(),
+        red_team: data.redTeamNames,
+        blue_team: data.blueTeamNames,
+        red_score: data.redScore,
+        blue_score: data.blueScore,
+        match_type: data.matchType ?? "manual",
+        balance_confidence: 0,
+        played_at: data.matchPlayedAtIso,
+        match_stats: data.matchStats,
+      }),
+    )
+    const result = await approvePendingMatch(formData)
+    if (result.success) {
+      setPending((prev) => prev.filter((p) => p.id !== reviewing.id))
+      onApproved()
+    } else {
+      setError(result.error || "Failed to approve the match.")
+    }
+  }
 
   const handleReject = async (id: string) => {
     setBusyId(id)
@@ -158,14 +215,20 @@ export function PendingApprovalBin({
                 ) : (
                   <>
                     <Button
-                      asChild
+                      type="button"
                       size="sm"
+                      onClick={() => startReview(p)}
+                      disabled={loadingCsvId === p.id}
                       className="h-8 bg-[#66fcf1] px-3 text-xs font-medium text-black hover:bg-[#66fcf1]/80"
                     >
-                      <Link href={`/admin/review/${p.id}`}>
-                        <Pencil className="mr-1 h-3 w-3" />
-                        Review
-                      </Link>
+                      {loadingCsvId === p.id ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <>
+                          <Pencil className="mr-1 h-3 w-3" />
+                          Review
+                        </>
+                      )}
                     </Button>
                     <Button
                       type="button"
@@ -184,6 +247,21 @@ export function PendingApprovalBin({
           )
         })}
       </div>
+
+      {/* Keyed by the entry under review so each review remounts fresh — picking
+          up any aliases learned from approving a previous game this session. */}
+      <MatchStatsCsvModal
+        key={reviewing?.id ?? "none"}
+        open={reviewing !== null && csvText !== undefined}
+        onOpenChange={(o) => {
+          if (!o) closeReview()
+        }}
+        onCsvDataReady={handleApprove}
+        pendingCsvText={csvText}
+        pendingCsvFilename={csvFilename}
+        allowEscalate
+        pendingId={reviewing?.id}
+      />
     </div>
   )
 }

@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { Check, ChevronsUpDown, Loader2, RotateCcw } from "lucide-react"
+import { Check, ChevronsUpDown, Loader2, Maximize2, RotateCcw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { fetchAliasesFromDB, fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import {
@@ -252,12 +252,24 @@ export interface ScoreboardReviewProps {
   csvFile: File | null
   /** Shows the Manual/Algorithm toggle and includes matchType in the payload. */
   showMatchType?: boolean
-  /** Allow hand-editing stat values before the match is written. */
+  /** Allow hand-editing the inline stat columns before the match is written. */
   editable?: boolean
+  /**
+   * Also expose the per-row expander with every remaining counter. Off in the
+   * dialog, which has no room for it — that's what the full-page screen is for.
+   */
+  showAllCounters?: boolean
   confirmLabel: string
   onConfirm: (data: CsvMatchData) => void | Promise<void>
   onCancel: () => void
   cancelLabel?: string
+  /**
+   * "Something looks off" escape hatch: escalate to the full-page review. Only
+   * rendered when supplied, so the full-page screen doesn't offer to open
+   * itself.
+   */
+  onEscalate?: () => void
+  escalating?: boolean
   /** Rendered above the table — the file picker in the modal's upload flow. */
   children?: React.ReactNode
   busy?: boolean
@@ -272,10 +284,13 @@ export function ScoreboardReview({
   csvFile,
   showMatchType = false,
   editable = false,
+  showAllCounters = false,
   confirmLabel,
   onConfirm,
   onCancel,
   cancelLabel = "Cancel",
+  onEscalate,
+  escalating = false,
   children,
   busy = false,
   error = null,
@@ -894,7 +909,7 @@ export function ScoreboardReview({
                         {c.label}
                       </th>
                     ))}
-                    {editable && <th className="px-2 py-2 text-center font-medium">More</th>}
+                    {showAllCounters && <th className="px-2 py-2 text-center font-medium">More</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1082,7 +1097,7 @@ export function ScoreboardReview({
                               onChange={(next) => setOverride(d, c.col, next)}
                             />
                           ))}
-                          {editable && (
+                          {showAllCounters && (
                             <td className="px-2 py-1.5 text-center">
                               <button
                                 type="button"
@@ -1094,7 +1109,7 @@ export function ScoreboardReview({
                             </td>
                           )}
                         </tr>
-                        {editable && isExpanded && (
+                        {showAllCounters && isExpanded && (
                           <tr className="border-t border-[var(--color-border)]/40 bg-black/30">
                             <td colSpan={4 + INLINE_COLUMNS.length + 1} className="px-3 py-3">
                               <div className="mb-2 flex items-center justify-between">
@@ -1170,6 +1185,22 @@ export function ScoreboardReview({
           >
             {cancelLabel}
           </Button>
+          {onEscalate && summary && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={onEscalate}
+              disabled={escalating}
+              className="border-[#66fcf1]/50 bg-transparent text-[#66fcf1] hover:bg-[#66fcf1]/10"
+            >
+              {escalating ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Maximize2 className="mr-2 h-4 w-4" />
+              )}
+              Review in full
+            </Button>
+          )}
           {showMatchType && (
             <div className="flex items-center gap-1">
               {(["manual", "algorithm"] as const).map((t) => (

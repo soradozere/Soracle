@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import Papa from "papaparse"
 import {
   Dialog,
@@ -9,6 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { ScoreboardReview } from "@/components/scoreboard-review"
+import { createPendingFromUpload } from "@/app/admin/actions"
 import { parseScoreboardCsvText, summarizeParsedRows, type CsvRow, type ParseSummary } from "@/lib/scoreboard-csv"
 import type { CsvMatchData } from "@/lib/types"
 
@@ -32,6 +34,13 @@ interface MatchStatsCsvModalProps {
   // with the same Manual/Algorithm toggle. The consumer's onCsvDataReady should
   // call logMatchWithStats. Distinct from the default "prefill a form" flow.
   logMode?: boolean
+  // Offer "Review in full", which parks the upload in pending_matches and opens
+  // /admin/review/[id]. Only for flows that own the whole match (log mode) — the
+  // prefill flow hands back to a form the review screen knows nothing about.
+  allowEscalate?: boolean
+  // Already a pending entry (the approval bin). Escalation navigates straight to
+  // it instead of creating a second row for the same scoreboard.
+  pendingId?: string
 }
 
 export function MatchStatsCsvModal({
@@ -41,7 +50,10 @@ export function MatchStatsCsvModal({
   pendingCsvText,
   pendingCsvFilename,
   logMode = false,
+  allowEscalate = false,
+  pendingId,
 }: MatchStatsCsvModalProps) {
+  const router = useRouter()
   const isPendingMode = pendingCsvText !== undefined
   // Both pending review and log mode record the Manual/Algorithm pick and "log on
   // confirm"; only pending hides the file picker.
@@ -51,6 +63,30 @@ export function MatchStatsCsvModal({
   const [csvFile, setCsvFile] = useState<File | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [missingColumns, setMissingColumns] = useState<string[]>([])
+  const [escalating, setEscalating] = useState(false)
+
+  // Hand this scoreboard off to the full-page review. For a bot entry that row
+  // already exists, so we just navigate. For a manual upload the row is created
+  // HERE rather than at upload time, so the ordinary "upload, glance, publish"
+  // path never writes one — only an escalation does.
+  async function handleEscalate() {
+    if (pendingId) {
+      setEscalating(true)
+      router.push(`/admin/review/${pendingId}`)
+      return
+    }
+    if (!csvFile) return
+    setEscalating(true)
+    const formData = new FormData()
+    formData.append("file", csvFile)
+    const result = await createPendingFromUpload(formData)
+    if (result.success && result.pendingId) {
+      router.push(`/admin/review/${result.pendingId}`)
+    } else {
+      setEscalating(false)
+      setError(result.error || "Could not open the full review for this scoreboard.")
+    }
+  }
 
   function reset() {
     setSummary(null)
@@ -129,11 +165,15 @@ export function MatchStatsCsvModal({
           summary={summary}
           csvFile={csvFile}
           showMatchType={showMatchType}
-          // Editing is on here too, not just the full-page screen: the failure
-          // this exists for (a warmup player's kills bleeding into the final
-          // scoreboard) can land through any upload path, so every path needs
-          // the fix. The table scrolls horizontally in the dialog's width.
+          // Inline editing is on here too, not just the full-page screen: the
+          // failure this exists for (a warmup player's kills bleeding into the
+          // final scoreboard) can land through any upload path, so a quick fix
+          // shouldn't need a detour. The per-row expander with every remaining
+          // counter stays off — no room for it in a dialog, and needing it is
+          // exactly when "Review in full" is the right move.
           editable
+          onEscalate={allowEscalate ? handleEscalate : undefined}
+          escalating={escalating}
           error={error}
           missingColumns={missingColumns}
           loadingMessage={isPendingMode ? "Loading match…" : undefined}
