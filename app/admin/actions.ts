@@ -323,7 +323,7 @@ type MatchWithStatsPayload = {
 }
 
 /**
- * Store the per-opponent kill/return matrix for a JSON upload (scripts/024).
+ * Store the per-opponent kill/return matrix for a JSON upload (scripts/037).
  *
  * The matrix identifies players by session guid; match_stats identifies them by
  * the player_id an admin confirmed in review. The bridge is NAME-CLEAN, which

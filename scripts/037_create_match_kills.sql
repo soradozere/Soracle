@@ -1,4 +1,4 @@
--- 024_create_match_kills.sql
+-- 037_create_match_kills.sql
 --
 -- Per-opponent kill/return breakdown for a match: one row per (killer, victim)
 -- pair, as reported by TomArrow's JSON scoreboard (`playerData[].killed[]`).
