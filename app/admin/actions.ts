@@ -541,6 +541,29 @@ export async function getPendingMatches() {
   }
 }
 
+// One pending entry, for the standalone /admin/review/[id] screen. Unlike
+// getPendingMatches this doesn't filter on status, so landing on an
+// already-approved id shows "already handled" rather than a bare not-found.
+export async function getPendingMatch(pendingId: string) {
+  const authz = await requireMatchManager()
+  if (!authz.ok) return { success: false, error: authz.error }
+  try {
+    const { data, error } = await createServiceClient()
+      .from("pending_matches")
+      .select("*")
+      .eq("id", pendingId)
+      .maybeSingle()
+    if (error) return { success: false, error: error.message }
+    if (!data) return { success: false, error: "Pending match not found" }
+    return { success: true, data }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to load pending match",
+    }
+  }
+}
+
 // Fetch a pending match's raw CSV text for the review modal. Authorized to admins
 // + match admins; the row and the private-bucket object are then read with the
 // service role.
