@@ -696,6 +696,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ],
   },
   {
+    // Raised 8 Aug 2026 against 12-month projections (see Blocked! below for
+    // why a 2-month snapshot was the wrong yardstick): the old 100/250/500
+    // ladder put 19 players on the Epic within a year. Now ~30/19/6.
     id: "bser",
     title: "Tornado",
     category: "career",
@@ -703,9 +706,9 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Career backslash kills",
     metric: { type: "careerSum", get: (s) => s.bs_kills },
     ranks: [
-      { threshold: 100, rarity: "common", title: "Tornado Enthusiast" },
-      { threshold: 250, rarity: "rare", title: "Tornado Spammer" },
-      { threshold: 500, rarity: "epic", title: "Tornado King" },
+      { threshold: 150, rarity: "common", title: "Tornado Enthusiast" },
+      { threshold: 500, rarity: "rare", title: "Tornado Spammer" },
+      { threshold: 1500, rarity: "epic", title: "Tornado King" },
     ],
   },
   {
@@ -911,11 +914,15 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     rarity: "rare",
   },
   {
-    // Re-calibrated 29 Jul 2026: at the old 500-threshold, 11 of 49 blockers
-    // (22%) already held Brick Wall — far too common for a rare-tier crest.
-    // Raised to sit past all but the two highest career totals on record
-    // (Interlude 986, yuki 823); epic follows suit so it stays a real reach
-    // rather than nearly-claimed at the old 1000.
+    // Re-calibrated TWICE. The 29 Jul pass raised these against the highest
+    // totals ON RECORD, which was the wrong yardstick: blocks_enemy only
+    // started carrying data on 2026-06-02, so every "career" total was really
+    // ~2 months old. Projected to a year at the same rate, the 29 Jul numbers
+    // gave 37/30/25 holders — an Epic that 25 people hold isn't Epic.
+    //
+    // These ladders are meant to be a YEAR-long chase, so thresholds are now
+    // set against 12-month projections rather than a 2-month snapshot:
+    // 750 -> ~30 players, 2500 -> ~17, 5000 -> ~6.
     id: "blocked",
     title: "Blocked!",
     category: "career",
@@ -923,13 +930,17 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     condition: "Career enemy blocks",
     metric: { type: "careerSum", get: (s) => s.blocks_enemy },
     ranks: [
-      { threshold: 250, rarity: "common" },
-      { threshold: 750, rarity: "rare", title: "Brick Wall" },
-      { threshold: 1250, rarity: "epic", title: "Immovable Object" },
+      { threshold: 750, rarity: "common" },
+      { threshold: 2500, rarity: "rare", title: "Brick Wall" },
+      { threshold: 5000, rarity: "epic", title: "Immovable Object" },
     ],
     pending: true,
   },
   {
+    // Top rank raised 8 Aug 2026 against 12-month projections (see Blocked!
+    // above for why a 2-month snapshot was the wrong yardstick): 10000 put 15
+    // players on a Legendary within a year, 15000 puts ~5. The lower two are
+    // deliberately left alone — they pace the early climb fine at ~37/21.
     id: "bounty-hunter",
     title: "Bounty Hunter",
     category: "career",
@@ -939,7 +950,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ranks: [
       { threshold: 1000, rarity: "common" },
       { threshold: 5000, rarity: "epic", title: "Headhunter" },
-      { threshold: 10000, rarity: "legendary", title: "Mandalorian" },
+      { threshold: 15000, rarity: "legendary", title: "Mandalorian" },
     ],
   },
   {
