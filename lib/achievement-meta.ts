@@ -1210,26 +1210,6 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
     condition: "3+ dooms, 15+ DBS kills and a cap in one match",
     claim: (s) => s.doom_kills >= 3 && s.dbs_kills >= 15 && s.captures >= 1,
   },
-  {
-    id: "queue-killer-3000",
-    title: "Queue Killer 3000",
-    category: "match",
-    icon: "sith-eternal", // shares Rambo's crest — an unstoppable-kills feat
-    condition: "Win a match with zero deaths (10+ min played)",
-    claim: (s, m) => m.won && s.deaths === 0 && (s.time_played ?? 0) >= 10,
-  },
-  {
-    // A team win is capped at 7 captures, so this is only reachable by personally
-    // accounting for every single one of them, at a blistering pace. The scoreboard
-    // has no per-capture timestamps, so "in 7 minutes" is approximated as the
-    // player's whole match — captures and all — fitting inside a 7-minute stint.
-    id: "im-blyating",
-    title: "I'm Blyating",
-    category: "match",
-    icon: "rebel-fist", // shares Kimbo Slice's crest — pure speed
-    condition: "Capture the flag 7 times in under 7 minutes",
-    claim: (s) => s.captures >= 7 && s.time_played != null && s.time_played <= 7,
-  },
 ]
 
 // Both ACHIEVEMENTS and SECRET_ACHIEVEMENTS, by id. Anything that renders a crest
