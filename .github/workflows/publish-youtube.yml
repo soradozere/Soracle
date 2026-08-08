@@ -26,7 +26,8 @@ on:
         default: "private"
 
 env:
-  SORACLE_URL: "https://jk2ctf.vercel.app"
+  # See render-demo.yml: a wrong value here fails silently.
+  SORACLE_URL: "https://jk2ctf.com"
   RENDER_BUCKET: "jk2renders"
 
 jobs:

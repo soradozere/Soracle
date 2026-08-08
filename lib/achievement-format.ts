@@ -1,5 +1,6 @@
 import { findAchievementDef, RARITY_META } from "@/lib/achievement-meta"
 import type { AchievementView } from "@/lib/achievements"
+import { SITE_URL } from "@/lib/site-url"
 
 // Presentation helpers shared by the Discord flows (unlock ping + =achievements):
 // how a rank is named, its crest image URL, profile URL, colour, ordinals.
@@ -12,10 +13,9 @@ export const roman = (n: number) => ROMAN[n - 1] ?? String(n)
 export const fmtDate = (iso: string | null) =>
   iso ? new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }) : ""
 
-export const appUrl = () => (process.env.NEXT_PUBLIC_APP_URL ?? "https://jk2ctf.vercel.app").replace(/\/$/, "")
 export const slug = (name: string) => encodeURIComponent(name.trim().toLowerCase().replace(/\s+/g, "-"))
-export const profileUrl = (name: string) => `${appUrl()}/player/${slug(name)}`
-export const imageUrl = (v: AchievementView) => `${appUrl()}/api/achievement-image/${v.id}?rank=${v.rank}`
+export const profileUrl = (name: string) => `${SITE_URL}/player/${slug(name)}`
+export const imageUrl = (v: AchievementView) => `${SITE_URL}/api/achievement-image/${v.id}?rank=${v.rank}`
 
 export function ordinal(n: number): string {
   const s = ["th", "st", "nd", "rd"]
