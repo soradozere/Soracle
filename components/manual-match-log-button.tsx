@@ -1,43 +1,50 @@
 "use client"
 
-import { useRef, useState } from "react"
-import { useRouter } from "next/navigation"
-import { createPendingFromUpload } from "@/app/admin/actions"
+import { useState } from "react"
+import { logMatchWithStats } from "@/app/admin/actions"
+import { MatchStatsCsvModal } from "@/components/match-stats-csv-modal"
 import { Button } from "@/components/ui/button"
 import { useToast } from "@/hooks/use-toast"
-import { Loader2, Plus } from "lucide-react"
+import { Plus } from "lucide-react"
+import type { CsvMatchData } from "@/lib/types"
 
-// Admin button on Match History: pick a scoreboard CSV, and go straight to the
-// full review screen for it.
+// Admin button on Match History that opens the CSV modal in log mode: upload a
+// scoreboard, map names, pick Manual/Algorithm, and log the match directly (same
+// path as the bot-approval flow, minus the pending step). For scoreboards that
+// never came through the bot.
 //
-// This used to open the CSV modal and log the match on confirm. Now the upload
-// is parked in pending_matches first and the admin is sent to
-// /admin/review/[id] — the same screen the bot's uploads land on. One review
-// path for every source, and an interrupted review survives a refresh instead
-// of losing the parse.
-export function ManualMatchLogButton({ onLogged }: { onLogged?: () => void }) {
-  const router = useRouter()
-  const inputRef = useRef<HTMLInputElement>(null)
-  const [busy, setBusy] = useState(false)
+// Deliberately still a modal. The common case is "upload, glance, publish", and
+// routing that through a page load made a two-second job feel like a process.
+// When something DOES look off, the modal's "Review in full" button escalates to
+// /admin/review/[id] — see the modal for how that hand-off works.
+export function ManualMatchLogButton({ onLogged }: { onLogged: () => void }) {
+  const [open, setOpen] = useState(false)
   const { toast } = useToast()
 
-  async function handleFileChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0]
-    // Clear immediately so picking the same file again still fires a change.
-    event.target.value = ""
-    if (!file) return
-
-    setBusy(true)
+  const handleLog = async (data: CsvMatchData) => {
     const formData = new FormData()
-    formData.append("file", file)
-    const result = await createPendingFromUpload(formData)
-    setBusy(false)
-
-    if (result.success && result.pendingId) {
-      router.push(`/admin/review/${result.pendingId}`)
+    formData.append("file", data.csvFile)
+    formData.append(
+      "payload",
+      JSON.stringify({
+        uuid: crypto.randomUUID(),
+        red_team: data.redTeamNames,
+        blue_team: data.blueTeamNames,
+        red_score: data.redScore,
+        blue_score: data.blueScore,
+        match_type: data.matchType ?? "manual",
+        balance_confidence: 0,
+        played_at: data.matchPlayedAtIso,
+        match_stats: data.matchStats,
+      }),
+    )
+    const result = await logMatchWithStats(formData)
+    if (result.success) {
+      toast({ title: "Match logged with stats." })
+      onLogged()
     } else {
       toast({
-        title: "Couldn't open that scoreboard",
+        title: "Failed to log match",
         description: result.error,
         variant: "destructive",
       })
@@ -49,23 +56,18 @@ export function ManualMatchLogButton({ onLogged }: { onLogged?: () => void }) {
       <Button
         type="button"
         size="sm"
-        disabled={busy}
-        onClick={() => inputRef.current?.click()}
+        onClick={() => setOpen(true)}
         className="h-8 bg-[#66fcf1] px-3 text-xs font-medium text-black hover:bg-[#66fcf1]/80"
       >
-        {busy ? (
-          <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-        ) : (
-          <Plus className="mr-1 h-3 w-3" />
-        )}
+        <Plus className="mr-1 h-3 w-3" />
         Log a Match
       </Button>
-      <input
-        ref={inputRef}
-        type="file"
-        accept=".csv"
-        onChange={handleFileChange}
-        className="hidden"
+      <MatchStatsCsvModal
+        open={open}
+        onOpenChange={setOpen}
+        onCsvDataReady={handleLog}
+        logMode
+        allowEscalate
       />
     </>
   )
