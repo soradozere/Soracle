@@ -21,6 +21,7 @@
  * Deliberately absent: repeated keywords, tag walls, and anything that reads
  * as written for a crawler. Those are what actually trip spam detection.
  */
+import { SITE_URL } from "@/lib/site-url"
 
 /**
  * YouTube rejects angle brackets in titles and descriptions outright -- the
@@ -37,7 +38,6 @@ function stripAngleBrackets(s: string): string {
 
 const TITLE_LIMIT = 100
 const DESCRIPTION_LIMIT = 5000
-export const SITE_URL = "https://jk2ctf.vercel.app"
 
 export interface DemoMetadata {
   /** What the uploader called the video. */
