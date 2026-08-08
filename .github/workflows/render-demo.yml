@@ -76,10 +76,15 @@ env:
     zzz_bones.pk3
     zzzTricolor_Sabers_by_Apple.pk3
   R2_PUBLIC: "https://pub-76bff0ef02794a5d95b7e2a8b8660f61.r2.dev"
-  # Where the callbacks below report back to. A wrong value here fails
-  # silently: the render finishes, the POST goes nowhere, and the job just
-  # looks stuck. Change it and watch one render through end to end.
-  SORACLE_URL: "https://jk2ctf.com"
+  # Where the callbacks below report back to. Deliberately a .vercel.app alias
+  # rather than jk2ctf.com: this is machine-to-machine, nobody ever sees it, and
+  # the alias cannot lapse -- whereas a custom domain that quietly fails to renew
+  # would take the pipeline with it. The failure mode here is the bad one: the
+  # render finishes, the POST goes nowhere, and the job just looks stuck.
+  #
+  # Player-facing URLs are the opposite case and use jk2ctf.com; see
+  # lib/site-url.ts.
+  SORACLE_URL: "https://soracle.vercel.app"
   RENDER_BUCKET: "jk2renders"
   # Brightness, applied to the finished video as a gamma curve.
   #
