@@ -129,6 +129,11 @@ export function MatchStatsCsvModal({
           summary={summary}
           csvFile={csvFile}
           showMatchType={showMatchType}
+          // Editing is on here too, not just the full-page screen: the failure
+          // this exists for (a warmup player's kills bleeding into the final
+          // scoreboard) can land through any upload path, so every path needs
+          // the fix. The table scrolls horizontally in the dialog's width.
+          editable
           error={error}
           missingColumns={missingColumns}
           loadingMessage={isPendingMode ? "Loading match…" : undefined}
