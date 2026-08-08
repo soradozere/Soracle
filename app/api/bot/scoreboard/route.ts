@@ -4,9 +4,9 @@ import { createServiceClient } from "@/lib/supabase/admin"
 import {
   classifyTeam,
   countDistinctPlayers,
-  parseScoreboardCsvText,
   type CsvRow,
 } from "@/lib/scoreboard-csv"
+import { parseScoreboardFile } from "@/lib/scoreboard-json"
 import { createNameResolver } from "@/lib/name-match"
 
 // Minimum distinct players for a game to be worth logging. Below this it's a
@@ -52,7 +52,7 @@ export async function POST(request: Request) {
   const text = await file.text()
 
   // Parse + validate (drops spectators and nameless rows, summarises score/teams).
-  const parsed = parseScoreboardCsvText(text, filename)
+  const parsed = parseScoreboardFile(text, filename)
   if (!parsed.ok) {
     return NextResponse.json(
       {
