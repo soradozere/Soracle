@@ -5,7 +5,9 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { updateTag } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
-import { normalizeName } from "@/lib/name-match"
+import { createNameResolver, normalizeName } from "@/lib/name-match"
+import { fetchAliasesForBot, fetchPlayersForBot } from "@/lib/bot-api"
+import { classifyTeam, countDistinctPlayers, parseScoreboardCsvText } from "@/lib/scoreboard-csv"
 import { notifyAchievementUnlocks } from "@/lib/achievement-notify"
 import { recordSeasonalTitlesSafely } from "@/lib/titles-server"
 import { HISTORY_TAG } from "@/lib/achievements-server"
@@ -537,6 +539,99 @@ export async function getPendingMatches() {
       success: false,
       error: error instanceof Error ? error.message : "Failed to fetch pending matches",
       data: [],
+    }
+  }
+}
+
+// Park a hand-uploaded scoreboard in pending_matches so it lands on the same
+// /admin/review/[id] screen the bot's uploads use. One review path for every
+// source, and the upload survives a refresh or a closed tab.
+//
+// Deliberately NOT gated on the bot's 12-distinct-player minimum: that gate
+// exists because the bot forwards every game it sees, including casual pubs. An
+// admin uploading by hand has already decided this match counts.
+export async function createPendingFromUpload(formData: FormData) {
+  const authz = await requireMatchManager()
+  if (!authz.ok) return { success: false, error: authz.error }
+
+  const file = formData.get("file")
+  if (!(file instanceof File)) return { success: false, error: "No CSV file provided" }
+  const filename = file.name || "scoreboard.csv"
+
+  try {
+    const text = await file.text()
+    const parsed = parseScoreboardCsvText(text, filename)
+    if (!parsed.ok) {
+      return {
+        success: false,
+        error:
+          parsed.error ||
+          (parsed.missingColumns.length
+            ? `Missing required column(s): ${parsed.missingColumns.join(", ")}`
+            : "The CSV could not be parsed."),
+      }
+    }
+    const summary = parsed.summary
+
+    // Suggest a player for every in-game name up front, exactly as the bot route
+    // does, so the review screen opens with the same head start.
+    const admin = createServiceClient()
+    const [players, aliases] = await Promise.all([fetchPlayersForBot(), fetchAliasesForBot()])
+    const resolver = createNameResolver(players, aliases)
+    const rows = summary.rows.map((row) => {
+      const ign = (row["NAME-CLEAN"] ?? "").trim()
+      const match = resolver.resolve(ign)
+      return {
+        in_game_name: ign,
+        team: classifyTeam(row),
+        suggested_player_id: match?.playerId ?? null,
+        match_method: match?.method ?? null,
+        data: row,
+      }
+    })
+
+    const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120)
+    const csvPath = `manual/${crypto.randomUUID()}-${safe}`
+    const { error: uploadError } = await admin.storage
+      .from(PENDING_BUCKET)
+      .upload(csvPath, new Blob([text], { type: "text/csv" }), {
+        contentType: "text/csv",
+        upsert: false,
+      })
+    if (uploadError) return { success: false, error: `CSV upload failed: ${uploadError.message}` }
+
+    const { data: inserted, error: insertError } = await admin
+      .from("pending_matches")
+      .insert({
+        source: "manual_upload",
+        csv_path: csvPath,
+        csv_filename: filename,
+        match_played_at: summary.timestampIso,
+        distinct_players: countDistinctPlayers(summary.rows),
+        red_score: summary.redScore,
+        blue_score: summary.blueScore,
+        parsed: {
+          rows,
+          warnings: summary.warnings,
+          redCount: summary.redCount,
+          blueCount: summary.blueCount,
+        },
+        status: "pending",
+      })
+      .select("id")
+      .single()
+
+    if (insertError || !inserted) {
+      // Roll back the orphaned CSV (best effort), same as the bot route.
+      await admin.storage.from(PENDING_BUCKET).remove([csvPath])
+      return { success: false, error: insertError?.message ?? "Failed to create the review entry" }
+    }
+
+    return { success: true, pendingId: inserted.id as string }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to prepare the upload for review",
     }
   }
 }
