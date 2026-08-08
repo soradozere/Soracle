@@ -7,7 +7,8 @@ import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { createNameResolver, normalizeName } from "@/lib/name-match"
 import { fetchAliasesForBot, fetchPlayersForBot } from "@/lib/bot-api"
-import { classifyTeam, countDistinctPlayers, parseScoreboardCsvText } from "@/lib/scoreboard-csv"
+import { classifyTeam, countDistinctPlayers } from "@/lib/scoreboard-csv"
+import { isJsonScoreboard, parseScoreboardFile } from "@/lib/scoreboard-json"
 import { notifyAchievementUnlocks } from "@/lib/achievement-notify"
 import { recordSeasonalTitlesSafely } from "@/lib/titles-server"
 import { HISTORY_TAG } from "@/lib/achievements-server"
@@ -560,7 +561,7 @@ export async function createPendingFromUpload(formData: FormData) {
 
   try {
     const text = await file.text()
-    const parsed = parseScoreboardCsvText(text, filename)
+    const parsed = parseScoreboardFile(text, filename)
     if (!parsed.ok) {
       return {
         success: false,
@@ -590,12 +591,13 @@ export async function createPendingFromUpload(formData: FormData) {
       }
     })
 
+    const contentType = isJsonScoreboard(filename) ? "application/json" : "text/csv"
     const safe = filename.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 120)
     const csvPath = `manual/${crypto.randomUUID()}-${safe}`
     const { error: uploadError } = await admin.storage
       .from(PENDING_BUCKET)
-      .upload(csvPath, new Blob([text], { type: "text/csv" }), {
-        contentType: "text/csv",
+      .upload(csvPath, new Blob([text], { type: contentType }), {
+        contentType,
         upsert: false,
       })
     if (uploadError) return { success: false, error: `CSV upload failed: ${uploadError.message}` }
