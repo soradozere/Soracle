@@ -278,6 +278,7 @@ export function ReviewScreen({ pendingId }: { pendingId: string }) {
         csvFile={csvFile}
         showMatchType
         editable={!alreadyHandled}
+        showAllCounters={!alreadyHandled}
         busy={busy}
         error={parseError}
         missingColumns={missingColumns}
