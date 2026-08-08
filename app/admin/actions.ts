@@ -8,7 +8,7 @@ import { createServiceClient } from "@/lib/supabase/admin"
 import { createNameResolver, normalizeName } from "@/lib/name-match"
 import { fetchAliasesForBot, fetchPlayersForBot } from "@/lib/bot-api"
 import { classifyTeam, countDistinctPlayers } from "@/lib/scoreboard-csv"
-import { isJsonScoreboard, parseScoreboardFile } from "@/lib/scoreboard-json"
+import { extractKillMatrix, isJsonScoreboard, parseScoreboardFile } from "@/lib/scoreboard-json"
 import { notifyAchievementUnlocks } from "@/lib/achievement-notify"
 import { recordSeasonalTitlesSafely } from "@/lib/titles-server"
 import { HISTORY_TAG } from "@/lib/achievements-server"
@@ -322,6 +322,84 @@ type MatchWithStatsPayload = {
   match_stats: Array<Record<string, unknown>>
 }
 
+/**
+ * Store the per-opponent kill/return matrix for a JSON upload (scripts/037).
+ *
+ * The matrix identifies players by session guid; match_stats identifies them by
+ * the player_id an admin confirmed in review. The bridge is NAME-CLEAN, which
+ * both sides carry — guid → name (from the JSON) → player_id (from the payload
+ * we are about to write).
+ *
+ * Deliberately best-effort and never throws: this feeds the top-capper stat and
+ * head-to-head views, neither of which is worth failing a match save over.
+ *
+ * A name shared by two rows (JK2 players fake each other's names) is DROPPED
+ * rather than guessed — misattributing kills to the wrong human is worse than
+ * having no matrix for that pair.
+ */
+async function saveKillMatrix(
+  supabase: SupabaseClient,
+  matchId: string,
+  file: File,
+  matchStats: Array<Record<string, unknown>>,
+): Promise<void> {
+  try {
+    if (!isJsonScoreboard(file.name)) return
+    const matrix = extractKillMatrix(await file.text(), file.name)
+    if (!matrix || matrix.edges.length === 0) return
+
+    // NAME-CLEAN → player_id, skipping any name claimed by two different rows.
+    const idByName = new Map<string, string | null>()
+    for (const s of matchStats) {
+      const name = typeof s.in_game_name === "string" ? s.in_game_name.trim() : ""
+      const pid = typeof s.player_id === "string" ? s.player_id : null
+      if (!name || !pid) continue
+      idByName.set(name, idByName.has(name) && idByName.get(name) !== pid ? null : pid)
+    }
+    const resolve = (guid: string): string | null => {
+      const name = matrix.nameByGuid[guid]
+      return name ? (idByName.get(name) ?? null) : null
+    }
+
+    // Two rows of the same reconnecting player share a guid, so the same pair
+    // can appear twice — sum them rather than letting the unique index reject
+    // the whole insert.
+    const merged = new Map<string, { killer: string; victim: string; kills: number; rets: number; kt: Record<string, number>; rt: Record<string, number> }>()
+    const addTypes = (into: Record<string, number>, from: Record<string, number>) => {
+      for (const [k, v] of Object.entries(from ?? {})) into[k] = (into[k] ?? 0) + (v ?? 0)
+      return into
+    }
+    for (const e of matrix.edges) {
+      const killer = resolve(e.killerGuid)
+      const victim = resolve(e.victimGuid)
+      if (!killer || !victim || killer === victim) continue
+      const key = `${killer}:${victim}`
+      const cur = merged.get(key) ?? { killer, victim, kills: 0, rets: 0, kt: {}, rt: {} }
+      cur.kills += e.kills
+      cur.rets += e.rets
+      addTypes(cur.kt, e.killTypes)
+      addTypes(cur.rt, e.retTypes)
+      merged.set(key, cur)
+    }
+    if (merged.size === 0) return
+
+    const { error } = await supabase.from("match_kills").insert(
+      [...merged.values()].map((m) => ({
+        match_id: matchId,
+        killer_player_id: m.killer,
+        victim_player_id: m.victim,
+        kills: m.kills,
+        rets: m.rets,
+        kill_types: m.kt,
+        ret_types: m.rt,
+      })),
+    )
+    if (error) console.warn(`Match ${matchId}: kill matrix not saved — ${error.message}`)
+  } catch (err) {
+    console.warn(`Match ${matchId}: kill matrix not saved —`, err)
+  }
+}
+
 // Shared core for logging a match that carries a stats CSV. Orders the work so the
 // DB stays consistent on any failure: upload CSV → insert match → insert stats →
 // move CSV. Returns the new match id. Used by both the manual log flow and the
@@ -439,6 +517,11 @@ async function persistMatchWithStats(
     await removePending()
     return { success: false, error: `Failed to save stats: ${statsError.message}` }
   }
+
+  // 3b. Per-opponent kill/return matrix, JSON uploads only. Best-effort: this
+  //     is additive data for the top-capper stat and head-to-head views, and a
+  //     failure here must not undo an otherwise-good match.
+  await saveKillMatrix(supabase, matchId, file, payload.match_stats)
 
   // 4. Move the CSV from pending/ to its final match_id-named path. A failure
   //    here leaves data correct but the file stuck in pending/ — warn, succeed.
