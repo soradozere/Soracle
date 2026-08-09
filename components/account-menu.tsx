@@ -21,7 +21,7 @@ import { playerSlug } from "@/lib/player-profile"
 // on the bubble itself, which is the only thing in the masthead that can carry a
 // notification without the layout jumping.
 export function AccountMenu() {
-  const [player, setPlayer] = useState<{ name: string } | null>(null)
+  const [player, setPlayer] = useState<{ name: string; avatarUrl: string | null } | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [adminHref, setAdminHref] = useState<string | null>(null)
   const [isAdmin, setIsAdmin] = useState(false)
@@ -33,7 +33,7 @@ export function AccountMenu() {
       .then((r) => r.json())
       .then((data) => {
         if (!active) return
-        setPlayer(data.playerId ? { name: data.name } : null)
+        setPlayer(data.playerId ? { name: data.name, avatarUrl: data.avatarUrl ?? null } : null)
         setLoaded(true)
       })
       .catch(() => active && setLoaded(true))
@@ -104,19 +104,25 @@ export function AccountMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="relative w-9 h-9 rounded-full grid place-items-center font-bold text-[13px] transition-all"
+        className="relative w-9 h-9 rounded-full grid place-items-center font-bold text-[13px] transition-all overflow-hidden"
         style={{
           fontFamily: "var(--font-mono)",
           color: "var(--color-text-bright)",
           border: "1px solid color-mix(in srgb, var(--color-primary) 45%, transparent)",
-          background:
-            "radial-gradient(100% 100% at 30% 20%, color-mix(in srgb, var(--color-primary) 34%, transparent), color-mix(in srgb, var(--color-surface-elevated) 78%, transparent))",
+          background: player.avatarUrl
+            ? undefined
+            : "radial-gradient(100% 100% at 30% 20%, color-mix(in srgb, var(--color-primary) 34%, transparent), color-mix(in srgb, var(--color-surface-elevated) 78%, transparent))",
           boxShadow:
             "inset 0 1px 0 var(--glass-spec), 0 0 14px -6px color-mix(in srgb, var(--color-primary) 70%, transparent)",
         }}
         title={badge ? `${player.name} — ${badge} awaiting review` : player.name}
       >
-        {initials}
+        {player.avatarUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={player.avatarUrl} alt="" className="w-full h-full object-cover" />
+        ) : (
+          initials
+        )}
         {badge !== null && (
           // Amber, not red: on the Sith theme a red dot disappears into the
           // palette entirely.
