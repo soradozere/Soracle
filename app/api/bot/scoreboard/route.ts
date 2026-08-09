@@ -6,7 +6,7 @@ import {
   countDistinctPlayers,
   type CsvRow,
 } from "@/lib/scoreboard-csv"
-import { parseScoreboardFile } from "@/lib/scoreboard-json"
+import { isJsonScoreboard, parseScoreboardFile } from "@/lib/scoreboard-json"
 import { createNameResolver } from "@/lib/name-match"
 
 // Minimum distinct players for a game to be worth logging. Below this it's a
@@ -25,8 +25,8 @@ function str(value: FormDataEntryValue | null): string | null {
 }
 
 /**
- * Bot ingest: the Discord bot POSTs an end-of-match scoreboard CSV here. We parse
- * it, gate on the 12-distinct-player minimum, resolve in-game names to players,
+ * Bot ingest: the Discord bot POSTs an end-of-match scoreboard here — JSON or
+ * CSV, chosen by extension. We parse it, gate on the 12-distinct-player minimum, resolve in-game names to players,
  * and park the result in pending_matches for admin approval. Writes go through the
  * service-role client (the bot is not a Supabase auth user).
  *
@@ -116,10 +116,11 @@ export async function POST(request: Request) {
 
   // Store the raw CSV (canonical) in the private bucket.
   const csvPath = `${guildId ?? "unknown"}/${messageId ?? crypto.randomUUID()}-${safeName(filename)}`
+  const contentType = isJsonScoreboard(filename) ? "application/json" : "text/csv"
   const { error: uploadError } = await supabase.storage
     .from(BUCKET)
-    .upload(csvPath, new Blob([text], { type: "text/csv" }), {
-      contentType: "text/csv",
+    .upload(csvPath, new Blob([text], { type: contentType }), {
+      contentType,
       upsert: false,
     })
   if (uploadError) {
