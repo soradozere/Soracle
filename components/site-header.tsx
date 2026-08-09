@@ -5,11 +5,11 @@ import Link from "next/link"
 import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { ThemeSelector } from "@/components/theme-selector"
-import { AdminNavButton } from "@/components/admin-nav-button"
-import { PlayerNavButton } from "@/components/player-nav-button"
+import { AccountMenu } from "@/components/account-menu"
+import { SegmentedRail, type Segment } from "@/components/segmented-rail"
 import { themes, applyTheme, type ThemeName } from "@/lib/themes"
 import { useToast } from "@/hooks/use-toast"
-import { History, BarChart3, Users, Film } from "lucide-react"
+import { History, BarChart3, Users, Film, Scale } from "lucide-react"
 
 // Shared masthead + nav for the main site pages. Each former tab is now its own
 // route, so nav items are plain links and the active state comes from the URL —
@@ -18,13 +18,16 @@ import { History, BarChart3, Users, Film } from "lucide-react"
 // "How It Works" lives in the Team Balancer panel now, not here — it's
 // specifically about the balancer, so it makes more sense docked to that panel
 // than sitting in the global nav.
-const NAV = [
-  { href: "/balancer", label: "Team Balancer", icon: null },
-  { href: "/matches", label: "Match History", icon: History },
-  { href: "/players", label: "Players", icon: Users },
-  { href: "/stats", label: "Stats", icon: BarChart3 },
-  { href: "/demos", label: "Demos", icon: Film },
-] as const
+//
+// There is no Home item: the brand block on the left is the home link, which is
+// why the rail's thumb retracts on "/" rather than lighting something arbitrary.
+const NAV: Segment[] = [
+  { key: "/balancer", href: "/balancer", label: "Balancer", icon: Scale },
+  { key: "/matches", href: "/matches", label: "Matches", icon: History },
+  { key: "/players", href: "/players", label: "Players", icon: Users },
+  { key: "/stats", href: "/stats", label: "Stats", icon: BarChart3 },
+  { key: "/demos", href: "/demos", label: "Demos", icon: Film },
+]
 
 export function SiteHeader() {
   const pathname = usePathname()
@@ -53,93 +56,102 @@ export function SiteHeader() {
     })
   }
 
+  // Sub-routes count as their section (/demos/123 keeps Demos lit), but "/" must
+  // not match everything.
+  const activeKey =
+    NAV.find((item) => pathname === item.key || pathname.startsWith(`${item.key}/`))?.key ?? null
+
   return (
-    <>
-      <header
-        className="border-b backdrop-blur-xl sticky top-0 z-50"
+    <header
+      className="border-b sticky top-0 z-50 relative"
+      style={{
+        borderColor: "var(--glass-hair)",
+        // Deliberately thin. A masthead opaque enough to hide the starfield has
+        // no glass to it at all — this lets the sky through and lets the sweep
+        // below do the work.
+        background: `linear-gradient(180deg,
+          color-mix(in srgb, var(--color-surface-elevated) calc(var(--glass-mast-veil) * 100%), transparent),
+          color-mix(in srgb, var(--color-surface) calc(var(--glass-mast-veil) * 74%), transparent))`,
+        backdropFilter: "blur(26px) saturate(170%)",
+        WebkitBackdropFilter: "blur(26px) saturate(170%)",
+        boxShadow: "inset 0 1px 0 var(--glass-spec), 0 8px 24px -18px var(--glass-shade)",
+      }}
+    >
+      {/* One specular sweep across the glass. This, not the fill, is what reads
+          as sheen once the background is thin enough to see through. */}
+      <span
+        aria-hidden
+        className="absolute inset-0 pointer-events-none"
         style={{
-          borderColor: "var(--color-border)",
-          backgroundColor: "var(--color-surface)",
+          background: `linear-gradient(104deg,
+            transparent 8%,
+            color-mix(in srgb, var(--color-text-bright) 9%, transparent) 34%,
+            color-mix(in srgb, var(--color-text-bright) 3%, transparent) 47%,
+            transparent 62%)`,
+          mixBlendMode: "overlay",
         }}
-      >
-        <div className="container mx-auto px-4 py-4 md:py-6">
-          {/* No breakpoint here on purpose. The masthead claims a 420px basis —
-              enough for the title to stay on one line — and the nav refuses to
-              shrink, so the nav drops to its own row exactly when the two stop
-              fitting together, at whatever width that happens to be. A fixed
-              breakpoint would have to be re-guessed every time a nav item is
-              added. */}
-          <div className="flex flex-wrap items-center justify-between gap-4">
-            <Link
-              href="/"
-              className="flex items-center gap-3 md:gap-4 min-w-0 flex-1 basis-[420px] hover:opacity-90 transition-opacity"
+      />
+
+      <div className="container mx-auto px-4 py-3 relative">
+        {/* No breakpoint here on purpose. The masthead claims a 420px basis —
+            enough for the title to stay on one line — and the nav refuses to
+            shrink, so the nav drops to its own row exactly when the two stop
+            fitting together, at whatever width that happens to be. A fixed
+            breakpoint would have to be re-guessed every time a nav item is
+            added. */}
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <Link
+            href="/"
+            className="flex items-center gap-3 min-w-0 flex-1 basis-[420px] hover:opacity-90 transition-opacity"
+          >
+            <span
+              className="w-11 h-11 rounded-xl grid place-items-center shrink-0"
+              style={{
+                border: "1px solid color-mix(in srgb, var(--color-primary) 38%, transparent)",
+                background: `radial-gradient(120% 120% at 30% 10%, color-mix(in srgb, var(--color-primary) 26%, transparent), transparent 70%),
+                  color-mix(in srgb, var(--color-surface-elevated) 60%, transparent)`,
+                boxShadow:
+                  "inset 0 1px 0 var(--glass-spec), 0 0 18px -6px color-mix(in srgb, var(--color-primary) 60%, transparent)",
+              }}
             >
               <Image
                 src="/logo.png"
                 alt="JK2 Logo"
-                width={50}
-                height={50}
-                className="drop-shadow-[0_0_10px_rgba(102,252,241,0.5)] md:w-[60px] md:h-[60px] shrink-0"
+                width={30}
+                height={30}
+                className="w-[30px] h-[30px] object-contain"
+                style={{ filter: "drop-shadow(0 0 6px color-mix(in srgb, var(--color-primary) 55%, transparent))" }}
               />
-              <div className="min-w-0">
-                <h1
-                  className="text-xl md:text-2xl lg:text-3xl font-bold glow-text mb-1"
-                  style={{ fontFamily: "var(--font-orbitron)" }}
-                >
-                  JK2 CAPTURE THE FLAG
-                </h1>
-                {/* Truncates rather than wraps: this line is the widest thing in
-                    the masthead, and letting it demand its full width is what
-                    starves the nav. */}
-                <p className="text-xs md:text-sm truncate" style={{ color: "var(--color-text-dim)" }}>
-                  Jedi Knight 2: Jedi Outcast • 6v6 Competitive • Also known as Soracle • With thanks to TomArrow
-                </p>
-              </div>
-            </Link>
-            {/* wrap + shrink-0: the masthead beside this is wide, so at mid
-                widths the nav has to fall to a second row rather than push the
-                page into a horizontal scroll. */}
-            {/* Shrinkable on purpose: `shrink-0` would pin this to the width of
-                all five buttons in a row, which is wider than a phone, and its
-                own flex-wrap would then never fire. Allowed to shrink, it wraps
-                its buttons internally once it has dropped to its own line. */}
-            <div className="flex flex-wrap gap-2 justify-end">
+            </span>
+            <div className="min-w-0">
+              <h1
+                className="text-[17px] font-bold glow-text tracking-[0.06em] leading-tight"
+                style={{ fontFamily: "var(--font-orbitron)" }}
+              >
+                JK2 CAPTURE THE FLAG
+              </h1>
+              {/* Truncates rather than wraps: this line is the widest thing in
+                  the masthead, and letting it demand its full width is what
+                  starves the nav. */}
+              <p className="text-[11px] truncate mt-0.5" style={{ color: "var(--color-text-dim)" }}>
+                Jedi Knight II: Jedi Outcast · 6v6 Competitive
+              </p>
+            </div>
+          </Link>
+
+          {/* Shrinkable on purpose: `shrink-0` would pin this to the width of
+              the whole rail plus cluster, which is wider than a phone, and its
+              own flex-wrap would then never fire. */}
+          <div className="flex flex-wrap items-center gap-3 justify-end">
+            <SegmentedRail segments={NAV} activeKey={activeKey} aria-label="Site sections" />
+            <span className="w-px h-6 hidden sm:block" style={{ backgroundColor: "var(--glass-hair)" }} />
+            <div className="flex items-center gap-2">
               <ThemeSelector currentTheme={currentTheme} onThemeChange={handleThemeChange} />
-              {NAV.map(({ href, label, icon: Icon }) => {
-                const active = pathname === href
-                return (
-                  <Link
-                    key={href}
-                    href={href}
-                    className={`flex-1 md:flex-none px-3 md:px-4 py-2 rounded-md transition-all font-medium text-sm flex items-center justify-center gap-1.5 ${
-                      active ? "font-bold" : "hover:bg-[#3d4855] border"
-                    }`}
-                    style={
-                      active
-                        ? {
-                            backgroundColor: "var(--color-primary)",
-                            color: "var(--color-background)",
-                            boxShadow: "0 0 15px var(--color-primary-glow)",
-                          }
-                        : {
-                            backgroundColor: "var(--color-surface-elevated)",
-                            color: "var(--color-text)",
-                            borderColor: "var(--color-border)",
-                          }
-                    }
-                  >
-                    {Icon && <Icon className="w-4 h-4" />}
-                    {label}
-                  </Link>
-                )
-              })}
-              <PlayerNavButton />
-              <AdminNavButton />
+              <AccountMenu />
             </div>
           </div>
         </div>
-      </header>
-
-    </>
+      </div>
+    </header>
   )
 }

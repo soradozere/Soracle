@@ -187,24 +187,24 @@ const DETAIL_CSS = `
 .ach-statline b{color:#e6edf3;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 .ach-h2{font-family:var(--font-orbitron),sans-serif;font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:#8892a0;font-weight:800;margin:34px 0 10px}
 
-.ach-tw{overflow-x:auto;border:1px solid #2a3542;border-radius:8px;background:#151b24}
+.ach-tw{overflow-x:auto;border:1px solid color-mix(in srgb, var(--color-border) 72%, var(--color-background));border-radius:8px;background:color-mix(in srgb, var(--color-surface) 62%, var(--color-background))}
 .ach-table{border-collapse:collapse;width:100%;font-size:13px;min-width:420px}
-.ach-table th{text-align:left;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#8892a0;padding:9px 14px;border-bottom:1px solid #3d4855;white-space:nowrap;font-weight:700}
-.ach-table td{padding:9px 14px;border-top:1px solid #2a3542;color:#c5c6c7}
+.ach-table th{text-align:left;font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--color-text-dim);padding:9px 14px;border-bottom:1px solid var(--color-border);white-space:nowrap;font-weight:700}
+.ach-table td{padding:9px 14px;border-top:1px solid color-mix(in srgb, var(--color-border) 72%, var(--color-background));color:var(--color-text)}
 .ach-table tbody tr:first-child td{border-top:0}
 .ach-num{text-align:right;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums}
 .ach-ord{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#66fcf1;font-weight:700;width:64px}
-.ach-who{font-weight:700;color:#e6edf3;text-decoration:none}
+.ach-who{font-weight:700;color:var(--color-text-bright);text-decoration:none}
 .ach-who:hover{color:#66fcf1}
 .ach-rk{font-style:italic;font-weight:800;width:56px}
-.ach-dim{color:#8892a0}
-.ach-empty{text-align:center;color:#8892a0;padding:22px;border:1px dashed #2a3542;border-radius:8px;font-size:13px;margin:0}
+.ach-dim{color:var(--color-text-dim)}
+.ach-empty{text-align:center;color:var(--color-text-dim);padding:22px;border:1px dashed color-mix(in srgb, var(--color-border) 72%, var(--color-background));border-radius:8px;font-size:13px;margin:0}
 .ach-pill{font-size:10px;font-weight:800;letter-spacing:.06em;padding:2px 9px;border-radius:999px;border:1px solid var(--rc);color:color-mix(in srgb,var(--rc) 82%,#fff);white-space:nowrap}
 
 .ach-rank-block{margin-bottom:16px}
 .ach-rank-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:0 2px 8px}
 .ach-rank-num{font-family:var(--font-orbitron),sans-serif;font-size:17px;font-weight:800;font-style:italic;color:var(--rc);text-shadow:0 0 8px color-mix(in srgb,var(--rc) 55%,transparent);min-width:26px}
-.ach-rank-name{font-weight:700;font-size:14px;color:#e6edf3}
-.ach-rank-need{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:#8892a0;font-variant-numeric:tabular-nums}
-.ach-rank-count{margin-left:auto;font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:#8892a0}
+.ach-rank-name{font-weight:700;font-size:14px;color:var(--color-text-bright)}
+.ach-rank-need{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11.5px;color:var(--color-text-dim);font-variant-numeric:tabular-nums}
+.ach-rank-count{margin-left:auto;font-size:10px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;color:var(--color-text-dim)}
 `

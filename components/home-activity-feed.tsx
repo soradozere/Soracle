@@ -19,11 +19,11 @@ function MatchRow({ item }: { item: Extract<ActivityItem, { type: "match" }> }) 
         </span>
         <span className="home-feed-main">
           <span>
-            <b className="text-[#e6edf3]">Match #{item.ordinal}</b>
-            <span className="text-[#8892a0]"> logged &mdash; </span>
-            <b className="text-[#ff4757]">Red {item.redScore}</b>
-            <span className="text-[#8892a0]"> : </span>
-            <b className="text-[#62d6e8]">{item.blueScore} Blue</b>
+            <b className="text-[var(--color-text-bright)]">Match #{item.ordinal}</b>
+            <span className="text-[var(--color-text-dim)]"> logged &mdash; </span>
+            <b className="text-[var(--color-accent-red)]">Red {item.redScore}</b>
+            <span className="text-[var(--color-text-dim)]"> : </span>
+            <b className="text-[var(--color-accent-blue)]">{item.blueScore} Blue</b>
           </span>
           <span className="home-feed-sub">{item.playerCount} players</span>
         </span>
@@ -45,8 +45,8 @@ function CrestRow({ item }: { item: Extract<ActivityItem, { type: "crest" }> }) 
         </span>
         <span className="home-feed-main">
           <span>
-            <b className="text-[#e6edf3]">{e.playerName}</b>
-            <span className="text-[#8892a0]"> earned </span>
+            <b className="text-[var(--color-text-bright)]">{e.playerName}</b>
+            <span className="text-[var(--color-text-dim)]"> earned </span>
             <b style={{ color }}>{name}</b>
           </span>
           <span className="home-feed-sub" style={{ color }}>
@@ -70,8 +70,8 @@ function DemoRow({ item }: { item: Extract<ActivityItem, { type: "demo" }> }) {
         </span>
         <span className="home-feed-main">
           <span>
-            <span className="text-[#8892a0]">New demo &mdash; </span>
-            <b className="text-[#e6edf3]">{item.title}</b>
+            <span className="text-[var(--color-text-dim)]">New demo &mdash; </span>
+            <b className="text-[var(--color-text-bright)]">{item.title}</b>
           </span>
           <span className="home-feed-sub">
             {item.gametype}
@@ -86,7 +86,7 @@ function DemoRow({ item }: { item: Extract<ActivityItem, { type: "demo" }> }) {
 
 export function HomeActivityFeed({ items }: { items: ActivityItem[] }) {
   if (!items.length) {
-    return <p className="text-sm text-[#8892a0]">Nothing logged yet.</p>
+    return <p className="text-sm text-[var(--color-text-dim)]">Nothing logged yet.</p>
   }
 
   return (
@@ -102,23 +102,27 @@ export function HomeActivityFeed({ items }: { items: ActivityItem[] }) {
         )
       })}
       <style>{`
-        .home-feed{list-style:none;margin:0;padding:0;max-height:560px;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#2a3542 #0b0c10}
+        /* Absolute, deliberately: it fills the panel exactly, and because an
+           absolutely-positioned box contributes nothing to intrinsic sizing, the
+           panel beside it decides how tall the row is. That's what keeps the feed
+           level with the video at every width without a magic pixel height. */
+        .home-feed{list-style:none;margin:0;padding:0;position:absolute;inset:0;overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:color-mix(in srgb, var(--color-border) 72%, var(--color-background)) var(--color-background)}
         .home-feed::-webkit-scrollbar{width:6px}
-        .home-feed::-webkit-scrollbar-track{background:#0b0c10;border-radius:999px;margin:4px 0}
-        .home-feed::-webkit-scrollbar-thumb{background:#2a3542;border-radius:999px;border:1px solid #0b0c10}
-        .home-feed::-webkit-scrollbar-thumb:hover{background:#3d4855}
-        .home-feed-row{display:grid;grid-template-columns:30px 1fr auto;gap:12px;align-items:center;padding:11px 14px;border-top:1px solid #2a3542;color:#c5c6c7;text-decoration:none}
+        .home-feed::-webkit-scrollbar-track{background:var(--color-background);border-radius:999px;margin:4px 0}
+        .home-feed::-webkit-scrollbar-thumb{background:color-mix(in srgb, var(--color-border) 72%, var(--color-background));border-radius:999px;border:1px solid var(--color-background)}
+        .home-feed::-webkit-scrollbar-thumb:hover{background:var(--color-border)}
+        .home-feed-row{display:grid;grid-template-columns:30px 1fr auto;gap:12px;align-items:center;padding:11px 14px;border-top:1px solid color-mix(in srgb, var(--color-border) 72%, var(--color-background));color:var(--color-text);text-decoration:none}
         .home-feed li:first-child .home-feed-row{border-top:0}
-        a.home-feed-row:hover{background:#1f2833}
-        a.home-feed-row:focus-visible{outline:none;background:#1f2833;box-shadow:inset 3px 0 0 #66fcf1}
-        .home-feed-row--match{background:rgba(98,214,232,0.06);box-shadow:inset 3px 0 0 #62d6e8}
-        .home-feed-row--demo{background:rgba(167,139,250,0.06);box-shadow:inset 3px 0 0 #a78bfa}
-        .home-feed-ico{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:#151b24;border:1px solid #2a3542;color:#66fcf1;flex-shrink:0}
-        .home-feed-ico--match{color:#62d6e8;border-color:#62d6e855}
-        .home-feed-ico--demo{color:#a78bfa;border-color:#a78bfa55}
+        a.home-feed-row:hover{background:color-mix(in srgb, var(--color-surface-elevated) 70%, transparent)}
+        a.home-feed-row:focus-visible{outline:none;background:color-mix(in srgb, var(--color-surface-elevated) 70%, transparent);box-shadow:inset 3px 0 0 var(--color-primary)}
+        .home-feed-row--match{background:color-mix(in srgb, var(--color-accent-blue) 8%, transparent);box-shadow:inset 3px 0 0 var(--color-accent-blue)}
+        .home-feed-row--demo{background:color-mix(in srgb, var(--color-accent-purple) 8%, transparent);box-shadow:inset 3px 0 0 var(--color-accent-purple)}
+        .home-feed-ico{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;background:color-mix(in srgb, var(--color-surface) 62%, var(--color-background));border:1px solid color-mix(in srgb, var(--color-border) 72%, var(--color-background));color:var(--color-primary);flex-shrink:0}
+        .home-feed-ico--match{color:var(--color-accent-blue);border-color:var(--color-accent-blue)55}
+        .home-feed-ico--demo{color:var(--color-accent-purple);border-color:var(--color-accent-purple)55}
         .home-feed-main{display:flex;flex-direction:column;gap:1px;min-width:0;font-size:13.5px}
-        .home-feed-sub{font-size:11px;color:#8892a0;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
-        .home-feed-date{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:#8892a0;font-variant-numeric:tabular-nums;white-space:nowrap}
+        .home-feed-sub{font-size:11px;color:var(--color-text-dim);font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+        .home-feed-date{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;color:var(--color-text-dim);font-variant-numeric:tabular-nums;white-space:nowrap}
         @media (max-width:640px){
           .home-feed-row{grid-template-columns:26px 1fr;row-gap:4px}
           .home-feed-date{grid-column:2}

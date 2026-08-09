@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import { PasswordChangeForm } from "@/components/password-change-form"
+import { FeaturedVideoAdmin } from "@/components/featured-video-admin"
 
 export default async function SettingsPage() {
   const supabase = await createClient()
@@ -41,11 +42,20 @@ export default async function SettingsPage() {
 
       <main className="container mx-auto px-4 py-8 max-w-2xl">
         <div className="mb-6">
-          <h2 className="text-3xl font-bold mb-2">Account Settings</h2>
-          <p className="text-muted-foreground">Manage your account settings and security preferences.</p>
+          <h2 className="text-3xl font-bold mb-2">Site &amp; Account Settings</h2>
+          <p className="text-muted-foreground">Site configuration an admin can change without a deploy, plus your own account.</p>
         </div>
 
         <div className="space-y-6">
+          <div className="border rounded-lg p-6">
+            <h3 className="text-xl font-semibold mb-1">Homepage Featured Video</h3>
+            <p className="text-muted-foreground text-sm mb-4">
+              Normally the newest upload on youtube.com/@jk2ctf. Pin a specific video when someone posts a frag movie
+              on their own channel, then switch back to automatic.
+            </p>
+            <FeaturedVideoAdmin />
+          </div>
+
           <div className="border rounded-lg p-6">
             <h3 className="text-xl font-semibold mb-4">Change Password</h3>
             <PasswordChangeForm />
