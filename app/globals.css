@@ -174,73 +174,195 @@
   }
 }
 
-/* Light theme (Cloud City) only: the app is dark-first and hardcodes the Jedi
-   palette in many components. These remap those exact hardcoded hexes to the
-   active theme variables so light mode reads correctly, without touching
-   component files. Substring matchers also catch opacity variants (e.g. /95). */
+/* The app is dark-first and hardcodes the Jedi palette in a great many
+   components (bg-[#1f2833], border-[#3d4855], text-[#66fcf1] …). These remap
+   those exact hexes to the active theme's variables, so a panel written against
+   the Jedi palette still turns warm on Bespin and red on Sith without touching
+   the component.
+
+   This used to be scoped to html[data-theme="cloud-city"], which is why only the
+   light theme ever looked right: every other theme left those boxes sitting at
+   the literal Jedi hexes while the text and accents around them changed. It now
+   applies under any data-theme (applyTheme always sets one), and Cloud City
+   keeps its extra light-only rules further down.
+
+   Semantic colours that carry meaning rather than palette -- the red/blue team
+   hexes, win green, danger red, gold -- are deliberately NOT in this list. */
+/* Every rule below matches with `~=` — an exact whitespace-separated class
+   token — rather than a substring. That distinction is the whole ballgame here:
+   `[class*="border-[#66fcf1]"]` also matches `hover:border-[#66fcf1]/60`, so a
+   substring rule paints a permanent border on anything that merely names the
+   colour in a hover state, and the `:not()` guard written to prevent that then
+   excluded elements carrying BOTH the plain token and a variant — which is how
+   the balancer's selected cards ended up stuck on Jedi cyan under every theme.
+   `~=` matches the plain token and nothing else.
+
+   Opacity variants are their own tokens (`bg-[#1f2833]/60`), so each one in use
+   is listed explicitly — a translucent panel repainted with a solid colour is
+   the other way this layer can quietly ruin a page. To add one:
+     grep -rho 'bg-\[#1f2833\]/[0-9]*' components app | sort -u
+   Hover variants are re-themed at the bottom, applied only while hovered. */
 @layer utilities {
-  html[data-theme="cloud-city"] [class*="text-[#8892a0]"],
-  html[data-theme="cloud-city"] [class*="text-[#6b7280]"] {
+  html[data-theme] [class~="text-[#8892a0]"],
+  html[data-theme] [class~="text-[#6b7280]"] {
     color: var(--color-text-dim) !important;
   }
-  html[data-theme="cloud-city"] [class*="text-[#c5c6c7]"] {
+  html[data-theme] [class~="text-[#c5c6c7]"] {
     color: var(--color-text) !important;
   }
-  html[data-theme="cloud-city"] [class*="text-[#66fcf1]"] {
+  html[data-theme] [class~="text-[#66fcf1]"] {
     color: var(--color-primary) !important;
   }
-  html[data-theme="cloud-city"] [class*="bg-[#0b0c10]"] {
+  html[data-theme] [class~="bg-[#0b0c10]"] {
     background-color: var(--color-background) !important;
   }
-  html[data-theme="cloud-city"] [class*="bg-[#1f2833]"] {
+  html[data-theme] [class~="bg-[#1f2833]"] {
     background-color: var(--color-surface) !important;
   }
-  html[data-theme="cloud-city"] [class*="bg-[#2a3441]"],
-  html[data-theme="cloud-city"] [class*="bg-[#3d4855]"] {
+  html[data-theme] [class~="bg-[#2a3441]"],
+  html[data-theme] [class~="bg-[#3d4855]"] {
     background-color: var(--color-surface-elevated) !important;
   }
-  html[data-theme="cloud-city"] [class*="bg-[#66fcf1]"] {
+  html[data-theme] [class~="bg-[#66fcf1]"] {
     background-color: var(--color-primary) !important;
   }
-  html[data-theme="cloud-city"] [class*="border-[#3d4855]"] {
+  html[data-theme] [class~="border-[#3d4855]"] {
     border-color: var(--color-border) !important;
   }
-  html[data-theme="cloud-city"] [class*="border-[#66fcf1]"] {
+  html[data-theme] [class~="border-[#66fcf1]"] {
     border-color: var(--color-primary) !important;
   }
 
-  /* Semantic Tailwind tokens (bg-surface, text-text, border-border, …) bake the
-     dark Jedi values via @theme inline, so they also need remapping on light.
-     Order matters: broader matchers first, more specific (…-elevated/-dim/-bright)
-     after so they win. !important + the [data-theme] scope keeps it light-only. */
-  html[data-theme="cloud-city"] [class*="bg-background"] {
-    background-color: var(--color-background) !important;
+  /* Translucent variants, each preserving its own alpha. */
+  html[data-theme] [class~="bg-[#1f2833]/30"] {
+    background-color: color-mix(in srgb, var(--color-surface) 30%, transparent) !important;
   }
-  html[data-theme="cloud-city"] [class*="bg-surface"] {
-    background-color: var(--color-surface) !important;
+  html[data-theme] [class~="bg-[#1f2833]/40"] {
+    background-color: color-mix(in srgb, var(--color-surface) 40%, transparent) !important;
   }
-  html[data-theme="cloud-city"] [class*="bg-surface-elevated"] {
-    background-color: var(--color-surface-elevated) !important;
+  html[data-theme] [class~="bg-[#1f2833]/50"] {
+    background-color: color-mix(in srgb, var(--color-surface) 50%, transparent) !important;
   }
-  html[data-theme="cloud-city"] [class*="bg-primary"]:not([class*=":bg-primary"]) {
-    background-color: var(--color-primary) !important;
+  html[data-theme] [class~="bg-[#1f2833]/60"] {
+    background-color: color-mix(in srgb, var(--color-surface) 60%, transparent) !important;
   }
-  html[data-theme="cloud-city"] [class*="text-text"] {
-    color: var(--color-text) !important;
+  html[data-theme] [class~="bg-[#1f2833]/80"] {
+    background-color: color-mix(in srgb, var(--color-surface) 80%, transparent) !important;
   }
-  html[data-theme="cloud-city"] [class*="text-text-bright"] {
+  html[data-theme] [class~="bg-[#1f2833]/95"] {
+    background-color: color-mix(in srgb, var(--color-surface) 95%, transparent) !important;
+  }
+  html[data-theme] [class~="bg-[#0b0c10]/30"] {
+    background-color: color-mix(in srgb, var(--color-background) 30%, transparent) !important;
+  }
+  html[data-theme] [class~="bg-[#0b0c10]/60"] {
+    background-color: color-mix(in srgb, var(--color-background) 60%, transparent) !important;
+  }
+  html[data-theme] [class~="bg-[#0b0c10]/95"] {
+    background-color: color-mix(in srgb, var(--color-background) 95%, transparent) !important;
+  }
+  html[data-theme] [class~="bg-[#2a3441]/60"],
+  html[data-theme] [class~="bg-[#3d4855]/60"] {
+    background-color: color-mix(in srgb, var(--color-surface-elevated) 60%, transparent) !important;
+  }
+  html[data-theme] [class~="border-[#66fcf1]/30"] {
+    border-color: color-mix(in srgb, var(--color-primary) 30%, transparent) !important;
+  }
+  html[data-theme] [class~="border-[#66fcf1]/50"] {
+    border-color: color-mix(in srgb, var(--color-primary) 50%, transparent) !important;
+  }
+
+  /* text-white, which is the last thing that made Cloud City unreadable: white
+     numbers and headings sitting on a cream page.
+
+     `text-white` is used two ways in this codebase, and only one of them should
+     flip on a light theme:
+
+       A. white ON a coloured or dark fill — `bg-[#27ae60] text-white`,
+          `bg-red-500 text-white`, gradient buttons, `bg-[#0b0c10]/60 text-white`.
+          White is correct there on every theme.
+       B. white on the page or a panel — the homepage's stat numbers, the
+          balancer's lobby counter, table cells. Unreadable on light.
+
+     Family A always names its own fill on the same element, so `:not([class*="bg-"])`
+     separates the two exactly. Elements that set a light fill AND white text are
+     the one case this can't see; those are fixed in their components instead
+     (the tooltips in scoreboard-review.tsx).
+
+     On dark themes --color-text-bright IS white, so this is a no-op there. */
+  html[data-theme] [class~="text-white"]:not([class*="bg-"]) {
     color: var(--color-text-bright) !important;
   }
-  html[data-theme="cloud-city"] [class*="text-text-dim"] {
-    color: var(--color-text-dim) !important;
+  html[data-theme] [class*="hover:text-white"]:not([class*="bg-"]):hover {
+    color: var(--color-text-bright) !important;
   }
-  html[data-theme="cloud-city"] [class*="text-primary"]:not([class*=":text-primary"]) {
+  /* The other near-white literal in the newer components. */
+  html[data-theme] [class~="text-[#e6edf3]"],
+  html[data-theme] [class~="text-[#e8ecf1]"] {
+    color: var(--color-text-bright) !important;
+  }
+
+  /* …and the hover/focus variants, applied only while actually hovered. */
+  html[data-theme] [class*="hover:text-[#66fcf1]"]:hover {
     color: var(--color-primary) !important;
   }
-  html[data-theme="cloud-city"] [class*="border-border"] {
+  html[data-theme] [class*="hover:border-[#66fcf1]"]:hover {
+    border-color: var(--color-primary) !important;
+  }
+  html[data-theme] [class*="hover:bg-[#3d4855]"]:hover {
+    background-color: var(--color-surface-elevated) !important;
+  }
+
+  /* Semantic Tailwind tokens (bg-surface, text-text, border-border, …) bake the
+     dark Jedi values via @theme inline, so they need remapping too.
+
+     `~=` matches a whitespace-separated class token exactly, which is the right
+     tool here and fixes two bugs the old substring matchers had:
+
+       1. `[class*="bg-surface"]` also matched `bg-surface-elevated`, which is why
+          the rules had to be ordered by specificity and commented about it;
+       2. any element carrying a variant (`hover:bg-primary/90`) was excluded by
+          the `:not()` guard even when it ALSO had the plain token — which is what
+          left every shadcn <Button> stuck on Jedi cyan with a themed label on
+          top of it, unreadable on half the palettes.
+
+     Opacity and variant forms are handled by the explicit rules underneath. */
+  html[data-theme] [class~="bg-background"] {
+    background-color: var(--color-background) !important;
+  }
+  html[data-theme] [class~="bg-surface"] {
+    background-color: var(--color-surface) !important;
+  }
+  html[data-theme] [class~="bg-surface-elevated"] {
+    background-color: var(--color-surface-elevated) !important;
+  }
+  html[data-theme] [class~="bg-primary"] {
+    background-color: var(--color-primary) !important;
+  }
+  html[data-theme] [class*="hover:bg-primary"]:hover {
+    background-color: var(--color-primary) !important;
+  }
+  /* The on-accent colour: without this, a themed accent fill keeps a label that
+     was computed against the Jedi palette. */
+  html[data-theme] [class~="text-primary-foreground"] {
+    color: var(--color-background) !important;
+  }
+  html[data-theme] [class~="text-text"] {
+    color: var(--color-text) !important;
+  }
+  html[data-theme] [class~="text-text-bright"] {
+    color: var(--color-text-bright) !important;
+  }
+  html[data-theme] [class~="text-text-dim"] {
+    color: var(--color-text-dim) !important;
+  }
+  html[data-theme] [class~="text-primary"] {
+    color: var(--color-primary) !important;
+  }
+  html[data-theme] [class~="border-border"] {
     border-color: var(--color-border) !important;
   }
-  html[data-theme="cloud-city"] [class*="border-primary"] {
+  html[data-theme] [class~="border-primary"] {
     border-color: var(--color-primary) !important;
   }
 }
@@ -306,8 +428,13 @@
 }
 
 @layer utilities {
+  /* Theme-driven: this used to hardcode the Jedi cyan, so every heading on the
+     site kept glowing cyan under Sith, Yavin and the rest. Two stops so it reads
+     as a bloom rather than a blur. */
   .glow-text {
-    text-shadow: 0 0 10px rgba(102, 252, 241, 0.5);
+    text-shadow:
+      0 0 10px color-mix(in srgb, var(--color-primary) 45%, transparent),
+      0 0 28px color-mix(in srgb, var(--color-primary) 22%, transparent);
   }
 
   .glow-border {
@@ -329,5 +456,267 @@
 
   .hover-glow:hover:not(:disabled) {
     box-shadow: 0 0 20px var(--color-primary-glow);
+  }
+}
+
+/* ===========================================================================
+   Shared "liquid glass" surface kit.
+
+   One recipe, derived entirely from the active theme's palette vars, so every
+   panel that opts in stays correct on all six themes without per-component
+   colour work. Three knobs carry the whole thing:
+
+     --glass-spec   the top-edge specular highlight
+     --glass-shade  the cast shadow
+     --glass-veil   how opaque the fill is (how much sky shows through)
+
+   Light themes need a bright specular and a soft, warm shadow — the dark
+   defaults read as grime on a pale ground — hence the data-theme override
+   below. That attribute is set by applyTheme() in lib/themes.ts.
+   =========================================================================== */
+:root {
+  --glass-spec: rgba(255, 255, 255, 0.16);
+  --glass-shade: rgba(0, 0, 0, 0.38);
+  --glass-veil: 0.58;
+  --glass-mast-veil: 0.62;
+  --glass-tint: 0.06;
+  --glass-hair: color-mix(in srgb, var(--color-border) 78%, transparent);
+  --glass-ease: cubic-bezier(0.62, 0.04, 0.31, 1);
+}
+
+html[data-theme="cloud-city"] {
+  --glass-spec: rgba(255, 255, 255, 0.9);
+  --glass-shade: rgba(90, 70, 45, 0.13);
+  --glass-veil: 0.66;
+  --glass-mast-veil: 0.72;
+  --glass-tint: 0.1;
+}
+
+@layer components {
+  .glass-panel {
+    position: relative;
+    overflow: hidden;
+    border-radius: 14px;
+    border: 1px solid var(--glass-hair);
+    background:
+      linear-gradient(
+        168deg,
+        color-mix(in srgb, var(--color-surface-elevated) calc(var(--glass-veil) * 100%), transparent),
+        color-mix(in srgb, var(--color-surface) calc(var(--glass-veil) * 78%), transparent)
+      ),
+      linear-gradient(
+        0deg,
+        color-mix(in srgb, var(--color-primary) calc(var(--glass-tint) * 100%), transparent),
+        color-mix(in srgb, var(--color-primary) calc(var(--glass-tint) * 100%), transparent)
+      );
+    backdrop-filter: blur(20px) saturate(150%);
+    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    box-shadow:
+      inset 0 1px 0 var(--glass-spec),
+      0 10px 26px -12px var(--glass-shade);
+  }
+
+  /* The liquid-glass tell: a hairline of light down the top edge that fades
+     round the shoulders, instead of a flat white border. */
+  .glass-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-text-bright) 12%, transparent),
+      transparent 42%
+    );
+    opacity: 0.5;
+    mix-blend-mode: overlay;
+  }
+
+  /* Segmented control: one recessed trough with a single lit thumb that slides
+     between items. Used by the masthead nav and every view toggle, so the whole
+     site shares one motion. The thumb is positioned from JS (SegmentedRail). */
+  .seg-rail {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    padding: 4px;
+    border-radius: 12px;
+    border: 1px solid var(--glass-hair);
+    background: color-mix(in srgb, var(--color-background) 42%, transparent);
+    box-shadow: inset 0 1px 2px var(--glass-shade);
+  }
+
+  .seg-thumb {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    border-radius: 9px;
+    pointer-events: none;
+    z-index: 0;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-primary) 30%, transparent),
+      color-mix(in srgb, var(--color-primary) 15%, transparent)
+    );
+    border: 1px solid color-mix(in srgb, var(--color-primary) 45%, transparent);
+    box-shadow:
+      inset 0 1px 0 var(--glass-spec),
+      0 0 16px -6px color-mix(in srgb, var(--color-primary) 80%, transparent);
+    transition:
+      transform 0.44s var(--glass-ease),
+      width 0.44s var(--glass-ease),
+      opacity 0.2s linear;
+    will-change: transform, width;
+  }
+
+  /* First paint, a resize, or a font swap must not animate from 0 — only a real
+     selection change should slide. */
+  .seg-rail[data-no-anim="true"] .seg-thumb {
+    transition: none;
+  }
+
+  .seg-item {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    padding: 9px 13px;
+    border-radius: 9px;
+    white-space: nowrap;
+    font-size: 12.5px;
+    font-weight: 500;
+    line-height: 1;
+    color: var(--color-text-dim);
+    background: none;
+    border: none;
+    cursor: pointer;
+    text-decoration: none;
+    transition: color 0.28s var(--glass-ease);
+  }
+
+  .seg-item:hover {
+    color: var(--color-text);
+  }
+
+  .seg-item[data-active="true"] {
+    color: var(--color-text-bright);
+    font-weight: 600;
+  }
+
+  /* Glyph chip: the frame the Star Wars emblems sit in (records list, tiles).
+     Tint comes from the parent's `color`, so one chip serves every accent. */
+  .glyph-chip {
+    display: grid;
+    place-items: center;
+    flex: none;
+    border-radius: 10px;
+    border: 1px solid var(--glass-hair);
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--color-surface-elevated) 80%, transparent),
+      color-mix(in srgb, var(--color-surface) 60%, transparent)
+    );
+    box-shadow: inset 0 1px 0 var(--glass-spec);
+    transition: 0.18s;
+  }
+}
+
+/* Page width.
+
+   Tailwind's `container` steps its max-width up through every breakpoint, ending
+   at 1536px -- which on a normal desktop makes each page a wall of edge-to-edge
+   panels, and is the reason the site felt like it wanted to be viewed at 80%
+   zoom. Every page wrapper on the site uses `container mx-auto`, so redefining
+   the utility fixes the lot in one place.
+
+   It has to be `@utility`, not a plain `.container` rule: Tailwind v4 emits the
+   container's per-breakpoint max-widths inside media queries that come after
+   anything written here, so a plain override loses at every breakpoint above
+   640px. `@utility` replaces the generated utility instead of fighting it. */
+@utility container {
+  width: 100%;
+  max-width: 1240px;
+  margin-inline: auto;
+}
+
+/* CSS-only tooltip. Anything with data-hint gets one; add .hint-right or
+   .hint-left when the default centred bubble would clip at a panel edge. */
+@layer utilities {
+  [data-hint] {
+    position: relative;
+  }
+
+  [data-hint]::after {
+    content: attr(data-hint);
+    position: absolute;
+    left: 50%;
+    bottom: calc(100% + 9px);
+    transform: translate(-50%, 4px);
+    z-index: 60;
+    width: max-content;
+    max-width: 290px;
+    white-space: normal;
+    text-align: left;
+    text-transform: none;
+    letter-spacing: 0;
+    padding: 9px 11px;
+    border-radius: 10px;
+    font-family: var(--font-sans);
+    font-size: 11.5px;
+    font-weight: 400;
+    line-height: 1.5;
+    color: var(--color-text);
+    background: color-mix(in srgb, var(--color-surface) 97%, transparent);
+    border: 1px solid var(--glass-hair);
+    box-shadow:
+      inset 0 1px 0 var(--glass-spec),
+      0 16px 34px -16px rgba(0, 0, 0, 0.75);
+    opacity: 0;
+    pointer-events: none;
+    transition: 0.15s;
+  }
+
+  [data-hint]:hover::after,
+  [data-hint]:focus-visible::after {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+
+  .hint-left::after {
+    left: auto;
+    right: 0;
+    transform: translate(0, 4px);
+  }
+
+  .hint-left:hover::after,
+  .hint-left:focus-visible::after {
+    transform: translate(0, 0);
+  }
+
+  /* For controls in the masthead: a bubble above them renders off the top of
+     the viewport (or under the sticky bar), so it hangs below instead. */
+  .hint-below::after {
+    bottom: auto;
+    top: calc(100% + 9px);
+    transform: translate(-50%, -4px);
+  }
+
+  .hint-below:hover::after,
+  .hint-below:focus-visible::after {
+    transform: translate(-50%, 0);
+  }
+
+  .hint-below.hint-left::after {
+    transform: translate(0, -4px);
+  }
+
+  .hint-below.hint-left:hover::after,
+  .hint-below.hint-left:focus-visible::after {
+    transform: translate(0, 0);
   }
 }
