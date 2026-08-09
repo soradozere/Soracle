@@ -141,8 +141,11 @@ export function SiteHeader() {
 
           {/* Shrinkable on purpose: `shrink-0` would pin this to the width of
               the whole rail plus cluster, which is wider than a phone, and its
-              own flex-wrap would then never fire. */}
-          <div className="flex flex-wrap items-center gap-3 justify-end">
+              own flex-wrap would then never fire. min-w-0 matters on phones:
+              without it the auto minimum holds this at the rail's full width
+              and drags the whole page wider than the viewport — with it, the
+              rail's own overflow-x takes over and scrolls. */}
+          <div className="flex flex-wrap items-center gap-3 justify-end min-w-0 max-w-full">
             <SegmentedRail segments={NAV} activeKey={activeKey} aria-label="Site sections" />
             <span className="w-px h-6 hidden sm:block" style={{ backgroundColor: "var(--glass-hair)" }} />
             <div className="flex items-center gap-2">

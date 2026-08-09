@@ -66,6 +66,17 @@ export function SegmentedRail({
     thumb.style.width = `${active.offsetWidth}px`
     thumb.style.height = `${active.offsetHeight}px`
     thumb.style.transform = `translate(${active.offsetLeft}px, ${active.offsetTop}px)`
+
+    // On a rail wider than its box (overflow-x: auto), keep the selection in
+    // view. Adjusting scrollLeft directly, not scrollIntoView, so the page
+    // itself never jumps.
+    if (rail.scrollWidth > rail.clientWidth) {
+      const left = active.offsetLeft - 8
+      const right = active.offsetLeft + active.offsetWidth + 8
+      if (left < rail.scrollLeft) rail.scrollTo({ left, behavior: animate ? "smooth" : "auto" })
+      else if (right > rail.scrollLeft + rail.clientWidth)
+        rail.scrollTo({ left: right - rail.clientWidth, behavior: animate ? "smooth" : "auto" })
+    }
     if (!animate) {
       // Clear on the next frame, or the flag would also suppress the next real
       // selection change.
