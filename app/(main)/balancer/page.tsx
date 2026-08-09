@@ -378,7 +378,12 @@ export default function TeamBalancer() {
 
   return (
     <div className="container mx-auto px-4 py-8 relative z-10">
-          <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4 mb-6 sticky top-[100px] md:top-[120px] z-40">
+          <div
+            className="glass-panel p-4 mb-6 sticky top-[88px] z-40"
+            /* Denser than a normal panel: this one is sticky, so content scrolls
+               underneath it and a standard veil let the text through. */
+            style={{ ["--glass-veil" as string]: 0.86 }}
+          >
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-4">
               <div className="flex items-center gap-2 flex-1 min-w-[200px]">
                 <Users className="w-5 h-5" style={{ color: "var(--color-primary)" }} />

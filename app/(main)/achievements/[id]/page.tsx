@@ -27,7 +27,7 @@ export async function generateMetadata({ params }: { params: Promise<{ id: strin
   if (!def) return { title: "Achievement — JK2 Capture the Flag" }
   return {
     title: `${def.title} — JK2 Capture the Flag`,
-    description: `${def.condition}. See who holds this crest and who got there first.`,
+    description: `${def.condition}. See who holds this achievement and who got there first.`,
   }
 }
 

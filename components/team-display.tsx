@@ -42,7 +42,7 @@ export const TeamDisplay = memo(function TeamDisplay({ result, players, onCopy, 
   return (
     <div className="space-y-6 animate-in fade-in duration-500">
       {/* Action bar - Added glass effect */}
-      <div className="bg-[#1f2833]/50 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
+      <div className="glass-panel p-4">
         <div className="flex items-center justify-end">
           <div className="flex gap-2">
             <button
@@ -79,7 +79,7 @@ export const TeamDisplay = memo(function TeamDisplay({ result, players, onCopy, 
       {/* Teams */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Red Team - Added glass effect */}
-        <div className="bg-[#1f2833]/50 backdrop-blur-md border-2 border-[#ff4757] rounded-lg p-6 glow-border-red">
+        <div className="glass-panel p-6 glow-border-red" style={{ borderColor: "#ff4757", borderWidth: 2 }}>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Flame className="w-6 h-6 text-[#ff4757]" />
@@ -126,7 +126,7 @@ export const TeamDisplay = memo(function TeamDisplay({ result, players, onCopy, 
         </div>
 
         {/* Blue Team - Added glass effect */}
-        <div className="bg-[#1f2833]/50 backdrop-blur-md border-2 border-[#62d6e8] rounded-lg p-6 glow-border-blue">
+        <div className="glass-panel p-6 glow-border-blue" style={{ borderColor: "#62d6e8", borderWidth: 2 }}>
           <div className="flex items-center justify-between mb-4">
             <div className="flex items-center gap-2">
               <Droplet className="w-6 h-6 text-[#62d6e8]" />
