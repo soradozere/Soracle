@@ -231,14 +231,27 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       ? window.matchMedia("(prefers-reduced-motion: reduce)").matches
       : false
 
+    // Whether the site theme sits on a light ground (Cloud City's cream). Keyed
+    // on background LUMINANCE rather than the theme's name, so any future light
+    // theme swaps to the daytime sky without touching this file.
+    let daylight = false
+
     const updateThemeColor = () => {
-      const primaryColor = getComputedStyle(document.documentElement).getPropertyValue("--color-primary").trim()
+      const styles = getComputedStyle(document.documentElement)
+      const primaryColor = styles.getPropertyValue("--color-primary").trim()
       if (primaryColor) {
         const hex = primaryColor.replace("#", "")
         const r = parseInt(hex.substring(0, 2), 16)
         const g = parseInt(hex.substring(2, 4), 16)
         const b = parseInt(hex.substring(4, 6), 16)
         currentColorRef.current = `${r}, ${g}, ${b}`
+      }
+      const bg = styles.getPropertyValue("--color-background").trim()
+      if (/^#[0-9a-f]{6}$/i.test(bg)) {
+        const br = parseInt(bg.slice(1, 3), 16)
+        const bgr = parseInt(bg.slice(3, 5), 16)
+        const bb = parseInt(bg.slice(5, 7), 16)
+        daylight = (0.2126 * br + 0.7152 * bgr + 0.0722 * bb) / 255 > 0.55
       }
     }
 
@@ -545,7 +558,9 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       const arr: GlyphCell[] = []
       for (let col = 0; col < cols; col++) {
         for (let row = 0; row < rows; row++) {
-          if (Math.random() > 0.34) continue
+          // 0.17 fills roughly a sixth of the grid. It was 0.34 — the motion
+          // rework read as a wall of text; half the symbols, same choreography.
+          if (Math.random() > 0.17) continue
           arr.push({
             col,
             row,
@@ -1021,6 +1036,15 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       ctx.fillStyle = vg
       ctx.fillRect(0, 0, w, h)
       // Warm dust motes (tinted by the accent) drifting up through the light.
+      drawDust(time)
+    }
+
+    // Slow accent-tinted motes, shared by the Nostalgia wallpaper and the
+    // daylight sky. They drift upward and wrap; the twinkle keeps a
+    // reduced-motion frame from looking like dead pixels.
+    const drawDust = (time: number) => {
+      const w = canvas.width
+      const h = canvas.height
       const col = currentColorRef.current
       imgDustRef.current.forEach((d) => {
         if (!reduce) {
@@ -1036,6 +1060,22 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
         ctx.fillStyle = `rgba(${col}, ${d.o * tw})`
         ctx.fill()
       })
+    }
+
+    // The daytime sky light site themes swap to (see `daylight`): the Bespin
+    // profile renderer's sun and cloud banks, a warm haze low on the frame for
+    // a horizon, and the accent motes. No stars, galaxies or meteors — over a
+    // cream page they only ever read as grey specks.
+    const drawDaylight = (time: number) => {
+      const w = canvas.width
+      const h = canvas.height
+      drawClouds(time)
+      const haze = ctx.createLinearGradient(0, h * 0.72, 0, h)
+      haze.addColorStop(0, "rgba(255, 214, 170, 0)")
+      haze.addColorStop(1, "rgba(255, 214, 170, 0.38)")
+      ctx.fillStyle = haze
+      ctx.fillRect(0, h * 0.72, w, h * 0.28)
+      drawDust(time)
     }
 
     const drawProfileBg = (kind: string, time: number) => {
@@ -1061,6 +1101,15 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       const kind = bgKindRef.current
       if (kind !== "starfield") {
         drawProfileBg(kind, time)
+        animationFrameIdRef.current = requestAnimationFrame(animate)
+        return
+      }
+
+      // Light site themes (Cloud City) trade the starfield for the daytime
+      // sky. Hyperspace quietly no-ops here — there are no stars to streak in
+      // daylight, and the balancer's trigger is harmless without them.
+      if (daylight) {
+        drawDaylight(time)
         animationFrameIdRef.current = requestAnimationFrame(animate)
         return
       }
