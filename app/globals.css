@@ -492,6 +492,14 @@ html[data-theme="cloud-city"] {
   --glass-tint: 0.1;
 }
 
+/* Profile pages under a full-palette theme: wallpaper art and glyph rain are
+   busier than the site starfield, so the panels carry more fill (the matching
+   blur raise sits with .glass-panel below). Must live out here with the other
+   var definitions — inside a layer it would lose to the unlayered :root. */
+html[data-profile-bg] {
+  --glass-veil: 0.76;
+}
+
 @layer components {
   .glass-panel {
     position: relative;
@@ -509,15 +517,26 @@ html[data-theme="cloud-city"] {
         color-mix(in srgb, var(--color-primary) calc(var(--glass-tint) * 100%), transparent),
         color-mix(in srgb, var(--color-primary) calc(var(--glass-tint) * 100%), transparent)
       );
-    backdrop-filter: blur(20px) saturate(150%);
-    -webkit-backdrop-filter: blur(20px) saturate(150%);
+    /* 14px, down from 20: the blur kernel drags bright content from just
+       outside a panel's edge into it, and on the homepage's 108px stat tiles a
+       glowing CTA or star cluster above smeared in as a milky block across the
+       whole top of the card. At 14px the reach is short enough not to read as
+       a shape while the frost stays. */
+    /* Standard property ONLY — no hand-written -webkit- twin. Lightning CSS
+       collapses a standard+prefixed pair down to just the LAST one written
+       (here that silently shipped -webkit-backdrop-filter alone, which
+       standards-only engines ignore — no blur at all). From the bare standard
+       property it generates whatever prefixes the targets need. */
+    backdrop-filter: blur(14px) saturate(150%);
     box-shadow:
       inset 0 1px 0 var(--glass-spec),
       0 10px 26px -12px var(--glass-shade);
   }
 
   /* The liquid-glass tell: a hairline of light down the top edge that fades
-     round the shoulders, instead of a flat white border. */
+     round the shoulders, instead of a flat white border. Fades all the way out
+     rather than stopping at 42% — the overlay blend made that stop perceivable
+     as a band edge on small tiles. */
   .glass-panel::before {
     content: "";
     position: absolute;
@@ -526,11 +545,21 @@ html[data-theme="cloud-city"] {
     pointer-events: none;
     background: linear-gradient(
       180deg,
-      color-mix(in srgb, var(--color-text-bright) 12%, transparent),
-      transparent 42%
+      color-mix(in srgb, var(--color-text-bright) 10%, transparent),
+      transparent 72%
     );
     opacity: 0.5;
     mix-blend-mode: overlay;
+  }
+
+  /* Profile pages: their backdrops (wallpaper art, glyph rain, nebulae) are
+     far busier than the site starfield, and the standard veil lets them fight
+     the content. More frost here; the matching veil raise lives with the
+     other --glass-* definitions OUTSIDE the layers — an unlayered :root var
+     beats anything declared in a layer, so it can't be overridden from in
+     here. */
+  html[data-profile-bg] .glass-panel {
+    backdrop-filter: blur(24px) saturate(140%); /* standard only — see note above */
   }
 
   /* Segmented control: one recessed trough with a single lit thumb that slides
