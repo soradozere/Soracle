@@ -25,6 +25,7 @@ import {
   THEMES,
   PREVIEW_THEME_IDS,
   earnedTitles,
+  oneOfOneTitles,
   isPreviewTheme,
   mergeRecordedTitles,
   seasonFor,
@@ -153,9 +154,12 @@ function StatTile({
     <Tooltip>
       <TooltipTrigger asChild>
         <div
-          className={`bg-[#0b0c10]/60 border border-[#3d4855] rounded-lg text-center cursor-default ${
-            compact ? "px-2.5 py-2" : "p-2"
-          }`}
+          className={`rounded-[10px] text-center cursor-default ${compact ? "px-2.5 py-2" : "p-2"}`}
+          style={{
+            background: "color-mix(in srgb, var(--color-background) 55%, transparent)",
+            border: "1px solid var(--glass-hair)",
+            boxShadow: "inset 0 1px 0 var(--glass-spec)",
+          }}
         >
           <div className={`font-bold font-mono text-[#c5c6c7] ${compact ? "text-lg leading-tight" : "text-lg"}`}>
             {value}
@@ -185,10 +189,13 @@ function SubHeading({ children, className = "mt-5 mb-3" }: { children: React.Rea
   )
 }
 
+// The glass-panel shell (globals.css) rather than a hand-rolled box: the fill
+// and hairline come off the theme vars, which the full-palette profile themes
+// repaint, so one shell serves Slicer green and Bespin cream alike.
 function SectionCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="bg-[#1f2833]/40 border border-[#3d4855] rounded-lg backdrop-blur-lg">
-      <div className="px-4 py-3 border-b border-[#3d4855]">
+    <div className="glass-panel">
+      <div className="px-4 py-3" style={{ borderBottom: "1px solid var(--glass-hair)" }}>
         <h2 className="text-sm font-bold font-mono tracking-wider text-[var(--pa,#66fcf1)]">{title}</h2>
       </div>
       <div className="p-4">{children}</div>
@@ -1231,8 +1238,16 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
   // and one the player no longer qualifies for simply doesn't display.
   // Live entitlement plus anything banked from past seasons — those ladders are
   // gone from the catalogue, so a July Odysseus can only come from the table.
+  // One-of-one crest titles ride along too: data.achievements only ever
+  // contains a secret for its holder, so this adds nothing for anyone else.
   const earned = data
-    ? mergeRecordedTitles(earnedTitles(achievementScore, monthScore, season), data.recordedTitles)
+    ? mergeRecordedTitles(
+        [
+          ...earnedTitles(achievementScore, monthScore, season),
+          ...oneOfOneTitles(data.achievements.filter((v) => v.earned).map((v) => v.id)),
+        ],
+        data.recordedTitles,
+      )
     : []
   const equippedTitle = fields.title ? earned.find((t) => t.id === fields.title) ?? null : null
   // Highest earned rank per crest (id → rank, 1-based), for the crest-gated themes.
@@ -1332,7 +1347,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
     <TooltipProvider delayDuration={200}>
     <div className="space-y-4 text-[#c5c6c7]">
       {/* ---- Header: avatar, name, slogan, tier + roles ---- */}
-      <div className="bg-[#1f2833]/40 border border-[#3d4855] rounded-lg backdrop-blur-lg p-5">
+      <div className="glass-panel p-5">
         <div className="flex flex-col sm:flex-row gap-5">
           {/* Custom avatar image if set, else initials. The 3D model lives in the
               This Month panel rather than here — the avatar is the player's
