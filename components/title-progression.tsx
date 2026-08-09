@@ -51,7 +51,7 @@ function Ladder({ ladder, value, caption }: { ladder: TitleLadder; value: number
             <span
               key={t.id}
               className={`tp-node ${got ? "is-got" : ""}`}
-              style={{ left: `${(t.threshold / top) * 100}%`, borderColor: got ? c : "#3d4855", background: got ? c : "#0b0c10" }}
+              style={{ left: `${(t.threshold / top) * 100}%`, borderColor: got ? c : "var(--color-border)", background: got ? c : "var(--color-background)" }}
               title={`${t.title} — ${fmt(t.threshold)}`}
             />
           )
@@ -117,7 +117,7 @@ const TP_CSS = `
 .tp-next{font-size:11px;color:#8892a0;font-variant-numeric:tabular-nums}
 .tp-maxed{color:#66fcf1}
 
-.tp-track{position:relative;height:8px;border-radius:999px;background:#0b0c10;border:1px solid #2a3542}
+.tp-track{position:relative;height:8px;border-radius:999px;background:var(--color-background);border:1px solid color-mix(in srgb, var(--color-border) 72%, var(--color-background))}
 .tp-fill{position:absolute;left:0;top:0;bottom:0;border-radius:999px;transition:width .5s ease}
 .tp-node{position:absolute;top:50%;width:11px;height:11px;margin-left:-5.5px;border-radius:50%;border:2px solid;transform:translateY(-50%);transition:background .3s ease,border-color .3s ease}
 .tp-node.is-got{box-shadow:0 0 8px currentColor}

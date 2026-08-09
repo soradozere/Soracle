@@ -7,11 +7,11 @@ export const metadata: Metadata = {
 }
 
 export default function StatsPage() {
+  // No outer panel any more: every section below is its own glass panel, and
+  // wrapping them in one more produced boxes inside a box.
   return (
-    <div className="container mx-auto px-4 py-8 relative z-10">
-      <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-6">
-        <ReportsTab />
-      </div>
+    <div className="container mx-auto px-4 py-6 relative z-10">
+      <ReportsTab />
     </div>
   )
 }

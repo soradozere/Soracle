@@ -12,6 +12,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
+import { RankMedal } from "@/components/reports-tab"
 
 // Hidden, admin-only ELO. ELO is a running rating, replayed in chronological order
 // every load — nothing is persisted, it's derived fresh.
@@ -589,7 +590,7 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
                     >
                       <td className="px-4 py-3">
                         {isTop3 ? (
-                          <span className="text-lg">{index === 0 ? "🥇" : index === 1 ? "🥈" : "🥉"}</span>
+                          <RankMedal index={index} />
                         ) : (
                           <span className="text-[var(--color-text-dim)]">{index + 1}</span>
                         )}

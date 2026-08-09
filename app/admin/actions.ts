@@ -11,7 +11,7 @@ import { classifyTeam, countDistinctPlayers } from "@/lib/scoreboard-csv"
 import { extractKillMatrix, isJsonScoreboard, parseScoreboardFile } from "@/lib/scoreboard-json"
 import { notifyAchievementUnlocks } from "@/lib/achievement-notify"
 import { recordSeasonalTitlesSafely } from "@/lib/titles-server"
-import { HISTORY_TAG } from "@/lib/achievements-server"
+import { HISTORY_TAG, computeStreakRecord } from "@/lib/achievements-server"
 
 const PENDING_BUCKET = "pending-scoreboards"
 
@@ -1005,6 +1005,22 @@ export async function deleteMatch(matchId: string) {
     return {
       success: false,
       error: error instanceof Error ? error.message : "Failed to delete match",
+    }
+  }
+}
+
+// The all-time streak record, for the Stats page to measure the month against.
+// Thin wrapper: the work (and the caching) lives in lib/achievements-server.ts,
+// but the Stats page is a client component and can only reach it through an
+// action. Public data, so no authz — same as everything else on that page.
+export async function getStreakRecord() {
+  try {
+    return { success: true as const, data: await computeStreakRecord() }
+  } catch (error) {
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : "Failed to fetch the streak record",
+      data: null,
     }
   }
 }

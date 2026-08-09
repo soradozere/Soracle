@@ -13,6 +13,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { TS, type Rating, rateMatch, conservativeRating } from "@/lib/trueskill"
+import { RankMedal } from "@/components/reports-tab"
 
 // Hidden, admin-only TrueSkill board. Like the ELO board, it's a running rating replayed
 // in chronological order on every load — nothing is persisted, it's derived fresh.
@@ -527,7 +528,7 @@ export function TrueSkillLeaderboard({ year, month }: TrueSkillLeaderboardProps)
                     >
                       <td className="px-4 py-3">
                         {isTop3 ? (
-                          <span className="text-lg">{index === 0 ? "🥇" : index === 1 ? "🥈" : "🥉"}</span>
+                          <RankMedal index={index} />
                         ) : (
                           <span className="text-[var(--color-text-dim)]">{index + 1}</span>
                         )}

@@ -451,6 +451,13 @@ export interface PlayerRow {
   formWins: number
   formLosses: number
   matches: number
+  /** In-game score accumulated this calendar month (UTC), across stat-tracked
+   *  matches. Zero for a player who hasn't played, or whose month's matches have
+   *  no scoreboard uploaded. */
+  monthScore: number
+  /** Matches played this calendar month (UTC) — the denominator for monthScore,
+   *  counted from matches played rather than from scoreboards uploaded. */
+  monthMatches: number
   lastPlayed: string | null
   inactive: boolean
 }
@@ -469,6 +476,9 @@ export async function computePlayersDirectory(): Promise<PlayerRow[]> {
   const { seqByPlayer, metaById, holders } = await buildHistoryIndex()
 
   const inactiveBefore = Date.now() - INACTIVE_DAYS * 86_400_000
+  // UTC, like every other monthly bucket on the site.
+  const nowUtc = new Date()
+  const monthKey = `${nowUtc.getUTCFullYear()}-${String(nowUtc.getUTCMonth() + 1).padStart(2, "0")}`
   const rows: PlayerRow[] = []
   for (const [pid, seq] of seqByPlayer) {
     const meta = metaById.get(pid)
@@ -508,6 +518,9 @@ export async function computePlayersDirectory(): Promise<PlayerRow[]> {
 
     // seq is chronological, so the tail is the recent end.
     const lastPlayed = seq.length ? seq[seq.length - 1].date : null
+    const thisMonth = seq.filter((m) => m.date.slice(0, 7) === monthKey)
+    const monthScore = thisMonth.reduce((sum, m) => sum + (m.stat?.score ?? 0), 0)
+    const monthMatches = thisMonth.filter((m) => m.played).length
     const recent = seq.slice(-FORM_WINDOW).reverse()
     const form = recent.map((m) => (m.won ? "W" : m.lost ? "L" : "D") as "W" | "L" | "D")
 
@@ -525,6 +538,8 @@ export async function computePlayersDirectory(): Promise<PlayerRow[]> {
       formWins: form.filter((f) => f === "W").length,
       formLosses: form.filter((f) => f === "L").length,
       matches: seq.length,
+      monthScore,
+      monthMatches,
       lastPlayed,
       inactive: meta.manuallyInactive || !lastPlayed || Date.parse(lastPlayed) < inactiveBefore,
     })
@@ -540,6 +555,60 @@ export interface HomeMatch {
   red_score: number
   blue_score: number
   created_at: string
+}
+
+export interface StreakRecord {
+  name: string
+  streak: number
+  /** ISO date of the last win in the run — rendered as the month it happened. */
+  endedAt: string
+}
+
+/**
+ * The longest run of consecutive wins any player has ever put together, for the
+ * Stats page's streaks panel to measure this month against.
+ *
+ * Off the cached history rows rather than a query of its own: the ledger has
+ * already paid for every match on any render that needs this, and an all-time
+ * answer over ~270 matches is trivial in-memory work. A draw breaks a run, the
+ * same way it does in the monthly streaks on the Stats page — a run of wins is
+ * a run of wins.
+ */
+export async function computeStreakRecord(): Promise<StreakRecord | null> {
+  const { matches } = await fetchHistoryRows()
+
+  // fetchHistoryRows pages ascending, but sort explicitly: a streak read in the
+  // wrong order is silently wrong rather than obviously broken.
+  const ordered = [...matches]
+    .filter((m) => m.red_team?.length && m.blue_team?.length)
+    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+
+  const running = new Map<string, { current: number; lastWin: string }>()
+  let best: StreakRecord | null = null
+
+  for (const match of ordered) {
+    const redWon = match.red_score > match.blue_score
+    const blueWon = match.blue_score > match.red_score
+
+    for (const [team, won] of [
+      [match.red_team ?? [], redWon],
+      [match.blue_team ?? [], blueWon],
+    ] as const) {
+      for (const name of team) {
+        if (!won) {
+          running.delete(name)
+          continue
+        }
+        const next = (running.get(name)?.current ?? 0) + 1
+        running.set(name, { current: next, lastWin: match.created_at })
+        if (!best || next > best.streak) {
+          best = { name, streak: next, endedAt: match.created_at }
+        }
+      }
+    }
+  }
+
+  return best
 }
 
 export interface HomeSummary {

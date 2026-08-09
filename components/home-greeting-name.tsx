@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 
-// Same /api/player-auth/me check as HomeProfileButton and PlayerNavButton —
+// Same /api/player-auth/me check as HomeProfileButton and the masthead's AccountMenu —
 // only knowable client-side, so "Welcome back" renders immediately and the
 // ", Name" suffix pops in once the session check resolves.
 export function HomeGreetingName() {

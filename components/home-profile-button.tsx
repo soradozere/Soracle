@@ -5,7 +5,7 @@ import Link from "next/link"
 import { LogIn, UserCircle2 } from "lucide-react"
 import { playerSlug } from "@/lib/player-profile"
 
-// Mirrors PlayerNavButton's logged-in/out check (see components/player-nav-button.tsx)
+// Mirrors the masthead account menu's logged-in/out check (see components/account-menu.tsx)
 // for the hero's secondary CTA row: logged out it's an entry point to
 // /player-login, logged in it jumps straight to the player's own profile.
 export function HomeProfileButton() {
@@ -32,9 +32,22 @@ export function HomeProfileButton() {
   return (
     <Link
       href={player ? `/player/${playerSlug(player.name)}` : "/player-login"}
-      className="px-4 py-1.5 rounded-md text-xs font-medium text-[#8892a0] hover:text-[#66fcf1] border border-[#3d4855] hover:border-[#66fcf1]/50 transition-all inline-flex items-center gap-1.5"
+      // Matches the Browse Servers button beside it — see the note in
+      // app/(main)/page.tsx: secondary, but legible.
+      className="px-4 py-2 rounded-md text-[13px] font-semibold transition-all inline-flex items-center gap-2 hover-glow"
+      style={{
+        color: "var(--color-text-bright)",
+        border: "1px solid color-mix(in srgb, var(--color-primary) 40%, transparent)",
+        background:
+          "linear-gradient(180deg, color-mix(in srgb, var(--color-surface-elevated) 75%, transparent), color-mix(in srgb, var(--color-surface) 55%, transparent))",
+        boxShadow: "inset 0 1px 0 var(--glass-spec)",
+      }}
     >
-      {player ? <UserCircle2 className="w-3.5 h-3.5" /> : <LogIn className="w-3.5 h-3.5" />}
+      {player ? (
+        <UserCircle2 className="w-4 h-4" style={{ color: "var(--color-primary)" }} />
+      ) : (
+        <LogIn className="w-4 h-4" style={{ color: "var(--color-primary)" }} />
+      )}
       {player ? "Visit Your Profile" : "Player Login"}
     </Link>
   )

@@ -141,6 +141,38 @@ export const MODEL_SKINS: Record<string, ModelSkin[]> = {
       textures: 2,
       surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 1, l_arm: 1, r_arm: 1 },
     },
+    /*
+     * HAND-ADDED, and the only entries in this generated file that are.
+     *
+     * These two come from a community reskin ("Levi Tavion", by leviticuzzz, used
+     * with permission) rather than from assets0.pk3, so a plain regeneration of
+     * this file CANNOT produce them and would silently drop them. Its model.glm is
+     * stock Tavion untouched — only textures and a shader differ — so it rides on
+     * tavion.glb rather than being a model of its own.
+     *
+     * They were still generated rather than guessed:
+     *   unzip "Levi Tavion.pk3" -d /tmp/levi
+     *   node scripts/glm-skins.mjs --assets /tmp/levi --model leviticuzzz --out /tmp/levi-out
+     * then the printed surfaces/additive maps were copied here under new ids, and
+     * /tmp/levi-out/leviticuzzz/{red,blue} became
+     * public/models/skins/tavion/levi-{red,blue}.
+     *
+     * If you regenerate this file, re-add these by hand or run that command again.
+     */
+    {
+      id: "levi-red",
+      label: "Levi (red)",
+      textures: 6,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 1, l_arm: 1, l_hand: 2, r_arm: 1, r_hand: 2, head: 3, head_feathers: 4, head_face: 5 },
+      additive: [4],
+    },
+    {
+      id: "levi-blue",
+      label: "Levi (blue)",
+      textures: 6,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 1, l_arm: 1, l_hand: 2, r_arm: 1, r_hand: 2, head: 3, head_feathers: 4, head_face: 5 },
+      additive: [4],
+    },
   ],
   desann: [
     { id: "default", label: "Default", textures: 0, surfaces: {} },

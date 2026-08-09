@@ -37,7 +37,7 @@ function viewFor(e: LedgerEntry): AchievementView {
 
 export function HomeCrestGrid({ entries }: { entries: LedgerEntry[] }) {
   if (!entries.length) {
-    return <p className="text-sm text-[#8892a0]">No crests unlocked yet.</p>
+    return <p className="text-sm text-[#8892a0]">No achievements unlocked yet.</p>
   }
 
   return (

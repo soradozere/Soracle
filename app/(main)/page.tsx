@@ -5,18 +5,20 @@ import { computeAchievementLedger, computePlayersDirectory, computeHomeSummary }
 import { resolveEquippedTitles } from "@/lib/titles-server"
 import { listFeedDemoUploads } from "@/lib/demos-server"
 import { HomeActivityFeed, type ActivityItem } from "@/components/home-activity-feed"
-import { HomeCrestGrid } from "@/components/home-crest-grid"
+import { HomeVideoPanel } from "@/components/home-video-panel"
+import { getFeaturedVideo } from "@/lib/youtube-feed"
 import { HomeActivePlayers, type ActivePlayerRow } from "@/components/home-active-players"
 import { HomeStarTile } from "@/components/home-star-tile"
 import { HomeToolsPanel } from "@/components/home-tools-panel"
 import { HomeProfileButton } from "@/components/home-profile-button"
 import { HomeGreetingName } from "@/components/home-greeting-name"
+import { Emblem } from "@/components/emblem"
 
 const SERVERS_URL = "https://jk2t.ddns.net/servers/?game=jk2"
 
 export const metadata: Metadata = {
   title: "JK2 Capture the Flag — Soracle",
-  description: "Recent activity, latest crests and the active roster for JK2 Capture the Flag.",
+  description: "Recent activity, latest achievements and the active roster for JK2 Capture the Flag.",
 }
 
 // Matches only arrive when an admin approves one -- and now that landing a
@@ -50,6 +52,10 @@ const monthKeyOf = (iso: string) => {
 const FEED_SIZE = 15
 const CREST_GRID_SIZE = 6
 const ACTIVE_PLAYERS_SIZE = 12
+// Fallback only. The featured video is normally whatever the channel uploaded
+// last (lib/youtube-feed.ts); this is what shows if that feed is unreachable, so
+// the panel never renders empty.
+const FALLBACK_VIDEO_ID = "hECQ3AgK8rU"
 
 export default async function HomePage() {
   const now = new Date()
@@ -62,6 +68,12 @@ export default async function HomePage() {
     computeHomeSummary(),
     listFeedDemoUploads(FEED_SIZE),
   ])
+
+  // An admin's pinned video if there is one, otherwise the newest upload on
+  // youtube.com/@jk2ctf. Both are cached; the constant below only runs if the
+  // channel feed is unreachable AND nothing is pinned.
+  const featured = await getFeaturedVideo()
+  const videoId = featured.videoId ?? FALLBACK_VIDEO_ID
 
   // Already filtered to matches with both teams, and already newest-first --
   // computeHomeSummary reverses the ledger's chronological order for exactly
@@ -136,6 +148,10 @@ export default async function HomePage() {
           See what&apos;s happening on this 2002 Star Wars game of CTF on CTF_Yavin_No_outside, no wallhacks, no
           mineswitching, no stacks and perfect SD
         </p>
+        {/* One row, not two. The hero used to stack a primary pair above a
+            secondary pair, which read as four competing decisions; the hairline
+            does the same job of separating "go do something" from "go look at
+            something" without a second line. */}
         <div className="flex flex-wrap items-center justify-center gap-3 mt-8">
           <Link
             href="/balancer"
@@ -152,15 +168,30 @@ export default async function HomePage() {
             <BarChart3 className="w-4 h-4" />
             {monthName}&apos;s Stats
           </Link>
-        </div>
-        <div className="flex flex-wrap items-center justify-center gap-3 mt-3">
+          <span
+            aria-hidden
+            className="hidden sm:block w-px h-7 mx-1"
+            style={{ backgroundColor: "var(--glass-hair)" }}
+          />
+          {/* Secondary, but not dim: "who's on right now" and "my profile" are
+              two of the most-wanted destinations on the page, and at 11px grey
+              on grey they were the easiest things to miss. Same size as before —
+              the lift comes from a glass fill, a primary-tinted edge and an
+              accent icon, so they still read below the two solid CTAs. */}
           <a
             href={SERVERS_URL}
             target="_blank"
             rel="noopener noreferrer"
-            className="px-4 py-1.5 rounded-md text-xs font-medium text-[#8892a0] hover:text-[#66fcf1] border border-[#3d4855] hover:border-[#66fcf1]/50 transition-all inline-flex items-center gap-1.5"
+            className="px-4 py-2 rounded-md text-[13px] font-semibold transition-all inline-flex items-center gap-2 hover-glow"
+            style={{
+              color: "var(--color-text-bright)",
+              border: "1px solid color-mix(in srgb, var(--color-primary) 40%, transparent)",
+              background:
+                "linear-gradient(180deg, color-mix(in srgb, var(--color-surface-elevated) 75%, transparent), color-mix(in srgb, var(--color-surface) 55%, transparent))",
+              boxShadow: "inset 0 1px 0 var(--glass-spec)",
+            }}
           >
-            <Server className="w-3.5 h-3.5" />
+            <Server className="w-4 h-4" style={{ color: "var(--color-primary)" }} />
             Browse Servers
           </a>
           <HomeProfileButton />
@@ -169,15 +200,25 @@ export default async function HomePage() {
 
       {/* ---------------------------------------------------------------- stat strip */}
       <section className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-10">
-        <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
-          <div className="text-2xl font-extrabold text-white font-mono" style={{ fontFamily: "var(--font-orbitron)" }}>
+        <div className="glass-panel p-4">
+          {/* Same watermark treatment as the Player of the Month tile beside it —
+              the Republic crest is what the Stats page uses for match counts. */}
+          <Emblem
+            src="/achievements/galactic-republic.svg"
+            color="var(--color-primary)"
+            className="absolute -right-5 -top-4 w-[112px] h-[112px] opacity-[0.07] pointer-events-none"
+          />
+          <div
+            className="relative text-2xl font-extrabold text-white font-mono"
+            style={{ fontFamily: "var(--font-orbitron)" }}
+          >
             {matchesThisMonth.length}
           </div>
-          <div className="mt-1 text-[10.5px] uppercase tracking-[0.08em] font-bold text-[#8892a0]">
+          <div className="relative mt-1 text-[10.5px] uppercase tracking-[0.08em] font-bold text-[#8892a0]">
             Matches This Month
           </div>
         </div>
-        <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
+        <div className="glass-panel p-4">
           <div
             className="text-2xl font-extrabold font-mono"
             style={{ fontFamily: "var(--font-orbitron)", color: "var(--color-primary)" }}
@@ -185,16 +226,13 @@ export default async function HomePage() {
             {crestsThisMonth.length}
           </div>
           <div className="mt-1 text-[10.5px] uppercase tracking-[0.08em] font-bold text-[#8892a0]">
-            Crests Unlocked
+            Achievements Earned
           </div>
         </div>
-        <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
-          <HomeStarTile />
-          <div className="mt-1 text-[10.5px] uppercase tracking-[0.08em] font-bold text-[#8892a0]">
-            Player of the Month
-          </div>
-        </div>
-        <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
+        {/* The month's record rides along from data the page already has, so the
+            tile can show more than a bare name. */}
+        <HomeStarTile monthlyStats={monthlyStats} />
+        <div className="glass-panel p-4">
           <div className="text-2xl font-extrabold text-white font-mono" style={{ fontFamily: "var(--font-orbitron)" }}>
             {killsThisMonth.toLocaleString()}
           </div>
@@ -205,32 +243,58 @@ export default async function HomePage() {
       </section>
 
       {/* ---------------------------------------------------------------- activity + crests */}
-      <section className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-5 mb-10">
-        <div>
+      {/* Both columns are flex, and both panels flex-1, so whichever is taller
+          sets the row and the other stretches to meet it -- the two boxes always
+          finish level instead of the feed running past by whatever its item
+          count happens to make it. The feed's own max-height (see
+          home-activity-feed.tsx) keeps it from being the one that always wins. */}
+      <section className="grid grid-cols-1 lg:grid-cols-[1.3fr_1fr] gap-5 mb-10 items-stretch">
+        <div className="flex flex-col min-h-0">
           <h2
             className="text-[13px] font-extrabold uppercase tracking-[0.16em] text-[#8892a0] mb-3"
             style={{ fontFamily: "var(--font-orbitron)" }}
           >
             Recent Activity
           </h2>
-          <div className="bg-[#151b24] border border-[#2a3542] rounded-lg overflow-hidden">
+          {/* The feed's scroller is absolutely positioned inside this panel
+              (see home-activity-feed.tsx), so its fifteen items contribute
+              nothing to layout and the video panel opposite sets the row height
+              at every width — no pixel constant to re-guess. The min-height is
+              for the stacked mobile layout, where there is no video beside it to
+              borrow a height from. */}
+          <div className="glass-panel relative flex-1 min-h-[340px] lg:min-h-0 overflow-hidden">
             <HomeActivityFeed items={activityFeed} />
           </div>
         </div>
-        <div>
+        <div className="flex flex-col min-h-0">
           <div className="flex items-baseline justify-between mb-3">
             <h2
               className="text-[13px] font-extrabold uppercase tracking-[0.16em] text-[#8892a0]"
               style={{ fontFamily: "var(--font-orbitron)" }}
             >
-              Latest Achievements
+              Latest Video
             </h2>
-            <Link href="/achievements" className="text-xs font-bold" style={{ color: "var(--color-primary)" }}>
-              All achievements &rarr;
-            </Link>
+            <a
+              href={`https://www.youtube.com/watch?v=${videoId}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-xs font-bold"
+              style={{ color: "var(--color-primary)" }}
+            >
+              Watch on YouTube &rarr;
+            </a>
           </div>
-          <div className="bg-[#1f2833]/60 backdrop-blur-md border border-[#3d4855] rounded-lg p-4">
-            <HomeCrestGrid entries={ledger.recent.slice(0, CREST_GRID_SIZE)} />
+          {/* TRIAL — to restore Latest Achievements exactly as it was, re-import
+              HomeCrestGrid from "@/components/home-crest-grid" and swap
+              HomeVideoPanel for the two lines below:
+
+                <div className="glass-panel flex-1 p-4">
+                  <HomeCrestGrid entries={ledger.recent.slice(0, CREST_GRID_SIZE)} />
+
+              (that panel must not be a flex container: the crest grid is
+              auto-fill and would collapse to one column as a flex item.) */}
+          <div className="glass-panel flex-1 p-4">
+            <HomeVideoPanel videoId={videoId} title={featured.title ?? undefined} />
           </div>
         </div>
       </section>
