@@ -78,9 +78,14 @@ function formatFlagHold(ms: number): string {
  *
  * Extracted from the Star Player block so the same scoring can run over last
  * month as well as this one — the hero's "vs <previous month>" delta is the
- * current holder's average scored on both months with identical rules. Tiers
- * come from the players table as they stand today, which is the same
- * approximation the monthly figure has always made.
+ * current holder's average scored on both months with identical rules.
+ *
+ * Tiers come from the match's OWN red_tiers/blue_tiers snapshot, so a past
+ * month's Star Player is frozen: retuning a player's tier today must not
+ * quietly re-award July. (It used to read the players table as it stands,
+ * which did exactly that.) Matches predating the snapshot columns fall back
+ * to the live map — those months can still drift, there is nothing recorded
+ * to freeze them against.
  */
 function scoreMatches(matches: Match[], playerTierMap: Map<string, number>) {
   const stats = new Map<string, { name: string; wins: number; losses: number; score: number; matches: number }>()
@@ -90,8 +95,13 @@ function scoreMatches(matches: Match[], playerTierMap: Map<string, number>) {
     const blueWon = match.blue_score > match.red_score
     if (!redWon && !blueWon) continue // draws score nothing either way
 
-    const redTierTotal = match.red_team.reduce((sum, name) => sum + (playerTierMap.get(name) || 5), 0)
-    const blueTierTotal = match.blue_team.reduce((sum, name) => sum + (playerTierMap.get(name) || 5), 0)
+    const snapshot = match.red_tiers?.length && match.blue_tiers?.length
+    const redTierTotal = snapshot
+      ? match.red_tiers!.reduce((sum, t) => sum + t, 0)
+      : match.red_team.reduce((sum, name) => sum + (playerTierMap.get(name) || 5), 0)
+    const blueTierTotal = snapshot
+      ? match.blue_tiers!.reduce((sum, t) => sum + t, 0)
+      : match.blue_team.reduce((sum, name) => sum + (playerTierMap.get(name) || 5), 0)
 
     for (const [team, won, tierAdvantage] of [
       [match.red_team, redWon, blueTierTotal - redTierTotal],
@@ -1210,7 +1220,7 @@ export function ReportsTab() {
                         {leader.streak}
                       </span>
                       <span
-                        className="text-[9.5px] font-semibold tracking-[0.08em] w-[52px] text-right"
+                        className="hint-left text-[9.5px] font-semibold tracking-[0.08em] w-[52px] text-right"
                         style={{
                           fontFamily: "var(--font-mono)",
                           color: leader.live ? "#27ae60" : "var(--color-text-dim)",
