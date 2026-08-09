@@ -142,37 +142,18 @@ export const MODEL_SKINS: Record<string, ModelSkin[]> = {
       surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 1, l_arm: 1, r_arm: 1 },
     },
     /*
-     * HAND-ADDED, and the only entries in this generated file that are.
-     *
-     * These two come from a community reskin ("Levi Tavion", by leviticuzzz, used
-     * with permission) rather than from assets0.pk3, so a plain regeneration of
-     * this file CANNOT produce them and would silently drop them. Its model.glm is
-     * stock Tavion untouched — only textures and a shader differ — so it rides on
-     * tavion.glb rather than being a model of its own.
-     *
-     * They were still generated rather than guessed:
+     * The "Levi Tavion" community reskin (by leviticuzzz, used with permission)
+     * briefly lived here as two hand-added entries (levi-red / levi-blue) riding
+     * on tavion.glb. PULLED Aug 2026: its .shader relies on effects the viewer
+     * doesn't reproduce (env-mapped chrome, scrolling UVs), so it rendered
+     * wrong. Textures are still in the models bucket under
+     * skins/tavion/levi-{red,blue}; to bring it back once shader support
+     * catches up, regenerate the entries with
      *   unzip "Levi Tavion.pk3" -d /tmp/levi
      *   node scripts/glm-skins.mjs --assets /tmp/levi --model leviticuzzz --out /tmp/levi-out
-     * then the printed surfaces/additive maps were copied here under new ids, and
-     * /tmp/levi-out/leviticuzzz/{red,blue} became
-     * public/models/skins/tavion/levi-{red,blue}.
-     *
-     * If you regenerate this file, re-add these by hand or run that command again.
+     * and hand-copy them here (they are NOT produced by a normal regeneration,
+     * which only reads assets0.pk3).
      */
-    {
-      id: "levi-red",
-      label: "Levi (red)",
-      textures: 6,
-      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 1, l_arm: 1, l_hand: 2, r_arm: 1, r_hand: 2, head: 3, head_feathers: 4, head_face: 5 },
-      additive: [4],
-    },
-    {
-      id: "levi-blue",
-      label: "Levi (blue)",
-      textures: 6,
-      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 1, l_arm: 1, l_hand: 2, r_arm: 1, r_hand: 2, head: 3, head_feathers: 4, head_face: 5 },
-      additive: [4],
-    },
   ],
   desann: [
     { id: "default", label: "Default", textures: 0, surfaces: {} },

@@ -5,7 +5,7 @@ import { createServiceClient } from "@/lib/supabase/admin"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
 import { computeAllPlayerAchievements, HISTORY_TAG } from "@/lib/achievements-server"
 import { scoreFromViews } from "@/lib/achievement-score"
-import { earnedTitles, mergeRecordedTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
+import { earnedTitles, mergeRecordedTitles, oneOfOneTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
 import { fetchRecordedTitles } from "@/lib/titles-server"
 import { findModelSkin, findPlayerModel, isKnownModel } from "@/lib/player-models"
 import { isKnownHandSlot } from "@/lib/saber-colours"
@@ -79,7 +79,12 @@ export async function POST(request: Request) {
     // Banked seasonal titles count too — otherwise a player wearing a past
     // season's title would be rejected the next time they saved anything.
     const recorded = await fetchRecordedTitles(supabase, playerId)
-    const earned = mergeRecordedTitles(earnedTitles(achievementScore, monthScore, season), recorded)
+    // One-of-one crest titles are equippable too; earnedCrestRanks only holds
+    // this player's earned crests, so no one else's secrets can validate here.
+    const earned = mergeRecordedTitles(
+      [...earnedTitles(achievementScore, monthScore, season), ...oneOfOneTitles(earnedCrestRanks.keys())],
+      recorded,
+    )
     if (!earned.some((t) => t.id === titleId)) {
       return NextResponse.json({ error: "Title not earned" }, { status: 403 })
     }
