@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Check, ChevronsUpDown, Link2, Sparkles, Trophy } from "lucide-react"
+import Link from "next/link"
+import { Check, ChevronsUpDown, Heart, Link2, Sparkles, Swords, Trophy } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { getAchievementsEarnedInMonth } from "@/app/admin/actions"
 import { Emblem } from "@/components/emblem"
@@ -11,6 +12,7 @@ import { useToast } from "@/hooks/use-toast"
 import { fmtDate, roman } from "@/lib/achievement-format"
 import { rarityColor, rarityLabel } from "@/lib/achievement-pages"
 import type { LedgerEntry } from "@/lib/achievements-server"
+import { playerSlug } from "@/lib/player-profile"
 import { cn } from "@/lib/utils"
 
 // A per-player recap of one closed month — the personal numbers the profile's
@@ -70,6 +72,22 @@ interface PlayerRow {
   tier_value: number
 }
 
+interface PairRecord {
+  name: string
+  games: number
+  wins: number
+  losses: number
+  rate: number
+}
+
+interface OppRecord {
+  name: string
+  meetings: number
+  theirWins: number
+  myWins: number
+  rate: number
+}
+
 interface WrappedCard {
   name: string
   tier: number | null
@@ -90,7 +108,16 @@ interface WrappedCard {
   deaths: number
   flagHoldMs: number
   bestScore: { value: number; match: Match } | null
+  friends: PairRecord[]
+  nemeses: OppRecord[]
 }
+
+// Same floor and ranking the bot's monthly =friend/=nemesis commands use
+// (app/api/bot/friend, app/api/bot/nemesis by-discord routes) — highest win
+// rate, not raw volume, with a minimum so two lucky games together don't read
+// as a bond. Kept in step with those deliberately; if one changes, check the
+// other.
+const PAIR_MIN_GAMES = 3
 
 function formatFlagHold(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
@@ -283,6 +310,8 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
           deaths: 0,
           flagHoldMs: 0,
           bestScore: null,
+          friends: [],
+          nemeses: [],
         }
         byName.set(name, c)
       }
@@ -291,14 +320,18 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
 
     // Record, chronological per-player history for the streak pass below —
     // mirrors the Reports tab's own monthly-streak calc (allStreaks), kept as
-    // its own copy since this view owns its own match fetch.
+    // its own copy since this view owns its own match fetch. Teammate/opponent
+    // tallies ride the same loop (same team-membership data), feeding the
+    // friends/nemeses pass right after.
     const history = new Map<string, boolean[]>() // true = won, in play order
+    const teammateTally = new Map<string, Map<string, { games: number; wins: number; losses: number }>>()
+    const opponentTally = new Map<string, Map<string, { meetings: number; theirWins: number; myWins: number }>>()
     for (const match of matches) {
       const redWon = match.red_score > match.blue_score
       const blueWon = match.blue_score > match.red_score
-      for (const [team, won, lost] of [
-        [match.red_team, redWon, blueWon] as const,
-        [match.blue_team, blueWon, redWon] as const,
+      for (const [team, opp, won, lost] of [
+        [match.red_team, match.blue_team, redWon, blueWon] as const,
+        [match.blue_team, match.red_team, blueWon, redWon] as const,
       ]) {
         for (const name of team) {
           const c = ensure(name)
@@ -308,6 +341,39 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
           else c.draws++
           if (!history.has(name)) history.set(name, [])
           history.get(name)!.push(won)
+
+          let mates = teammateTally.get(name)
+          if (!mates) {
+            mates = new Map()
+            teammateTally.set(name, mates)
+          }
+          for (const mate of team) {
+            if (mate === name) continue
+            let rec = mates.get(mate)
+            if (!rec) {
+              rec = { games: 0, wins: 0, losses: 0 }
+              mates.set(mate, rec)
+            }
+            rec.games++
+            if (won) rec.wins++
+            else if (lost) rec.losses++
+          }
+
+          let opps = opponentTally.get(name)
+          if (!opps) {
+            opps = new Map()
+            opponentTally.set(name, opps)
+          }
+          for (const foe of opp) {
+            let rec = opps.get(foe)
+            if (!rec) {
+              rec = { meetings: 0, theirWins: 0, myWins: 0 }
+              opps.set(foe, rec)
+            }
+            rec.meetings++
+            if (lost) rec.theirWins++
+            else if (won) rec.myWins++
+          }
         }
       }
     }
@@ -321,6 +387,22 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
       const c = ensure(name)
       c.streak = max
       c.streakLive = current === max && max > 0
+    }
+    for (const [name, mates] of teammateTally) {
+      const c = ensure(name)
+      c.friends = Array.from(mates.entries())
+        .map(([mate, rec]) => ({ name: mate, ...rec, rate: rec.wins / rec.games }))
+        .filter((r) => r.games >= PAIR_MIN_GAMES)
+        .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games))
+        .slice(0, 3)
+    }
+    for (const [name, opps] of opponentTally) {
+      const c = ensure(name)
+      c.nemeses = Array.from(opps.entries())
+        .map(([foe, rec]) => ({ name: foe, ...rec, rate: rec.theirWins / rec.meetings }))
+        .filter((r) => r.meetings >= PAIR_MIN_GAMES)
+        .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.meetings - a.meetings))
+        .slice(0, 3)
     }
 
     const nameById = new Map(players.map((p) => [p.id, p.name] as const))
@@ -532,6 +614,100 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
               </p>
             )}
           </section>
+
+          {(card.friends.length > 0 || card.nemeses.length > 0) && (
+            <div className="grid sm:grid-cols-2 gap-3.5">
+              <section className="glass-panel p-5">
+                <div
+                  className="text-[11px] font-semibold uppercase tracking-[0.16em] mb-3"
+                  style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
+                >
+                  Best team-mates
+                </div>
+                {card.friends.length === 0 ? (
+                  <p className="text-sm" style={{ color: "var(--color-text-dim)" }}>
+                    Not enough games together this month.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {card.friends.map((friend, i) => (
+                      <div
+                        key={friend.name}
+                        className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg"
+                        style={{
+                          background: "color-mix(in srgb, var(--color-background) 55%, transparent)",
+                          border: "1px solid var(--glass-hair)",
+                        }}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="text-xs font-mono w-3.5 shrink-0" style={{ color: "var(--color-text-dim)" }}>
+                            {i + 1}
+                          </span>
+                          <Heart className="w-3.5 h-3.5 shrink-0" style={{ color: "#27ae60" }} />
+                          <Link
+                            href={`/player/${playerSlug(friend.name)}`}
+                            className="text-sm font-semibold truncate hover:underline"
+                          >
+                            {friend.name}
+                          </Link>
+                        </div>
+                        <div className="text-xs shrink-0" style={{ color: "var(--color-text-dim)" }}>
+                          <b style={{ color: "#27ae60" }}>{Math.round(friend.rate * 100)}%</b>
+                          {" · "}
+                          {friend.wins}W–{friend.losses}L
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="glass-panel p-5">
+                <div
+                  className="text-[11px] font-semibold uppercase tracking-[0.16em] mb-3"
+                  style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
+                >
+                  Nemeses
+                </div>
+                {card.nemeses.length === 0 ? (
+                  <p className="text-sm" style={{ color: "var(--color-text-dim)" }}>
+                    No recurring opponents this month.
+                  </p>
+                ) : (
+                  <div className="space-y-2">
+                    {card.nemeses.map((nemesis, i) => (
+                      <div
+                        key={nemesis.name}
+                        className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg"
+                        style={{
+                          background: "color-mix(in srgb, var(--color-background) 55%, transparent)",
+                          border: "1px solid var(--glass-hair)",
+                        }}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <span className="text-xs font-mono w-3.5 shrink-0" style={{ color: "var(--color-text-dim)" }}>
+                            {i + 1}
+                          </span>
+                          <Swords className="w-3.5 h-3.5 shrink-0" style={{ color: "#ff4757" }} />
+                          <Link
+                            href={`/player/${playerSlug(nemesis.name)}`}
+                            className="text-sm font-semibold truncate hover:underline"
+                          >
+                            {nemesis.name}
+                          </Link>
+                        </div>
+                        <div className="text-xs shrink-0" style={{ color: "var(--color-text-dim)" }}>
+                          <b style={{ color: "#ff4757" }}>beats you {Math.round(nemesis.rate * 100)}%</b>
+                          {" · "}
+                          {nemesis.myWins}W–{nemesis.theirWins}L
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+            </div>
+          )}
 
           {cardAchievements.length > 0 && (
             <section className="glass-panel p-5">
