@@ -20,6 +20,10 @@ export interface ProfileMatch {
   id: string
   red_team: string[]
   blue_team: string[]
+  // Tier snapshots taken when the match was saved — what freezes Star Player
+  // maths against later tier retunes. Null on matches predating the columns.
+  red_tiers?: number[] | null
+  blue_tiers?: number[] | null
   red_score: number
   blue_score: number
   match_type: string | null
@@ -234,7 +238,10 @@ function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[] }
     return matchDataCache.promise
   }
   const promise = Promise.all([
-    fetchAllRows<ProfileMatch>("matches", "id, red_team, blue_team, red_score, blue_score, match_type, created_at"),
+    fetchAllRows<ProfileMatch>(
+      "matches",
+      "id, red_team, blue_team, red_tiers, blue_tiers, red_score, blue_score, match_type, created_at",
+    ),
     fetchAllRows<StatRow>(
       "match_stats",
       "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, red_returns, yellow_returns, dfa_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, blubs_returns, blubs_kills, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, tele_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played, ping_mean",
@@ -363,14 +370,16 @@ interface MonthlyHonours {
   topKD: { name: string; kd: number } | null
 }
 
-// For every COMPLETED month, work out who topped the public monthly W/L
-// leaderboard (champion + top 5), who was Star Player of the Month, who captured
-// the most flags, and who had the best K/D. Champion/top-5 deliberately mirror
 // Star Player for a set of matches (one month's worth): upset-weighted average
 // win value, mirroring the Reports "Star Player of the Month". A win counts for
-// more when your team was the underdog (lower combined current-tier) and less
-// when favoured; draws are skipped. Qualifier is 35% of the matches. Used for
-// both the monthly honours and the live current-month badge.
+// more when your team was the underdog (lower combined tier) and less when
+// favoured; draws are skipped. Qualifier is 35% of the matches. Used for both
+// the monthly honours and the live current-month badge.
+//
+// Tier totals come from the match's own red_tiers/blue_tiers snapshot — the
+// same freeze the Reports tab's scoreMatches applies, and the two MUST agree
+// or the Stats hero and the profile badge could name different players for the
+// same month. Snapshotless matches (pre-column) fall back to live tiers.
 function computeStarPlayer(
   monthMatches: ProfileMatch[],
   tierByName: Map<string, number>,
@@ -380,8 +389,13 @@ function computeStarPlayer(
     const redWon = match.red_score > match.blue_score
     const blueWon = match.blue_score > match.red_score
     if (!redWon && !blueWon) continue
-    const redTier = match.red_team.reduce((s, n) => s + (tierByName.get(n) ?? 5), 0)
-    const blueTier = match.blue_team.reduce((s, n) => s + (tierByName.get(n) ?? 5), 0)
+    const snapshot = match.red_tiers?.length && match.blue_tiers?.length
+    const redTier = snapshot
+      ? match.red_tiers!.reduce((s, t) => s + t, 0)
+      : match.red_team.reduce((s, n) => s + (tierByName.get(n) ?? 5), 0)
+    const blueTier = snapshot
+      ? match.blue_tiers!.reduce((s, t) => s + t, 0)
+      : match.blue_team.reduce((s, n) => s + (tierByName.get(n) ?? 5), 0)
     for (const [team, won, tierAdvantage] of [
       [match.red_team, redWon, blueTier - redTier] as const,
       [match.blue_team, blueWon, redTier - blueTier] as const,
@@ -412,11 +426,12 @@ function computeStarPlayer(
     : null
 }
 
-// the Reports tab's leaderboard — win rate, then total wins, then games played,
-// 30% qualifier — NOT the ELO/TrueSkill boards, since W/L is the one the
-// community sees. Star Player mirrors the Reports "Star Player of the Month"
-// (upset-weighted average win value, using current tiers). The current
-// in-progress month never awards — you can't win a month that isn't over.
+// For every COMPLETED month: who topped the public monthly W/L leaderboard
+// (champion + top 5, same maths as the Reports tab's board — win rate, then
+// total wins, then games played, 30% qualifier — NOT the ELO/TrueSkill boards,
+// since W/L is the one the community sees), who capped the most, and who had
+// the best K/D. The current in-progress month never awards — you can't win a
+// month that isn't over.
 function computeMonthlyHonours(
   matches: ProfileMatch[],
   stats: StatRow[],

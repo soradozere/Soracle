@@ -218,7 +218,9 @@ export default async function HomePage() {
             Matches This Month
           </div>
         </div>
-        <div className="glass-panel p-4">
+        {/* Clicks through to the full board — same treatment the Player of the
+            Month tile gives its profile link. */}
+        <Link href="/achievements" className="glass-panel p-4 block transition-transform hover:-translate-y-0.5">
           <div
             className="text-2xl font-extrabold font-mono"
             style={{ fontFamily: "var(--font-orbitron)", color: "var(--color-primary)" }}
@@ -228,7 +230,7 @@ export default async function HomePage() {
           <div className="mt-1 text-[10.5px] uppercase tracking-[0.08em] font-bold text-[#8892a0]">
             Achievements Earned
           </div>
-        </div>
+        </Link>
         {/* The month's record rides along from data the page already has, so the
             tile can show more than a bare name. */}
         <HomeStarTile monthlyStats={monthlyStats} />

@@ -1,4 +1,4 @@
-import { findAchievementDef, type Rarity } from "@/lib/achievement-meta"
+import { SECRET_ACHIEVEMENTS, SECRET_RARITY, findAchievementDef, type Rarity } from "@/lib/achievement-meta"
 
 // The title catalogue. Titles are a progression axis of their own, sitting on top
 // of the crests rather than mirroring them: their conditions read off the
@@ -92,19 +92,23 @@ export const SEASONS: Record<string, Season> = {
   // each `id` unique across ALL seasons — an id is what a banked title is keyed
   // on in player_titles, so reusing one would collide with a past winner.
   // A month left as-is still works; it just runs under a placeholder name.
+  // Five all-time dragons, smallest to the Black Dread. Renamed mid-month from
+  // the "Season 2 — TBC" scaffold: any rows already banked under the s2026-08-N
+  // ids are remapped by scripts/039_rename_august_season.sql — run it wherever
+  // August matches have landed.
   "2026-08": {
     key: "2026-08",
-    name: "Season 2 — TBC",
+    name: "Fire & Blood",
     ladder: {
       id: "s2026-08",
-      label: "Season 2 — TBC",
+      label: "Fire & Blood",
       metric: "month_score",
       tiers: [
-        { id: "s2026-08-1", title: "Tier One", threshold: 5000, rarity: "common" },
-        { id: "s2026-08-2", title: "Tier Two", threshold: 12500, rarity: "rare" },
-        { id: "s2026-08-3", title: "Tier Three", threshold: 20000, rarity: "epic" },
-        { id: "s2026-08-4", title: "Tier Four", threshold: 27500, rarity: "legendary" },
-        { id: "s2026-08-5", title: "Tier Five", threshold: 35000, rarity: "mythic" },
+        { id: "silverwing", title: "Silverwing", threshold: 5000, rarity: "common" },
+        { id: "meraxes", title: "Meraxes", threshold: 12500, rarity: "rare" },
+        { id: "vermithor", title: "Vermithor", threshold: 20000, rarity: "epic" },
+        { id: "vhagar", title: "Vhagar", threshold: 27500, rarity: "legendary" },
+        { id: "balerion", title: "Balerion", threshold: 35000, rarity: "mythic" },
       ],
     },
   },
@@ -412,6 +416,30 @@ export function earnedTitles(achievementScore: number, monthScore: number, seaso
   return out
 }
 
+// The picker group one-of-one titles file under.
+export const ONE_OF_ONE_SOURCE = "One of a kind"
+
+// A claimed one-of-one crest grants a title of the same name. There is no
+// ladder and no listing anywhere — a one-of-one title stays invisible to
+// everyone except its holder because the only way into this function's output
+// is holding the crest (secretViewsFor gives every other player an empty
+// array). Equipping it displays publicly like any title, which is the point.
+//
+// Takes the ids of a player's EARNED crests (any mix — non-secrets are
+// filtered out here), so both call sites can pass what they already have.
+// The crest id doubles as the title id: keep season/score tier ids clear of
+// SECRET_ACHIEVEMENTS ids, same as the uniqueness rule between seasons.
+export function oneOfOneTitles(earnedAchievementIds: Iterable<string>): EarnedTitle[] {
+  const earned = new Set(earnedAchievementIds)
+  return SECRET_ACHIEVEMENTS.filter((d) => earned.has(d.id)).map((d) => ({
+    id: d.id,
+    title: d.title,
+    threshold: 0,
+    rarity: SECRET_RARITY,
+    source: ONE_OF_ONE_SOURCE,
+  }))
+}
+
 // Resolve a title id to its display info straight from the catalogue — the
 // score ladder plus every season still defined. Returns null for a title whose
 // season has since been removed; those live only in player_titles, so the bot
@@ -423,6 +451,11 @@ export function catalogueTitleById(id: string): { title: string; rarity: Rarity;
     const tier = season.ladder.tiers.find((t) => t.id === id)
     if (tier) return { title: tier.title, rarity: tier.rarity, source: season.name }
   }
+  // One-of-one titles resolve here so an EQUIPPED one renders everywhere
+  // (players board, bot embeds). This leaks nothing: resolution is by id, and
+  // only the crest's holder can ever have the id stored as their title.
+  const secret = SECRET_ACHIEVEMENTS.find((d) => d.id === id)
+  if (secret) return { title: secret.title, rarity: SECRET_RARITY, source: ONE_OF_ONE_SOURCE }
   return null
 }
 
