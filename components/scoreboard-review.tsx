@@ -231,7 +231,7 @@ function StatCell({
           />
         </TooltipTrigger>
         {edited && (
-          <TooltipContent className="bg-[var(--color-surface)] text-white">
+          <TooltipContent className="bg-[var(--color-surface)] text-[var(--color-text-bright)]">
             Edited — scoreboard said {original || "0"}
           </TooltipContent>
         )}
@@ -1029,7 +1029,7 @@ export function ScoreboardReview({
                                       S
                                     </label>
                                   </TooltipTrigger>
-                                  <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-white">
+                                  <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-[var(--color-text-bright)]">
                                     Flag this merged player as part of a substitution (e.g. they
                                     reconnected, then were subbed out)
                                   </TooltipContent>
@@ -1060,7 +1060,7 @@ export function ScoreboardReview({
                                       M
                                     </label>
                                   </TooltipTrigger>
-                                  <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-white">
+                                  <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-[var(--color-text-bright)]">
                                     Flag this row as a reconnect of another row (Merge with another row
                                     of the same player)
                                   </TooltipContent>
@@ -1081,7 +1081,7 @@ export function ScoreboardReview({
                                       S
                                     </label>
                                   </TooltipTrigger>
-                                  <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-white">
+                                  <TooltipContent className="max-w-[220px] bg-[var(--color-surface)] text-[var(--color-text-bright)]">
                                     Flag this row as part of a substitution (Sub in or out)
                                   </TooltipContent>
                                 </Tooltip>

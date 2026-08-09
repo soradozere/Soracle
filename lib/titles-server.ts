@@ -145,10 +145,15 @@ export async function resolveEquippedTitle(
 }
 
 /**
- * Batched resolveEquippedTitle for a set of players — one query for their
- * equipped title ids off the players table, then the same per-player recorded-
- * title lookup resolveEquippedTitle does. Public data (select-all RLS), so this
- * builds its own anon client rather than asking the caller for one.
+ * Batched resolveEquippedTitle for a set of players: two queries total,
+ * regardless of how many players are asked for. Public data (select-all RLS),
+ * so this builds its own anon client rather than asking the caller for one.
+ *
+ * It used to fan out — one player_titles query per player — which was tolerable
+ * for the homepage's twelve active players and decidedly not for the /players
+ * board, where it would have been one round trip per row on a roster of eighty.
+ * Both recorded-title lookups now come back in a single `.in()`, resolved in
+ * memory below.
  */
 export async function resolveEquippedTitles(
   playerIds: string[],
@@ -156,12 +161,44 @@ export async function resolveEquippedTitles(
   const results = new Map<string, { title: string; rarity: Rarity; source: string } | null>()
   if (!playerIds.length) return results
   const supabase = createAnonClient()
-  const { data } = await supabase.from("players").select("id, title").in("id", playerIds)
-  await Promise.all(
-    ((data ?? []) as { id: string; title: string | null }[]).map(async (p) => {
-      results.set(p.id, await resolveEquippedTitle(supabase, p.id, p.title))
-    }),
-  )
+
+  const [{ data: players }, { data: recordedRows }] = await Promise.all([
+    supabase.from("players").select("id, title").in("id", playerIds),
+    supabase
+      .from("player_titles")
+      .select("player_id, title_id, season_name, title, rarity, earned_at")
+      .in("player_id", playerIds)
+      // Newest first, so the first match for a title id is the one to show —
+      // the same ordering fetchRecordedTitles guarantees per player.
+      .order("earned_at", { ascending: false }),
+  ])
+
+  const recordedByPlayer = new Map<string, { titleId: string; seasonName: string; title: string; rarity: Rarity }[]>()
+  for (const row of (recordedRows ?? []) as {
+    player_id: string
+    title_id: string
+    season_name: string
+    title: string
+    rarity: string
+  }[]) {
+    const list = recordedByPlayer.get(row.player_id) ?? []
+    list.push({ titleId: row.title_id, seasonName: row.season_name, title: row.title, rarity: row.rarity as Rarity })
+    recordedByPlayer.set(row.player_id, list)
+  }
+
+  for (const p of (players ?? []) as { id: string; title: string | null }[]) {
+    if (!p.title) {
+      results.set(p.id, null)
+      continue
+    }
+    // A banked title (player_titles) wins over the catalogue: seasonal titles
+    // lapse from the catalogue but stay earned.
+    const rec = recordedByPlayer.get(p.id)?.find((t) => t.titleId === p.title)
+    results.set(
+      p.id,
+      rec ? { title: rec.title, rarity: rec.rarity, source: rec.seasonName } : catalogueTitleById(p.title),
+    )
+  }
   return results
 }
 

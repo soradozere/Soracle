@@ -59,7 +59,11 @@ export const PlayerCard = memo(function PlayerCard({
   const [showTooltip, setShowTooltip] = useState(false)
   const [popoverOpen, setPopoverOpen] = useState(false)
 
-  const isBespin = currentTheme === "bespin"
+  // Bespin used to be the site's light theme, and these bars were special-cased
+  // for it: a cream track with near-opaque fills. "Bespin Nights" is dark now, so
+  // that branch left one theme with white bars on a dark card. The only light
+  // theme today is Cloud City, and the track itself is theme-derived either way.
+  const isLightTheme = currentTheme === "cloud-city"
 
   const primaryRole = Object.entries(player.roles).reduce((a, b) =>
     player.roles[a[0] as keyof typeof player.roles] > player.roles[b[0] as keyof typeof player.roles] ? a : b,
@@ -105,12 +109,19 @@ export const PlayerCard = memo(function PlayerCard({
         tabIndex={0}
         onClick={onToggle}
         onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onToggle() }}
-        className={`relative bg-[#1f2833]/30 border rounded-lg p-4 text-left transition-all cursor-pointer hover:border-[#66fcf1] hover:shadow-[0_0_10px_rgba(102,252,241,0.3)] ${
+        /*
+         * Unselected cards carry no outline. Every card having one meant the
+         * grid read as a wall of identical boxes and selection was signalled
+         * only by a colour change on a border that was already there — now the
+         * border itself IS the selection, with a transparent one held in place
+         * so nothing shifts by a pixel when it appears. Hover still previews it.
+         */
+        className={`relative bg-[#1f2833]/30 border rounded-lg p-4 text-left transition-all cursor-pointer hover:border-[#66fcf1]/60 hover:shadow-[0_0_14px_-2px_var(--color-primary-glow)] ${
           didNotMakeCut
             ? "border-[#ff4757] opacity-60"
             : isSelected
               ? "border-[#66fcf1] glow-border"
-              : "border-[#3d4855]"
+              : "border-transparent"
         } backdrop-blur-lg w-full`}
       >
         {isSelected && selectionNumber && (
@@ -260,27 +271,25 @@ export const PlayerCard = memo(function PlayerCard({
             return (
               <div key={role} className="flex items-center gap-2">
                 <span
-                  className={`text-xs w-12 font-mono ${
-                    isBespin
-                      ? "text-[#b86b49] font-semibold"
-                      : isDisabled
-                        ? "text-[#8892a0] line-through"
-                        : "text-[#8892a0]"
-                  }`}
+                  className={`text-xs w-12 font-mono text-[#8892a0] ${isDisabled ? "line-through" : ""}`}
                 >
                   {ROLE_LABELS[role as keyof typeof ROLE_LABELS]}
                 </span>
                 <div
-                  className={`flex-1 h-2 rounded-full overflow-hidden border ${
-                    isBespin ? "bg-[#d9cdb9] border-[#c4b59e]" : "bg-[#0b0c10] border-[#3d4855]"
-                  }`}
+                  className="flex-1 h-2 rounded-full overflow-hidden border"
+                  style={{
+                    backgroundColor: "color-mix(in srgb, var(--color-background) 65%, transparent)",
+                    borderColor: "var(--glass-hair)",
+                  }}
                 >
                   <div
                     className="h-full transition-all duration-300"
                     style={{
                       width: `${(value / 10) * 100}%`,
                       backgroundColor: ROLE_COLORS[role as keyof typeof ROLE_COLORS],
-                      opacity: isDisabled ? 0.2 : isBespin ? 0.9 : 0.3,
+                      // Role colours are fixed hues; on a light ground they need
+                      // to be near-solid to read, on a dark one they'd shout.
+                      opacity: isDisabled ? 0.2 : isLightTheme ? 0.85 : 0.32,
                     }}
                   />
                 </div>

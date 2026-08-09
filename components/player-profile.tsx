@@ -1042,7 +1042,7 @@ function EditLoadoutDialog({
               </DropdownMenuContent>
             </DropdownMenu>
             <p className="text-[10px] text-[#8892a0]">
-              An animated JK2 player model on your profile. Not tied to crests — anyone can pick any model.
+              An animated JK2 player model on your profile. Not tied to achievements — anyone can pick any model.
             </p>
           </div>
           {/* fields.model is always truthy now (Kyle by default), so this guard

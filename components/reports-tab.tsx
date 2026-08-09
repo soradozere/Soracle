@@ -1,11 +1,13 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getMatchesByMonth, getMatchStatsByMonth } from "@/app/admin/actions"
-import { ChevronLeft, ChevronRight, Trophy, Target, BarChart3, Zap, Swords, Star, Flag, Skull, Shield, Sword, Gauge } from "lucide-react"
+import { getMatchesByMonth, getMatchStatsByMonth, getStreakRecord } from "@/app/admin/actions"
+import type { StreakRecord } from "@/lib/achievements-server"
+import { ChevronLeft, ChevronRight, BarChart3 } from "lucide-react"
+import { SegmentedRail } from "@/components/segmented-rail"
+import { Emblem } from "@/components/emblem"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import type { Player } from "@/lib/types"
-import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
 import { checkIsAdmin } from "@/lib/is-admin"
 import { TierChangelog } from "@/components/tier-changelog"
@@ -71,6 +73,254 @@ function formatFlagHold(ms: number): string {
   return `${minutes}:${String(seconds).padStart(2, "0")}`
 }
 
+/**
+ * Upset-weighted win value per player, for one set of matches.
+ *
+ * Extracted from the Star Player block so the same scoring can run over last
+ * month as well as this one — the hero's "vs <previous month>" delta is the
+ * current holder's average scored on both months with identical rules. Tiers
+ * come from the players table as they stand today, which is the same
+ * approximation the monthly figure has always made.
+ */
+function scoreMatches(matches: Match[], playerTierMap: Map<string, number>) {
+  const stats = new Map<string, { name: string; wins: number; losses: number; score: number; matches: number }>()
+
+  for (const match of matches) {
+    const redWon = match.red_score > match.blue_score
+    const blueWon = match.blue_score > match.red_score
+    if (!redWon && !blueWon) continue // draws score nothing either way
+
+    const redTierTotal = match.red_team.reduce((sum, name) => sum + (playerTierMap.get(name) || 5), 0)
+    const blueTierTotal = match.blue_team.reduce((sum, name) => sum + (playerTierMap.get(name) || 5), 0)
+
+    for (const [team, won, tierAdvantage] of [
+      [match.red_team, redWon, blueTierTotal - redTierTotal],
+      [match.blue_team, blueWon, redTierTotal - blueTierTotal],
+    ] as const) {
+      for (const playerName of team) {
+        if (!stats.has(playerName)) {
+          stats.set(playerName, { name: playerName, wins: 0, losses: 0, score: 0, matches: 0 })
+        }
+        const entry = stats.get(playerName)!
+        entry.matches++
+        if (!won) {
+          entry.losses++
+          continue
+        }
+        entry.wins++
+        entry.score +=
+          tierAdvantage > 0
+            ? // Upset win — worth more the stronger the opposition was.
+              1.0 + tierAdvantage * 0.1
+            : // Expected win — worth less, floored so it's never worthless.
+              Math.max(0.3, 1.0 + tierAdvantage * 0.05)
+      }
+    }
+  }
+
+  return stats
+}
+
+// Panel heading: a label, a rule that fades out, and an optional qualifier on
+// the right. The qualifier is where "players with N+ stat-tracked matches" now
+// lives — stated once per panel instead of under every single stat.
+function SectionHead({ title, tag }: { title: string; tag?: string }) {
+  return (
+    <div className="flex items-center gap-2.5 mb-3.5">
+      <h3
+        className="text-[11px] font-semibold uppercase tracking-[0.16em]"
+        style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
+      >
+        {title}
+      </h3>
+      <span
+        className="flex-1 h-px"
+        style={{ background: "linear-gradient(90deg, var(--glass-hair), transparent)" }}
+      />
+      {tag && (
+        <span className="text-[10.5px] tracking-[0.05em]" style={{ color: "var(--color-text-dim)" }}>
+          {tag}
+        </span>
+      )}
+    </div>
+  )
+}
+
+// One row of the records list: emblem, what the record is, who holds it, the
+// figure. `accent` tints the emblem and the value, so each row reads as its own
+// record without the panel turning into a rainbow.
+function RecordRow({
+  emblem,
+  accent,
+  label,
+  hint,
+  who,
+  value,
+  note,
+}: {
+  emblem: string
+  accent: string
+  label: string
+  hint: string
+  who?: string
+  value: string | number | null
+  note?: string
+}) {
+  const empty = value === null || value === undefined || who === undefined
+  return (
+    <div
+      className="flex items-center gap-3 py-2.5 border-b last:border-b-0"
+      style={{ color: accent, borderColor: "color-mix(in srgb, var(--color-border) 45%, transparent)" }}
+    >
+      <span className="glyph-chip w-[34px] h-[34px]">
+        <Emblem src={emblem} className="w-[19px] h-[19px] opacity-90" />
+      </span>
+      <span className="text-[12.5px] flex-1 min-w-0 flex items-center gap-1.5" style={{ color: "var(--color-text-dim)" }}>
+        {label}
+        <span
+          className="w-3.5 h-3.5 rounded-full grid place-items-center text-[8px] font-semibold shrink-0 cursor-help opacity-70"
+          style={{ border: "1px solid var(--glass-hair)" }}
+          data-hint={hint}
+        >
+          ?
+        </span>
+      </span>
+      {empty ? (
+        <span className="text-[11.5px] italic" style={{ color: "var(--color-text-dim)" }}>
+          no data
+        </span>
+      ) : (
+        <>
+          <span className="text-sm font-semibold mr-3" style={{ color: "var(--color-text-bright)" }}>
+            {who}
+          </span>
+          <span className="text-sm font-bold min-w-[96px] text-right tabular-nums" style={{ fontFamily: "var(--font-mono)" }}>
+            {value}
+            {note && (
+              <span className="block text-[10.5px] font-normal mt-0.5" style={{ color: "var(--color-text-dim)" }}>
+                {note}
+              </span>
+            )}
+          </span>
+        </>
+      )}
+    </div>
+  )
+}
+
+// A summary line under the streak list: emblem, what it is, and the figure.
+function StreakFoot({
+  emblem,
+  title,
+  sub,
+  value,
+  unit,
+  muted = false,
+}: {
+  emblem: string
+  title: string
+  sub: string
+  value: number
+  unit: string
+  muted?: boolean
+}) {
+  const accent = muted ? "var(--color-text-dim)" : "#f39c12"
+  return (
+    <div
+      className="flex items-center gap-3 mt-3 pt-3 border-t"
+      style={{ borderColor: "color-mix(in srgb, var(--color-border) 45%, transparent)" }}
+    >
+      <span className="glyph-chip w-[30px] h-[30px]" style={{ color: accent }}>
+        <Emblem src={emblem} className="w-[17px] h-[17px]" />
+      </span>
+      <span className="min-w-0">
+        <b className="text-[13px] font-semibold" style={{ color: "var(--color-text-bright)" }}>
+          {title}
+        </b>
+        <span className="block text-[11px] mt-0.5 truncate" style={{ color: "var(--color-text-dim)" }}>
+          {sub}
+        </span>
+      </span>
+      <span className="ml-auto text-right">
+        <b className="text-[19px] font-bold tabular-nums" style={{ fontFamily: "var(--font-mono)", color: accent }}>
+          {value}
+        </b>
+        <span className="block text-[10px] mt-0.5 uppercase tracking-[0.1em]" style={{ color: "var(--color-text-dim)" }}>
+          {unit}
+        </span>
+      </span>
+    </div>
+  )
+}
+
+function HoodStat({
+  value,
+  color,
+  label,
+  note,
+}: {
+  value: string | number
+  color: string
+  label: string
+  note: string
+}) {
+  return (
+    <div
+      className="px-4 py-3.5 rounded-[11px]"
+      style={{
+        border: "1px solid var(--glass-hair)",
+        backgroundColor: "color-mix(in srgb, var(--color-surface-elevated) 45%, transparent)",
+      }}
+    >
+      <b className="block text-[26px] font-bold leading-none mb-1.5 tabular-nums" style={{ fontFamily: "var(--font-mono)", color }}>
+        {value}
+      </b>
+      <span className="block text-[11px] font-medium" style={{ color: "var(--color-text)" }}>
+        {label}
+      </span>
+      <span className="block text-[11px] leading-snug" style={{ color: "var(--color-text-dim)" }}>
+        {note}
+      </span>
+    </div>
+  )
+}
+
+function EmptyHood({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-sm italic text-center py-10" style={{ color: "var(--color-text-dim)" }}>
+      {children}
+    </p>
+  )
+}
+
+// The top three used 🥇🥈🥉, which ignore the theme entirely and sit oddly next
+// to the site's own emblems. Same three ranks, drawn with the crests the profile
+// pages already use, tinted gold / silver / bronze.
+const MEDAL_EMBLEMS = [
+  { src: "/badges/champion.svg", color: "#ffd700" },
+  { src: "/badges/star.svg", color: "#c9ced6" },
+  { src: "/badges/top5.svg", color: "#cd7f32" },
+]
+
+export function RankMedal({ index }: { index: number }) {
+  const medal = MEDAL_EMBLEMS[index]
+  if (!medal) return null
+  return (
+    <span
+      className="w-[26px] h-[26px] rounded-full grid place-items-center"
+      style={{
+        color: medal.color,
+        backgroundColor: `color-mix(in srgb, ${medal.color} 14%, transparent)`,
+        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${medal.color} 45%, transparent)${
+          index === 0 ? `, 0 0 14px -5px ${medal.color}` : ""
+        }`,
+      }}
+    >
+      <Emblem src={medal.src} className="w-[15px] h-[15px]" label={`Rank ${index + 1}`} />
+    </span>
+  )
+}
+
 export function ReportsTab() {
   // "Current month" in UTC, matching the UTC month bucketing used everywhere
   // (badges, boards, server actions) — viewer-local months made viewers in
@@ -80,10 +330,16 @@ export function ReportsTab() {
   const [selectedMonth, setSelectedMonth] = useState(now.getUTCMonth() + 1)
   const [matches, setMatches] = useState<Match[]>([])
   const [matchStats, setMatchStats] = useState<MatchStatRow[]>([])
+  // Previous month, for the "vs <month>" deltas; and the all-time streak record.
+  const [prevMatches, setPrevMatches] = useState<Match[]>([])
+  const [streakRecord, setStreakRecord] = useState<StreakRecord | null>(null)
   const [players, setPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
   const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "elo" | "trueskill">("stats")
   const [isAdmin, setIsAdmin] = useState(false)
+  // The "Under the hood" band: four working views of the same month, sharing one
+  // panel rather than stacking four full-width slabs down the page.
+  const [hoodView, setHoodView] = useState<"reality" | "compare" | "accuracy" | "tiers">("reality")
 
   // Check if user is admin (server-side allowlist, RLS-enforced)
   useEffect(() => {
@@ -92,19 +348,35 @@ export function ReportsTab() {
 
   useEffect(() => {
     setLoading(true)
+    // The previous month rides along so the headline figures can say which way
+    // they moved. It's the same query one month back, and nothing on the page
+    // blocks on it beyond the deltas themselves.
+    const prevMonth = selectedMonth === 1 ? 12 : selectedMonth - 1
+    const prevYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear
+
     Promise.all([
       getMatchesByMonth(selectedYear, selectedMonth),
       fetchPlayersFromDB(),
-      getMatchStatsByMonth(selectedYear, selectedMonth)
-    ]).then(([matchResult, playersData, statsResult]) => {
+      getMatchStatsByMonth(selectedYear, selectedMonth),
+      getMatchesByMonth(prevYear, prevMonth),
+    ]).then(([matchResult, playersData, statsResult, prevResult]) => {
       if (matchResult.success) {
         setMatches(matchResult.data as Match[])
       }
       setPlayers(playersData)
       setMatchStats(statsResult.success ? (statsResult.data as MatchStatRow[]) : [])
+      setPrevMatches(prevResult.success ? (prevResult.data as Match[]) : [])
       setLoading(false)
     })
   }, [selectedYear, selectedMonth])
+
+  // All-time streak record — fetched once, not per month: it doesn't depend on
+  // which month is selected.
+  useEffect(() => {
+    getStreakRecord().then((result) => {
+      if (result.success) setStreakRecord(result.data)
+    })
+  }, [])
 
   // Visibility logic for leaderboard
   const isCurrentMonth = selectedYear === now.getUTCFullYear() && selectedMonth === now.getUTCMonth() + 1
@@ -167,63 +439,7 @@ export function ReportsTab() {
     playerTierMap.set(player.name, player.tierValue)
   }
 
-  const starPlayerStats = new Map<string, { name: string; wins: number; losses: number; score: number; matches: number }>()
-  
-  for (const match of matches) {
-    const redWon = match.red_score > match.blue_score
-    const blueWon = match.blue_score > match.red_score
-    if (!redWon && !blueWon) continue // Skip draws
-    
-    // Calculate tier totals for each team
-    const redTierTotal = match.red_team.reduce((sum, name) => sum + (playerTierMap.get(name) || 5), 0)
-    const blueTierTotal = match.blue_team.reduce((sum, name) => sum + (playerTierMap.get(name) || 5), 0)
-    
-    // Process red team players
-    for (const playerName of match.red_team) {
-      if (!starPlayerStats.has(playerName)) {
-        starPlayerStats.set(playerName, { name: playerName, wins: 0, losses: 0, score: 0, matches: 0 })
-      }
-      const stats = starPlayerStats.get(playerName)!
-      stats.matches++
-      
-      if (redWon) {
-        stats.wins++
-        const tierAdvantage = blueTierTotal - redTierTotal // Positive if opponent was stronger
-        if (tierAdvantage > 0) {
-          // Upset win - bonus points
-          stats.score += 1.0 + (tierAdvantage * 0.1)
-        } else {
-          // Expected win - reduced points (minimum 0.3)
-          stats.score += Math.max(0.3, 1.0 + (tierAdvantage * 0.05))
-        }
-      } else {
-        stats.losses++
-      }
-    }
-    
-    // Process blue team players
-    for (const playerName of match.blue_team) {
-      if (!starPlayerStats.has(playerName)) {
-        starPlayerStats.set(playerName, { name: playerName, wins: 0, losses: 0, score: 0, matches: 0 })
-      }
-      const stats = starPlayerStats.get(playerName)!
-      stats.matches++
-      
-      if (blueWon) {
-        stats.wins++
-        const tierAdvantage = redTierTotal - blueTierTotal // Positive if opponent was stronger
-        if (tierAdvantage > 0) {
-          // Upset win - bonus points
-          stats.score += 1.0 + (tierAdvantage * 0.1)
-        } else {
-          // Expected win - reduced points (minimum 0.3)
-          stats.score += Math.max(0.3, 1.0 + (tierAdvantage * 0.05))
-        }
-      } else {
-        stats.losses++
-      }
-    }
-  }
+  const starPlayerStats = scoreMatches(matches, playerTierMap)
 
   const starPlayerMinMatches = Math.ceil(totalMatches * 0.35)
   const starPlayer = Array.from(starPlayerStats.values())
@@ -235,6 +451,47 @@ export function ReportsTab() {
       // Tiebreaker: more matches = more proven
       return b.matches - a.matches
     })[0] || null
+
+  // How this month compares with the last one. Only shown where there is a
+  // previous month to compare against — a first month reads as no delta rather
+  // than as a fall from zero.
+  const prevMonthIndex = selectedMonth === 1 ? 12 : selectedMonth - 1
+  const prevMonthYear = selectedMonth === 1 ? selectedYear - 1 : selectedYear
+  const prevMonthName = MONTH_NAMES[prevMonthIndex - 1]
+
+  // A part-month can't be compared with a whole one — on the 9th, "−48 vs July"
+  // is true and useless. So while the current month is still running, the
+  // previous month is cut to the same point in its own calendar: nine days
+  // against nine days. Finished months compare in full.
+  //
+  // Date.UTC rolls a day-of-month the previous month doesn't have (the 31st
+  // against a 30-day month) forward into the next one, which is the behaviour
+  // we want: the whole of the shorter month has elapsed by then.
+  const partialCutoff = isCurrentMonth
+    ? Date.UTC(
+        prevMonthYear,
+        prevMonthIndex - 1,
+        now.getUTCDate(),
+        now.getUTCHours(),
+        now.getUTCMinutes(),
+        now.getUTCSeconds(),
+      )
+    : null
+  const comparablePrevMatches =
+    partialCutoff === null ? prevMatches : prevMatches.filter((m) => Date.parse(m.created_at) <= partialCutoff)
+  const matchesDelta = prevMatches.length > 0 ? totalMatches - comparablePrevMatches.length : null
+  const matchesDeltaLabel =
+    partialCutoff === null
+      ? `vs ${prevMonthName}`
+      : // Spell the window out, or "+3 vs July" reads as a full-month claim.
+        `vs 1–${now.getUTCDate()} ${prevMonthName.slice(0, 3)}`
+  const prevStarScores = prevMatches.length > 0 ? scoreMatches(prevMatches, playerTierMap) : null
+  const starPlayerPrev = starPlayer && prevStarScores ? prevStarScores.get(starPlayer.name) ?? null : null
+  // Same player, same scoring, one month earlier. Null when they didn't play.
+  const starValueDelta =
+    starPlayer && starPlayerPrev && starPlayerPrev.matches > 0
+      ? starPlayer.avgScore - starPlayerPrev.score / starPlayerPrev.matches
+      : null
 
   // Winning Streak - longest consecutive wins by any player within the month
   const playerMatchHistory = new Map<string, { won: boolean; date: Date }[]>()
@@ -264,13 +521,18 @@ export function ReportsTab() {
     }
   }
 
-  // Find all player streaks and get top 5
-  const allStreaks: { name: string; streak: number }[] = []
-  
+  // Find all player streaks and get top 5.
+  //
+  // `live` marks a streak that is still running at the end of the month — the
+  // trailing run of wins is the same length as the player's best. A 7-game run
+  // that ended three weeks ago and one that is still going are different stories,
+  // and the number alone can't tell them apart.
+  const allStreaks: { name: string; streak: number; live: boolean }[] = []
+
   for (const [playerName, history] of playerMatchHistory.entries()) {
     let currentStreak = 0
     let maxStreak = 0
-    
+
     for (const match of history) {
       if (match.won) {
         currentStreak++
@@ -279,9 +541,9 @@ export function ReportsTab() {
         currentStreak = 0
       }
     }
-    
+
     if (maxStreak > 1) {
-      allStreaks.push({ name: playerName, streak: maxStreak })
+      allStreaks.push({ name: playerName, streak: maxStreak, live: currentStreak === maxStreak })
     }
   }
   
@@ -545,6 +807,58 @@ export function ReportsTab() {
       }
     })
 
+  // Prediction accuracy — the one measure that says whether the tiers are
+  // calibrated at all: the balancer names a favourite every time it splits a
+  // lobby (the side with the higher combined tier), so did that side actually
+  // win? Built entirely from data already on the row — the tier snapshot and the
+  // final score — so it costs nothing extra to load.
+  //
+  // Level lobbies have no favourite and are excluded rather than counted as a
+  // miss; draws can't confirm or deny a prediction, so they're excluded too.
+  const predictions = matches
+    .filter((m) => m.red_tiers && m.blue_tiers)
+    .map((m) => {
+      const redTotal = m.red_tiers!.reduce((a, b) => a + b, 0)
+      const blueTotal = m.blue_tiers!.reduce((a, b) => a + b, 0)
+      if (redTotal === blueTotal) return null
+      if (m.red_score === m.blue_score) return null
+      const favouriteWon = redTotal > blueTotal ? m.red_score > m.blue_score : m.blue_score > m.red_score
+      return { gap: Math.abs(redTotal - blueTotal), favouriteWon }
+    })
+    .filter((p): p is { gap: number; favouriteWon: boolean } => p !== null)
+
+  const favouriteWins = predictions.filter((p) => p.favouriteWon).length
+  const favouriteRate = predictions.length > 0 ? (favouriteWins / predictions.length) * 100 : null
+  const upsets = predictions.length - favouriteWins
+  // How often the balancer produced a genuinely even lobby, which is the thing
+  // it's actually for.
+  const evenLobbies = matchesWithTierSnapshots.filter((m) => {
+    const gap = Math.abs(
+      m.red_tiers!.reduce((a, b) => a + b, 0) - m.blue_tiers!.reduce((a, b) => a + b, 0),
+    )
+    return gap <= 1
+  }).length
+
+  // Same question split by how lopsided the lobby was meant to be. A band whose
+  // favourite wins barely more than half the time is a band where the tier
+  // numbers aren't carrying real information — that's the signal worth acting on
+  // when re-tuning. 50% is marked as the coin-flip reference; no expected curve
+  // is asserted, because we don't have one that isn't invented.
+  const CALIBRATION_BANDS: { label: string; test: (gap: number) => boolean }[] = [
+    { label: "Gap 0–1 (even)", test: (g) => g <= 1 },
+    { label: "Gap 2–3", test: (g) => g >= 2 && g <= 3 },
+    { label: "Gap 4+", test: (g) => g >= 4 },
+  ]
+  const calibration = CALIBRATION_BANDS.map((band) => {
+    const inBand = predictions.filter((p) => band.test(p.gap))
+    const won = inBand.filter((p) => p.favouriteWon).length
+    return {
+      label: band.label,
+      games: inBand.length,
+      rate: inBand.length > 0 ? (won / inBand.length) * 100 : null,
+    }
+  })
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -554,79 +868,49 @@ export function ReportsTab() {
   }
 
   return (
-    <div className="space-y-6">
-      {/* Month Selector */}
-      <div className="flex items-center justify-center gap-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={goToPrevMonth}
-          className="text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10"
-        >
-          <ChevronLeft className="w-5 h-5" />
-        </Button>
-        <h2 className="text-xl font-bold text-[var(--color-primary)] min-w-[200px] text-center">
-          {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
-        </h2>
-        <Button
-          variant="ghost"
-          size="icon"
-          onClick={goToNextMonth}
-          disabled={!canGoNext}
-          className="text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 disabled:opacity-30"
-        >
-          <ChevronRight className="w-5 h-5" />
-        </Button>
-      </div>
+    <div className="space-y-3.5">
+      {/* Month + view bar. The month sits left and the views right, in the same
+          segmented rail the masthead uses, so the page has one control surface
+          instead of a centred month heading above a centred row of buttons. */}
+      <div className="glass-panel flex flex-wrap items-center gap-3 py-2 pl-3.5 pr-2.5">
+        <div className="flex items-center gap-1.5">
+          <button
+            onClick={goToPrevMonth}
+            aria-label="Previous month"
+            className="w-7 h-7 rounded-lg grid place-items-center transition-colors"
+            style={{ border: "1px solid var(--glass-hair)", color: "var(--color-text-dim)" }}
+          >
+            <ChevronLeft className="w-3.5 h-3.5" />
+          </button>
+          <h2
+            className="text-[15px] font-bold tracking-[0.08em] uppercase min-w-[168px] text-center"
+            style={{ fontFamily: "var(--font-orbitron)" }}
+          >
+            {MONTH_NAMES[selectedMonth - 1]} {selectedYear}
+          </h2>
+          <button
+            onClick={goToNextMonth}
+            disabled={!canGoNext}
+            aria-label="Next month"
+            className="w-7 h-7 rounded-lg grid place-items-center transition-colors disabled:opacity-30"
+            style={{ border: "1px solid var(--glass-hair)", color: "var(--color-text-dim)" }}
+          >
+            <ChevronRight className="w-3.5 h-3.5" />
+          </button>
+        </div>
 
-      {/* View Toggle */}
-      <div className="flex items-center justify-center gap-2">
-        <button
-          onClick={() => setCurrentView("stats")}
-          className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-            currentView === "stats"
-              ? "bg-[var(--color-primary)] text-[var(--color-background)]"
-              : "bg-[var(--color-surface)] text-[var(--color-text-dim)] hover:bg-[var(--color-border)]/50"
-          }`}
-        >
-          Monthly Stats
-        </button>
-        {showLeaderboard && (
-          <button
-            onClick={() => setCurrentView("leaderboard")}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-              currentView === "leaderboard"
-                ? "bg-[var(--color-primary)] text-[var(--color-background)]"
-                : "bg-[var(--color-surface)] text-[var(--color-text-dim)] hover:bg-[var(--color-border)]/50"
-            }`}
-          >
-            Leaderboard
-          </button>
-        )}
-        {isAdmin && (
-          <button
-            onClick={() => setCurrentView("elo")}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-              currentView === "elo"
-                ? "bg-[var(--color-primary)] text-[var(--color-background)]"
-                : "bg-[var(--color-surface)] text-[var(--color-text-dim)] hover:bg-[var(--color-border)]/50"
-            }`}
-          >
-            ELO
-          </button>
-        )}
-        {isAdmin && (
-          <button
-            onClick={() => setCurrentView("trueskill")}
-            className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-              currentView === "trueskill"
-                ? "bg-[var(--color-primary)] text-[var(--color-background)]"
-                : "bg-[var(--color-surface)] text-[var(--color-text-dim)] hover:bg-[var(--color-border)]/50"
-            }`}
-          >
-            TrueSkill
-          </button>
-        )}
+        <SegmentedRail
+          className="ml-auto"
+          aria-label="Stats views"
+          activeKey={currentView}
+          onSelect={(key) => setCurrentView(key as typeof currentView)}
+          segments={[
+            { key: "stats", label: "Monthly" },
+            ...(showLeaderboard ? [{ key: "leaderboard", label: "Leaderboard" }] : []),
+            ...(isAdmin ? [{ key: "elo", label: "ELO" }] : []),
+            ...(isAdmin ? [{ key: "trueskill", label: "TrueSkill" }] : []),
+          ]}
+        />
       </div>
 
       {/* Admin preview notice */}
@@ -651,553 +935,771 @@ export function ReportsTab() {
         </div>
       ) : currentView === "stats" ? (
         <>
-          {/* Monthly Stats View */}
-          {/* Overview Bar */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <div className="text-[var(--color-text-dim)] text-xs uppercase mb-1">Total Matches</div>
-              <div className="text-2xl font-bold font-mono text-[var(--color-primary)]">{totalMatches}</div>
-            </div>
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <div className="text-[var(--color-text-dim)] text-xs uppercase mb-1">Avg Score Margin</div>
-              <div className="text-2xl font-bold font-mono text-[var(--color-text)]">{avgMargin.toFixed(1)}</div>
-            </div>
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <div className="text-[var(--color-text-dim)] text-xs uppercase mb-1">Tight games (7-6)</div>
-              <div className="text-2xl font-bold font-mono text-[#f39c12]">{nailBiters.length}</div>
-            </div>
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <div className="text-[var(--color-text-dim)] text-xs uppercase mb-1">Blowouts (&gt; 4)</div>
-              <div className="text-2xl font-bold font-mono text-[var(--color-text)]">{blowoutCount}</div>
-            </div>
-          </div>
+          {/* ---------------------------------------------------------------
+              Monthly view.
 
-          {/* Star Player of the Month */}
-          <div className="bg-[var(--color-surface)]/60 border border-[#ffd700]/30 rounded-lg p-6">
-            <h3 className="text-lg font-bold text-[#ffd700] mb-4 flex items-center gap-2">
-              <Star className="w-6 h-6 fill-[#ffd700]" />
-              Star Player of the Month
-            </h3>
-            {starPlayer ? (
-              <div className="text-center">
-                <div className="text-3xl font-bold font-mono text-[#ffd700] mb-2">{starPlayer.name}</div>
-                <div className="text-lg mb-3">
-                  <span className="text-[#27ae60] font-bold">{starPlayer.wins}W</span>
-                  <span className="text-[var(--color-text-dim)]"> - </span>
-                  <span className="text-[#ff4757] font-bold">{starPlayer.losses}L</span>
-                  <span className="text-[var(--color-text-dim)] ml-3">|</span>
-                  <span className="text-[var(--color-primary)] font-bold ml-3">{starPlayer.avgScore.toFixed(2)} win-value/game</span>
-                </div>
-                <p className="text-xs text-[var(--color-text-dim)] italic">
-                  Rewards winning the games you weren&apos;t favoured to win. Each win is worth more when your team was the underdog (lower combined tier) and less when you were favoured — so a single upset beats a string of expected wins. The Star Player has the highest average win-value per game.
-                </p>
-                <p className="text-xs text-[var(--color-text-dim)]/60 mt-1">
-                  Min {starPlayerMinMatches} games this month · based on current player tiers
-                </p>
+              Laid out as three unequal rows rather than a uniform grid of
+              one-number cards: a hero, a dense records list, and the
+              supporting measures. The old version gave a full-width panel to
+              every stat, which is where the empty space came from.
+              --------------------------------------------------------------- */}
+          <div className="grid grid-cols-12 gap-3.5">
+            {/* Star Player — the month's headline, so it gets the width and the
+                watermark. */}
+            <section className="glass-panel col-span-12 lg:col-span-7 p-6 flex flex-col min-h-[196px]">
+              <Emblem
+                src="/badges/star.svg"
+                color="#ffd700"
+                className="absolute -right-[52px] -top-[44px] w-[210px] h-[210px] opacity-[0.055] pointer-events-none"
+              />
+              <div
+                className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] w-fit"
+                style={{ fontFamily: "var(--font-mono)", color: "#ffd700" }}
+                data-hint="Rewards winning the games you weren't favoured to win. Each win is worth more when your side had the lower combined tier — one upset beats a string of expected wins."
+              >
+                <Emblem src="/badges/star.svg" color="#ffd700" className="w-[15px] h-[15px]" />
+                Star Player of the Month
               </div>
-            ) : (
-              <p className="text-[var(--color-text-dim)] text-sm text-center italic">
-                Not enough data yet — need players with {starPlayerMinMatches}+ matches this month
-              </p>
-            )}
+
+              {starPlayer ? (
+                <>
+                  <div
+                    className="text-[40px] font-bold leading-[1.05] mt-3 mb-0.5"
+                    style={{
+                      fontFamily: "var(--font-orbitron)",
+                      color: "var(--color-text-bright)",
+                      textShadow: "0 0 26px color-mix(in srgb, #ffd700 30%, transparent)",
+                    }}
+                  >
+                    {starPlayer.name}
+                  </div>
+                  <p className="text-xs" style={{ color: "var(--color-text-dim)" }}>
+                    Highest average win-value · min {starPlayerMinMatches} games this month
+                  </p>
+
+                  <div className="mt-auto pt-4 flex flex-wrap items-end gap-x-6 gap-y-3">
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: "var(--color-text-dim)" }}>
+                        Record
+                      </span>
+                      <b className="text-base font-semibold tabular-nums" style={{ color: "#27ae60" }}>
+                        {starPlayer.wins} – {starPlayer.losses}
+                      </b>
+                    </div>
+                    <div className="flex flex-col gap-0.5" data-hint="Average win-value per game played.">
+                      <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: "var(--color-text-dim)" }}>
+                        Win value
+                      </span>
+                      <b className="text-base font-semibold tabular-nums" style={{ color: "#ffd700" }}>
+                        {starPlayer.avgScore.toFixed(2)}
+                        <small className="text-[11px] font-normal ml-1" style={{ color: "var(--color-text-dim)" }}>
+                          /game
+                        </small>
+                      </b>
+                    </div>
+                    {starValueDelta !== null && (
+                      <div
+                        className="flex flex-col gap-0.5"
+                        data-hint={`${starPlayer.name}'s win-value per game in ${prevMonthName}, scored the same way.`}
+                      >
+                        <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: "var(--color-text-dim)" }}>
+                          vs {prevMonthName}
+                        </span>
+                        <b
+                          className="text-base font-semibold tabular-nums"
+                          style={{ color: starValueDelta >= 0 ? "var(--color-primary)" : "var(--color-text-dim)" }}
+                        >
+                          {starValueDelta >= 0 ? "+" : "−"}
+                          {Math.abs(starValueDelta).toFixed(2)}
+                        </b>
+                      </div>
+                    )}
+                    <div className="flex flex-col gap-0.5">
+                      <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: "var(--color-text-dim)" }}>
+                        Games
+                      </span>
+                      <b className="text-base font-semibold tabular-nums">{starPlayer.matches}</b>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className="mt-6 text-sm italic" style={{ color: "var(--color-text-dim)" }}>
+                  Not enough data yet — need players with {starPlayerMinMatches}+ matches this month
+                </p>
+              )}
+            </section>
+
+            {/* The four overview numbers, in ONE panel divided by hairlines. As
+                four separate cards they were four boxes each holding one figure. */}
+            <section className="glass-panel col-span-12 lg:col-span-5">
+              <div className="grid grid-cols-2 h-full">
+                {[
+                  {
+                    label: "Matches",
+                    value: totalMatches,
+                    note:
+                      matchesDelta === null
+                        ? "logged this month"
+                        : `${matchesDelta >= 0 ? "+" : "−"}${Math.abs(matchesDelta)} ${matchesDeltaLabel}`,
+                    hint:
+                      matchesDelta === null
+                        ? "Matches approved and logged this month."
+                        : partialCutoff === null
+                          ? `Matches approved and logged this month, against ${prevMonthName}'s full total (${comparablePrevMatches.length}).`
+                          : `Matches so far this month, against the same window in ${prevMonthName} — its first ${now.getUTCDate()} days, which had ${comparablePrevMatches.length}.`,
+                    color: "var(--color-primary)",
+                    crest: "/achievements/galactic-republic.svg",
+                  },
+                  {
+                    label: "Avg margin",
+                    value: avgMargin.toFixed(1),
+                    note: "of 7 caps",
+                    color: "var(--color-text-bright)",
+                    crest: "/achievements/galactic-empire.svg",
+                    hint: "Mean absolute cap difference across every match this month.",
+                  },
+                  {
+                    label: "Tight games",
+                    value: nailBiters.length,
+                    note: "decided 7–6",
+                    color: "#f39c12",
+                    crest: "/achievements/rebel-alliance.svg",
+                    hint: "Matches decided by a single cap.",
+                  },
+                  {
+                    label: "Blowouts",
+                    value: blowoutCount,
+                    note: "margin > 4",
+                    color: "#ff4757",
+                    crest: "/achievements/sith-order.svg",
+                    hint: "Matches won by more than four caps.",
+                  },
+                ].map((tile, i) => (
+                  <div
+                    key={tile.label}
+                    className={`relative p-[17px] ${i < 2 ? "border-b" : ""} ${i % 2 === 0 ? "border-r" : ""}`}
+                    style={{ borderColor: "var(--glass-hair)" }}
+                    data-hint={tile.hint}
+                  >
+                    <Emblem
+                      src={tile.crest}
+                      color="var(--color-text)"
+                      className="absolute right-3.5 top-4 w-4 h-4 opacity-20"
+                    />
+                    <div
+                      className="text-[10px] uppercase tracking-[0.14em] mb-1.5"
+                      style={{ color: "var(--color-text-dim)" }}
+                    >
+                      {tile.label}
+                    </div>
+                    <div className="text-[28px] font-bold leading-none tabular-nums" style={{ color: tile.color, fontFamily: "var(--font-mono)" }}>
+                      {tile.value}
+                    </div>
+                    <div className="text-[11px] mt-1.5" style={{ color: "var(--color-text-dim)" }}>
+                      {tile.note}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </section>
           </div>
 
-          {/* Winning Streak & Rivalries Row */}
-          <div className="grid md:grid-cols-2 gap-4">
-            {/* Winning Streak */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Zap className="w-5 h-5 text-[#f39c12]" />
-                Winning Streaks
-              </h3>
+          <div className="grid grid-cols-12 gap-3.5">
+            {/* Records: six half-empty cards collapsed into one dense list, each
+                row led by the badge it corresponds to. The per-stat explanations
+                survive as hints on the "?" rather than as body copy. */}
+            <section className="glass-panel col-span-12 lg:col-span-7 p-5">
+              <SectionHead title="Records" tag={`${statHighlightMinMatches}+ stat-tracked matches`} />
+
+              <RecordRow
+                emblem="/badges/top-capper.svg"
+                accent="#f39c12"
+                label="Top flag hold"
+                hint="Most total time carrying the enemy flag this month, summed across matches."
+                who={topFlagHold?.name}
+                value={topFlagHold ? formatFlagHold(topFlagHold.flagHoldMs) : null}
+                note="total hold"
+              />
+              <RecordRow
+                emblem="/badges/dbs-god.svg"
+                accent="#9b59b6"
+                label="Most DBS kills"
+                hint="Death-from-behind special kills, as reported by the uploaded scoreboard."
+                who={topDbsKills?.name}
+                value={topDbsKills ? topDbsKills.dbsKills : null}
+                note="this month"
+              />
+              <RecordRow
+                emblem="/badges/top-kd.svg"
+                accent="#ff4757"
+                label="Highest K/D"
+                hint="Kills divided by deaths across stat-tracked matches."
+                who={highestKd?.name}
+                value={highestKd ? highestKd.kd.toFixed(2) : null}
+                note={highestKd ? `${highestKd.kills} / ${highestKd.deaths}` : undefined}
+              />
+              <RecordRow
+                emblem="/achievements/mandalorian-crest.svg"
+                accent="#00d4ff"
+                label="Returns per minute"
+                hint="Flag returns per minute played — a rate rather than a total, so shorter sessions still count."
+                who={topRetsPerMin?.name}
+                value={topRetsPerMin ? topRetsPerMin.retsPerMin.toFixed(2) : null}
+                note={topRetsPerMin ? `${topRetsPerMin.returns} rets · ${topRetsPerMin.timePlayed} min` : undefined}
+              />
+              <RecordRow
+                emblem="/badges/top5.svg"
+                accent="#45a29e"
+                label="Fastest capper"
+                hint="Fewest minutes of flag hold per capture. Regular cappers only (at least 40% of the month's top cap total), so one lucky grab can't win it."
+                who={mostCapsPerRun?.name}
+                value={mostCapsPerRun ? `${mostCapsPerRun.minutesPerCap.toFixed(1)} min` : null}
+                note="per capture"
+              />
+              <RecordRow
+                emblem="/badges/highscore.svg"
+                accent="var(--color-primary)"
+                label="Highest single score"
+                hint="Best individual scoreboard total in one match this month."
+                who={highestScore?.name}
+                value={highestScore ? highestScore.score : null}
+                note={
+                  highestScore?.match
+                    ? `${highestScore.match.red_score}–${highestScore.match.blue_score}, ${new Date(
+                        highestScore.match.created_at,
+                      ).toLocaleDateString("en-GB", { day: "numeric", month: "short" })}`
+                    : undefined
+                }
+              />
+            </section>
+
+            {/* Streaks: the bar carries the length, the pill says whether it's
+                still running. */}
+            <section className="glass-panel col-span-12 lg:col-span-5 p-5">
+              <Emblem
+                src="/badges/champion.svg"
+                color="#f39c12"
+                className="absolute -right-10 -bottom-11 w-[200px] h-[200px] opacity-[0.05] pointer-events-none"
+              />
+              <SectionHead title="Winning streaks" tag="consecutive wins" />
               {streakLeaders.length > 0 ? (
-                <div className="space-y-3">
+                <>
                   {streakLeaders.map((leader, index) => (
-                    <div key={leader.name} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[var(--color-text-dim)] text-sm w-5">{index + 1}.</span>
-                        <span className="text-[var(--color-text)] font-medium">{leader.name}</span>
-                      </div>
-                      <span className="text-[#f39c12] font-bold">{leader.streak} wins</span>
+                    <div key={leader.name} className="flex items-center gap-2.5 py-2">
+                      <span className="text-[11px] w-3.5 tabular-nums" style={{ color: "var(--color-text-dim)" }}>
+                        {index + 1}
+                      </span>
+                      <span className="text-[13.5px] w-[104px] shrink-0 truncate">{leader.name}</span>
+                      <span
+                        className="flex-1 h-[7px] rounded overflow-hidden"
+                        style={{
+                          backgroundColor: "color-mix(in srgb, var(--color-background) 55%, transparent)",
+                          boxShadow: "inset 0 1px 2px var(--glass-shade)",
+                        }}
+                      >
+                        <span
+                          className="block h-full rounded"
+                          style={{
+                            width: `${(leader.streak / longestStreak) * 100}%`,
+                            background: "linear-gradient(90deg, color-mix(in srgb, #f39c12 45%, transparent), #f39c12)",
+                            boxShadow: "0 0 10px -3px #f39c12",
+                          }}
+                        />
+                      </span>
+                      <span className="text-xs font-semibold w-[30px] text-right tabular-nums" style={{ color: "#f39c12" }}>
+                        {leader.streak}
+                      </span>
+                      <span
+                        className="text-[9.5px] font-semibold tracking-[0.08em] w-[52px] text-right"
+                        style={{
+                          fontFamily: "var(--font-mono)",
+                          color: leader.live ? "#27ae60" : "var(--color-text-dim)",
+                          opacity: leader.live ? 0.9 : 0.45,
+                        }}
+                        data-hint={
+                          leader.live
+                            ? "Still running at the end of this month"
+                            : "Broken by a loss before the month ended"
+                        }
+                      >
+                        {leader.live ? "LIVE" : "ENDED"}
+                      </span>
                     </div>
                   ))}
-                </div>
-              ) : (
-                <p className="text-[var(--color-text-dim)] text-sm text-center italic">No streaks this month</p>
-              )}
-            </div>
-
-            {/* Rivalries */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Swords className="w-5 h-5 text-[#ff4757]" />
-                Top Rivalry
-              </h3>
-              {topRivalry && topRivalry.count >= 2 ? (
-                <div className="text-center">
-                  <div className="text-lg mb-2">
-                    <span className="text-[var(--color-text)] font-bold">{topRivalry.player1}</span>
-                    <span className="text-[var(--color-text-dim)] mx-2">vs</span>
-                    <span className="text-[var(--color-text)] font-bold">{topRivalry.player2}</span>
-                  </div>
-                  <div className="text-sm text-[var(--color-text-dim)] mb-2">
-                    Faced each other <span className="text-[var(--color-primary)] font-bold">{topRivalry.count}</span> times
-                  </div>
-                  <div className="text-sm">
-                    <span className="text-[var(--color-text)]">{topRivalry.player1}&apos;s teams won </span>
-                    <span className="text-[#27ae60] font-bold">{topRivalry.player1Wins}</span>
-                    <span className="text-[var(--color-text)]">, {topRivalry.player2}&apos;s won </span>
-                    <span className="text-[#27ae60] font-bold">{topRivalry.count - topRivalry.player1Wins}</span>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[var(--color-text-dim)] text-sm text-center italic">No recurring rivalries yet</p>
-              )}
-            </div>
-          </div>
-
-          {/* Average Lobby Strength & Red vs Blue Row */}
-          <div className="grid md:grid-cols-2 gap-4">
-            {/* Average Lobby Strength */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Target className="w-5 h-5" />
-                Avg Team Strength
-              </h3>
-              {avgLobbyStrength !== null ? (
-                <div className="text-center">
-                  <div className="text-3xl font-bold font-mono mb-2 text-[var(--color-primary)]">
-                    {avgLobbyStrength.toFixed(1)}
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)]">
-                    Total max level: 60
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)] mt-2 italic">
-                    Based on {matchesWithTierSnapshots.length} matches with tier data
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[var(--color-text-dim)] text-sm text-center italic">No tier snapshot data available</p>
-              )}
-            </div>
-
-            {/* Red vs Blue */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Target className="w-5 h-5" />
-                Red vs Blue Wins
-              </h3>
-              <div className="space-y-4">
-                <div className="flex h-8 rounded-lg overflow-hidden">
-                  {redPct > 0 && (
-                    <div
-                      className="bg-[#ff4757] flex items-center justify-center text-white text-sm font-bold"
-                      style={{ width: `${redPct}%` }}
-                    >
-                      {redPct}%
-                    </div>
+                  <StreakFoot
+                    emblem="/badges/champion.svg"
+                    title="Still running"
+                    sub="Streaks carrying into next month"
+                    value={allStreaks.filter((s) => s.live).length}
+                    unit={`of ${allStreaks.length}`}
+                  />
+                  {streakRecord && (
+                    <StreakFoot
+                      emblem="/badges/highscore.svg"
+                      title="All-time record"
+                      sub={`${streakRecord.name} · ${new Date(streakRecord.endedAt).toLocaleDateString("en-GB", {
+                        month: "long",
+                        year: "numeric",
+                        timeZone: "UTC",
+                      })}`}
+                      value={streakRecord.streak}
+                      unit="wins"
+                      /* Dimmed unless this month has matched it — it's a
+                         reference point, not a headline. */
+                      muted={longestStreak < streakRecord.streak}
+                    />
                   )}
-                  {bluePct > 0 && (
-                    <div
-                      className="bg-[#00d4ff] flex items-center justify-center text-white text-sm font-bold"
-                      style={{ width: `${bluePct}%` }}
-                    >
-                      {bluePct}%
-                    </div>
-                  )}
-                </div>
-                <div className="flex justify-between text-sm">
-                  <span className="text-[#ff4757]">Red: {redWins} wins</span>
-                  <span className="text-[#00d4ff]">Blue: {blueWins} wins</span>
-                </div>
-                {draws > 0 && (
-                  <div className="text-center text-sm text-[var(--color-text-dim)]">
-                    Draws: {draws}
-                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-center italic py-6" style={{ color: "var(--color-text-dim)" }}>
+                  No streaks this month
+                </p>
+              )}
+            </section>
+          </div>
+
+          <div className="grid grid-cols-12 gap-3.5">
+            {/* Red vs Blue and average strength share a panel — both are "how
+                even was the month", and neither fills one on its own. */}
+            <section className="glass-panel col-span-12 lg:col-span-7 p-5">
+              <SectionHead title="Team balance" tag={`${totalMatches} matches`} />
+              <div
+                className="flex h-[30px] rounded-[9px] overflow-hidden"
+                style={{ boxShadow: "inset 0 1px 0 var(--glass-spec), inset 0 -6px 12px -8px rgba(0,0,0,0.5)" }}
+                data-hint="Which side won, across every match this month. A persistent lean usually means a map or spawn advantage rather than a balance bug."
+              >
+                {redPct > 0 && (
+                  <span
+                    className="flex items-center pl-3 text-xs font-bold text-white"
+                    style={{ width: `${redPct}%`, background: "linear-gradient(180deg, color-mix(in srgb, #ff4757 92%, white), #ff4757)" }}
+                  >
+                    {redPct}%
+                  </span>
+                )}
+                {bluePct > 0 && (
+                  <span
+                    className="flex items-center justify-end pr-3 text-xs font-bold"
+                    style={{
+                      width: `${bluePct}%`,
+                      background: "linear-gradient(180deg, color-mix(in srgb, #00d4ff 92%, white), #00d4ff)",
+                      color: "color-mix(in srgb, var(--color-background) 80%, #000)",
+                    }}
+                  >
+                    {bluePct}%
+                  </span>
                 )}
               </div>
-            </div>
-          </div>
-
-          {/* Top Flag Hold & Most DBS Kills Row (from match stats CSVs) */}
-          <div className="grid md:grid-cols-2 gap-4">
-            {/* Top Flag Hold */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Flag className="w-5 h-5 text-[#f39c12]" />
-                Top Flag Hold
-              </h3>
-              {topFlagHold ? (
-                <div className="text-center">
-                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{topFlagHold.name}</div>
-                  <div className="text-2xl font-bold font-mono text-[#f39c12] mb-2">
-                    {formatFlagHold(topFlagHold.flagHoldMs)}
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)] italic">
-                    Most total flag hold time this month
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
-                    Players with {statHighlightMinMatches}+ stat-tracked matches
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
-                  No stats data this month
-                </p>
-              )}
-            </div>
-
-            {/* Most DBS Kills */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Skull className="w-5 h-5 text-[#ff4757]" />
-                Most DBS Kills
-              </h3>
-              {topDbsKills ? (
-                <div className="text-center">
-                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{topDbsKills.name}</div>
-                  <div className="text-2xl font-bold font-mono text-[#ff4757] mb-2">
-                    {topDbsKills.dbsKills} DBS kills
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)] italic">
-                    Most total DBS kills this month
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
-                    Players with {statHighlightMinMatches}+ stat-tracked matches
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
-                  No stats data this month
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Most Caps per Run & Top Returner Row (from match stats CSVs) */}
-          <div className="grid md:grid-cols-2 gap-4">
-            {/* Most Caps per Run */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Gauge className="w-5 h-5 text-[#f39c12]" />
-                Most Caps per Run
-              </h3>
-              {mostCapsPerRun ? (
-                <div className="text-center">
-                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{mostCapsPerRun.name}</div>
-                  <div className="text-2xl font-bold font-mono text-[#f39c12] mb-1">
-                    1 cap / {mostCapsPerRun.minutesPerCap.toFixed(1)} min
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)] mb-2">
-                    {mostCapsPerRun.captures} caps · {formatFlagHold(mostCapsPerRun.flagHoldMs)} hold
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)] italic">
-                    Fewest minutes of flag hold per cap
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
-                    Regular cappers only (≥40% of the top cap total)
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
-                  No stats data this month
-                </p>
-              )}
-            </div>
-
-            {/* Top Returner */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Shield className="w-5 h-5 text-[#00d4ff]" />
-                Rets / Min
-              </h3>
-              {topRetsPerMin ? (
-                <div className="text-center">
-                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{topRetsPerMin.name}</div>
-                  <div className="text-2xl font-bold font-mono text-[#00d4ff] mb-1">
-                    {topRetsPerMin.retsPerMin.toFixed(2)} rets/min
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)] mb-2">
-                    {topRetsPerMin.returns} returns · {topRetsPerMin.timePlayed} min
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)] italic">
-                    Most returns per minute played this month
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
-                    Players with {statHighlightMinMatches}+ stat-tracked matches
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
-                  No stats data this month
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Top Killer & Highest Score Row (from match stats CSVs) */}
-          <div className="grid md:grid-cols-2 gap-4">
-            {/* Top Killer */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Sword className="w-5 h-5 text-[#ff4757]" />
-                Highest K/D
-              </h3>
-              {highestKd ? (
-                <div className="text-center">
-                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{highestKd.name}</div>
-                  <div className="text-2xl font-bold font-mono text-[#ff4757] mb-1">
-                    {highestKd.kd.toFixed(2)} K/D
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)] mb-2">
-                    {highestKd.kills} kills · {highestKd.deaths} deaths
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)] italic">
-                    Highest kill/death ratio this month
-                  </div>
-                  <div className="text-xs text-[var(--color-text-dim)]/60 mt-1">
-                    Players with {statHighlightMinMatches}+ stat-tracked matches
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
-                  No stats data this month
-                </p>
-              )}
-            </div>
-
-            {/* Highest Score */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Trophy className="w-5 h-5 text-[#f39c12]" />
-                Highest Score
-              </h3>
-              {highestScore ? (
-                <div className="text-center">
-                  <div className="text-3xl font-bold font-mono text-[var(--color-text)] mb-1">{highestScore.name}</div>
-                  <div className="text-2xl font-bold font-mono text-[#f39c12] mb-2">
-                    {highestScore.score} pts
-                  </div>
-                  {highestScore.match && (
-                    <div className="text-xs text-[var(--color-text-dim)] mb-2">
-                      {new Date(highestScore.match.created_at).toLocaleDateString()} · {highestScore.match.red_score}–{highestScore.match.blue_score}
-                    </div>
-                  )}
-                  <div className="text-xs text-[var(--color-text-dim)] italic">
-                    Highest score in a single match this month
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[var(--color-text-dim)] text-sm text-center italic">
-                  No stats data this month
-                </p>
-              )}
-            </div>
-          </div>
-
-          {/* Algorithm vs Manual */}
-          <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-            <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-              <BarChart3 className="w-5 h-5" />
-              Algorithm vs Manual Comparison
-            </h3>
-            <div className="grid md:grid-cols-2 gap-4">
-              <div className={`p-4 rounded-lg border ${algorithmMatches.length > 0 ? "border-[var(--color-primary)]/50 bg-[var(--color-primary)]/5" : "border-[var(--color-border)]"}`}>
-                <div className="text-[var(--color-primary)] font-bold mb-2">Algorithm</div>
-                {algorithmMatches.length > 0 ? (
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-[var(--color-text-dim)]">Matches:</span>
-                      <span className="text-[var(--color-text)]">{algorithmMatches.length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--color-text-dim)]">Avg Margin:</span>
-                      <span className="text-[var(--color-text)]">{algorithmAvgMargin.toFixed(1)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--color-text-dim)]">Avg Tier Gap:</span>
-                      <span className="text-[var(--color-text)]">{algorithmAvgTierGap !== null ? algorithmAvgTierGap.toFixed(1) : "N/A"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--color-text-dim)]">Tight games (7-6):</span>
-                      <span className="text-[var(--color-text)]">{algorithmNailbiters}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--color-text-dim)]">Blowouts:</span>
-                      <span className="text-[var(--color-text)]">{algorithmBlowouts}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-[var(--color-text-dim)] text-sm">No algorithm matches this month</p>
-                )}
+              <div className="flex justify-between text-[11.5px] mt-2.5">
+                <span style={{ color: "#ff4757" }}>Red — {redWins} wins</span>
+                {draws > 0 && <span style={{ color: "var(--color-text-dim)" }}>{draws} drawn</span>}
+                <span style={{ color: "#00d4ff" }}>Blue — {blueWins} wins</span>
               </div>
-              <div className={`p-4 rounded-lg border ${manualMatches.length > 0 ? "border-[var(--color-text-dim)]/50 bg-[var(--color-text-dim)]/5" : "border-[var(--color-border)]"}`}>
-                <div className="text-[var(--color-text-dim)] font-bold mb-2">Manual</div>
-                {manualMatches.length > 0 ? (
-                  <div className="space-y-1 text-sm">
-                    <div className="flex justify-between">
-                      <span className="text-[var(--color-text-dim)]">Matches:</span>
-                      <span className="text-[var(--color-text)]">{manualMatches.length}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--color-text-dim)]">Avg Margin:</span>
-                      <span className="text-[var(--color-text)]">{manualAvgMargin.toFixed(1)}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--color-text-dim)]">Avg Tier Gap:</span>
-                      <span className="text-[var(--color-text)]">{manualAvgTierGap !== null ? manualAvgTierGap.toFixed(1) : "N/A"}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--color-text-dim)]">Tight games (7-6):</span>
-                      <span className="text-[var(--color-text)]">{manualNailbiters}</span>
-                    </div>
-                    <div className="flex justify-between">
-                      <span className="text-[var(--color-text-dim)]">Blowouts:</span>
-                      <span className="text-[var(--color-text)]">{manualBlowouts}</span>
-                    </div>
-                  </div>
-                ) : (
-                  <p className="text-[var(--color-text-dim)] text-sm">No manual matches this month</p>
-                )}
-              </div>
-            </div>
-            {algorithmMatches.length > 0 && manualMatches.length > 0 && (
-              <div className="mt-4 p-3 rounded bg-[#1f2833] text-sm text-center">
-                {algorithmAvgMargin < manualAvgMargin ? (
-                  <span className="text-[#27ae60]">Algorithm matches have closer games on average ({algorithmAvgMargin.toFixed(1)} vs {manualAvgMargin.toFixed(1)} margin)</span>
-                ) : algorithmAvgMargin > manualAvgMargin ? (
-                  <span className="text-[#f39c12]">Manual matches have closer games on average ({manualAvgMargin.toFixed(1)} vs {algorithmAvgMargin.toFixed(1)} margin)</span>
-                ) : (
-                  <span className="text-[var(--color-text-dim)]">Both approaches have similar margins</span>
-                )}
-              </div>
-            )}
-          </div>
 
-          {/* Balance vs Reality */}
-          {balanceVsReality.length > 0 && (
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-2">Balance vs Reality</h3>
-              <p className="text-sm text-[var(--color-text-dim)] mb-4">
-                Compares the algorithm&apos;s tier gap prediction against actual score margins. Lower values = closer matches.
-              </p>
-              <div className="h-72">
-                <ResponsiveContainer width="100%" height="100%">
-                  <LineChart data={balanceVsReality} margin={{ top: 28, right: 8, left: 0, bottom: 16 }}>
-                    <XAxis dataKey="match" stroke="var(--color-text-dim)" fontSize={12} label={{ value: "Match #", position: "bottom", fill: "var(--color-text-dim)", fontSize: 11 }} />
-                    <YAxis stroke="var(--color-text-dim)" fontSize={12} />
-                    <Tooltip
-                      contentStyle={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: "8px" }}
-                      labelStyle={{ color: "var(--color-primary)" }}
-                      labelFormatter={(label) => `Match ${label}`}
-                      formatter={(value: number, name: string, props: { payload?: { matchType?: string } }) => [
-                        value,
-                        name === "tierGap" ? "Tier Gap" : "Score Margin"
-                      ]}
-                      content={({ active, payload, label }) => {
-                        if (!active || !payload?.length) return null
-                        const matchType = payload[0]?.payload?.matchType
-                        return (
-                          <div style={{ backgroundColor: "var(--color-surface)", border: "1px solid var(--color-border)", borderRadius: 8, padding: "8px 12px" }}>
-                            <p style={{ color: "var(--color-primary)", marginBottom: 4, fontSize: 12 }}>Match {label}</p>
-                            {matchType && (
-                              <p style={{ marginBottom: 6 }}>
-                                <span style={{
-                                  fontSize: 10,
-                                  fontWeight: 700,
-                                  letterSpacing: "0.05em",
-                                  padding: "2px 6px",
-                                  borderRadius: 4,
-                                  backgroundColor: matchType === "algorithm" ? "rgba(102,252,241,0.15)" : "rgba(136,146,160,0.15)",
-                                  color: matchType === "algorithm" ? "var(--color-primary)" : "var(--color-text-dim)",
-                                  border: `1px solid ${matchType === "algorithm" ? "rgba(102,252,241,0.4)" : "rgba(136,146,160,0.4)"}`,
-                                }}>
-                                  {matchType === "algorithm" ? "ALGORITHM" : "MANUAL"}
-                                </span>
-                              </p>
-                            )}
-                            {payload.map((entry) => (
-                              <p key={entry.dataKey as string} style={{ color: entry.color as string, fontSize: 12, margin: "2px 0" }}>
-                                {entry.name === "tierGap" ? "Tier Gap" : "Score Margin"}: {entry.value}
-                              </p>
-                            ))}
-                          </div>
-                        )
+              {avgLobbyStrength !== null && (
+                <div className="mt-5">
+                  <div className="flex justify-between items-baseline mb-2">
+                    <span className="text-[10px] uppercase tracking-[0.14em]" style={{ color: "var(--color-text-dim)" }}>
+                      Average team strength
+                    </span>
+                    <b className="text-xl font-bold tabular-nums" style={{ fontFamily: "var(--font-mono)", color: "var(--color-primary)" }}>
+                      {avgLobbyStrength.toFixed(1)}
+                      <span className="text-xs font-normal" style={{ color: "var(--color-text-dim)" }}>
+                        {" "}
+                        / 60
+                      </span>
+                    </b>
+                  </div>
+                  <span
+                    className="block h-[9px] rounded-[5px] overflow-hidden"
+                    style={{
+                      backgroundColor: "color-mix(in srgb, var(--color-background) 55%, transparent)",
+                      boxShadow: "inset 0 1px 2px var(--glass-shade)",
+                    }}
+                  >
+                    <span
+                      className="block h-full"
+                      style={{
+                        width: `${(avgLobbyStrength / 60) * 100}%`,
+                        background: "linear-gradient(90deg, color-mix(in srgb, var(--color-primary) 35%, transparent), var(--color-primary))",
+                        boxShadow: "0 0 12px -3px var(--color-primary)",
                       }}
                     />
-                    <Legend
-                      verticalAlign="top"
-                      height={36}
-                      formatter={(value) => (
-                        <span style={{ color: "var(--color-text)", fontSize: 12 }}>
-                          {value === "tierGap" ? "Tier Gap (predicted)" : "Score Margin (actual)"}
+                  </span>
+                  <p className="text-[11px] mt-2" style={{ color: "var(--color-text-dim)" }}>
+                    Mean combined tier per side, from tier snapshots on {matchesWithTierSnapshots.length} of{" "}
+                    {totalMatches} matches.
+                  </p>
+                </div>
+              )}
+            </section>
+
+            <section className="glass-panel col-span-12 lg:col-span-5 p-5">
+              <SectionHead title="Top rivalry" />
+              {topRivalry && topRivalry.count >= 2 ? (
+                <div className="relative flex flex-col justify-center">
+                  <Emblem
+                    src="/badges/top-kd.svg"
+                    color="#ff4757"
+                    className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-[170px] h-[170px] opacity-[0.06] pointer-events-none"
+                  />
+                  <div className="flex items-center justify-center gap-3.5 mt-1.5 mb-3">
+                    <b className="text-xl font-bold" style={{ color: "var(--color-text-bright)" }}>
+                      {topRivalry.player1}
+                    </b>
+                    <span className="text-[11px] uppercase tracking-[0.18em]" style={{ color: "var(--color-text-dim)" }}>
+                      vs
+                    </span>
+                    <b className="text-xl font-bold" style={{ color: "var(--color-text-bright)" }}>
+                      {topRivalry.player2}
+                    </b>
+                  </div>
+                  {/* Tug-of-war: the bar leans as one pulls ahead. */}
+                  <span
+                    className="flex h-1.5 rounded-full overflow-hidden"
+                    style={{ backgroundColor: "color-mix(in srgb, var(--color-background) 50%, transparent)" }}
+                  >
+                    <span style={{ width: `${(topRivalry.player1Wins / topRivalry.count) * 100}%`, backgroundColor: "#ff4757" }} />
+                    <span
+                      style={{
+                        width: `${((topRivalry.count - topRivalry.player1Wins) / topRivalry.count) * 100}%`,
+                        backgroundColor: "#00d4ff",
+                      }}
+                    />
+                  </span>
+                  <div className="flex justify-between text-[11.5px] mt-2.5" style={{ color: "var(--color-text-dim)" }}>
+                    <span>{topRivalry.player1Wins} wins</span>
+                    <span>Faced {topRivalry.count} times</span>
+                    <span>{topRivalry.count - topRivalry.player1Wins} wins</span>
+                  </div>
+                  <p
+                    className="text-[11px] leading-relaxed mt-3.5 pt-3 border-t"
+                    style={{ color: "var(--color-text-dim)", borderColor: "color-mix(in srgb, var(--color-border) 45%, transparent)" }}
+                  >
+                    The most-contested even matchup this month — closest to a 50/50 split among pairs who met at
+                    least {RIVALRY_MIN_MEETINGS} times.
+                  </p>
+                </div>
+              ) : (
+                <p className="text-sm text-center italic py-6" style={{ color: "var(--color-text-dim)" }}>
+                  No recurring rivalries yet
+                </p>
+              )}
+            </section>
+          </div>
+
+          {/* ---------------------------------------------------------------
+              Under the hood.
+
+              The working views — how the balancer did, and what changed —
+              share one panel with their own rail. They used to be three
+              full-width slabs at the foot of the page, two of which were
+              mostly empty.
+              --------------------------------------------------------------- */}
+          <section className="glass-panel p-5">
+            <div className="flex flex-wrap items-center gap-3.5 mb-4">
+              <h3
+                className="text-[11px] font-semibold uppercase tracking-[0.16em]"
+                style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
+              >
+                Under the hood
+              </h3>
+              <SegmentedRail
+                className="ml-auto"
+                aria-label="Under the hood views"
+                dense
+                activeKey={hoodView}
+                onSelect={(key) => setHoodView(key as typeof hoodView)}
+                segments={[
+                  { key: "reality", label: "Balance vs reality" },
+                  { key: "compare", label: "Algorithm vs manual" },
+                  { key: "accuracy", label: "Prediction accuracy" },
+                  { key: "tiers", label: "Tier changelog" },
+                ]}
+              />
+            </div>
+
+            {hoodView === "reality" &&
+              (balanceVsReality.length > 0 ? (
+                <>
+                  <p className="text-xs leading-relaxed mb-4 max-w-[78ch]" style={{ color: "var(--color-text-dim)" }}>
+                    Did the predicted tier gap match how the games actually went? Where the amber line runs above the
+                    cyan, the match was less even than predicted.
+                  </p>
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <LineChart data={balanceVsReality} margin={{ top: 16, right: 8, left: 0, bottom: 16 }}>
+                        <XAxis
+                          dataKey="match"
+                          stroke="var(--color-text-dim)"
+                          fontSize={11}
+                          label={{ value: "Match #", position: "bottom", fill: "var(--color-text-dim)", fontSize: 11 }}
+                        />
+                        <YAxis stroke="var(--color-text-dim)" fontSize={11} />
+                        <Tooltip
+                          content={({ active, payload, label }) => {
+                            if (!active || !payload?.length) return null
+                            const matchType = payload[0]?.payload?.matchType
+                            return (
+                              <div
+                                style={{
+                                  backgroundColor: "var(--color-surface)",
+                                  border: "1px solid var(--glass-hair)",
+                                  borderRadius: 10,
+                                  padding: "8px 12px",
+                                }}
+                              >
+                                <p style={{ color: "var(--color-primary)", marginBottom: 4, fontSize: 12 }}>
+                                  Match {label} · {matchType === "algorithm" ? "algorithm" : "manual"}
+                                </p>
+                                {payload.map((entry) => (
+                                  <p key={entry.dataKey as string} style={{ color: entry.color as string, fontSize: 12, margin: "2px 0" }}>
+                                    {entry.dataKey === "tierGap" ? "Tier gap" : "Score margin"}: {entry.value}
+                                  </p>
+                                ))}
+                              </div>
+                            )
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="tierGap"
+                          stroke="var(--color-primary)"
+                          strokeWidth={2}
+                          /* Shape carries the match type — the old version stamped an
+                             ALG/MAN tag above every point, which is what made this
+                             chart unreadable. The legend states it once instead. */
+                          dot={(props) => {
+                            /* recharts doesn't hand a `key` to a custom dot renderer,
+                               so derive one from the point's own match number. */
+                            const { cx, cy, payload } = props
+                            return payload.matchType === "algorithm" ? (
+                              <circle key={`tierGap-${payload.match}`} cx={cx} cy={cy} r={4} fill="var(--color-primary)" />
+                            ) : (
+                              <rect key={`tierGap-${payload.match}`} x={cx - 3.5} y={cy - 3.5} width={7} height={7} fill="var(--color-primary)" opacity={0.65} />
+                            )
+                          }}
+                        />
+                        <Line
+                          type="monotone"
+                          dataKey="scoreMargin"
+                          stroke="#f39c12"
+                          strokeWidth={2}
+                          dot={(props) => {
+                            /* recharts doesn't hand a `key` to a custom dot renderer,
+                               so derive one from the point's own match number. */
+                            const { cx, cy, payload } = props
+                            return payload.matchType === "algorithm" ? (
+                              <circle key={`scoreMargin-${payload.match}`} cx={cx} cy={cy} r={4} fill="#f39c12" />
+                            ) : (
+                              <rect key={`scoreMargin-${payload.match}`} x={cx - 3.5} y={cy - 3.5} width={7} height={7} fill="#f39c12" opacity={0.65} />
+                            )
+                          }}
+                        />
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex flex-wrap justify-center gap-5 mt-2 text-[11.5px]" style={{ color: "var(--color-text-dim)" }}>
+                    <span className="flex items-center gap-2">
+                      <i className="w-4 h-0.5 rounded" style={{ backgroundColor: "var(--color-primary)" }} />
+                      Tier gap (predicted)
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <i className="w-4 h-0.5 rounded" style={{ backgroundColor: "#f39c12" }} />
+                      Score margin (actual)
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <i className="w-2 h-2 rounded-full" style={{ backgroundColor: "var(--color-primary)" }} />
+                      Algorithm match
+                    </span>
+                    <span className="flex items-center gap-2">
+                      <i className="w-2 h-2" style={{ backgroundColor: "color-mix(in srgb, var(--color-primary) 60%, transparent)" }} />
+                      Manual match
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <EmptyHood>No tier snapshots this month, so there is nothing to compare against.</EmptyHood>
+              ))}
+
+            {hoodView === "compare" && (
+              <>
+                <p className="text-xs leading-relaxed mb-4 max-w-[78ch]" style={{ color: "var(--color-text-dim)" }}>
+                  The same five measures, mirrored — so a month with no algorithm matches reads as an empty side
+                  rather than a card saying nothing.
+                </p>
+                <div
+                  className="flex justify-between items-center mb-3 text-[10px] font-semibold uppercase tracking-[0.16em]"
+                  style={{ fontFamily: "var(--font-mono)" }}
+                >
+                  <span style={{ color: "var(--color-primary)" }}>Algorithm · {algorithmMatches.length}</span>
+                  <span style={{ color: "var(--color-text-dim)" }}>vs</span>
+                  <span style={{ color: "var(--color-text)" }}>{manualMatches.length} · Manual</span>
+                </div>
+                {[
+                  { label: "Matches", a: algorithmMatches.length, m: manualMatches.length },
+                  { label: "Avg margin", a: algorithmMatches.length ? algorithmAvgMargin : null, m: manualMatches.length ? manualAvgMargin : null },
+                  { label: "Avg tier gap", a: algorithmAvgTierGap, m: manualAvgTierGap },
+                  { label: "Tight games (7–6)", a: algorithmMatches.length ? algorithmNailbiters : null, m: manualMatches.length ? manualNailbiters : null },
+                  { label: "Blowouts", a: algorithmMatches.length ? algorithmBlowouts : null, m: manualMatches.length ? manualBlowouts : null },
+                ].map((row, i) => {
+                  const max = Math.max(row.a ?? 0, row.m ?? 0) || 1
+                  return (
+                    <div
+                      key={row.label}
+                      className={`grid grid-cols-[1fr_168px_1fr] items-center gap-3 py-2 ${i ? "border-t" : ""}`}
+                      style={{ borderColor: "color-mix(in srgb, var(--color-border) 40%, transparent)" }}
+                    >
+                      {row.a === null ? (
+                        <span className="text-[11.5px] italic text-right" style={{ color: "var(--color-text-dim)" }}>
+                          {i === 0 ? "no algorithm matches" : "—"}
+                        </span>
+                      ) : (
+                        <span className="flex items-center justify-end gap-2.5">
+                          <span
+                            className="h-[9px] rounded-[5px]"
+                            style={{
+                              width: `${((row.a as number) / max) * 100}%`,
+                              background: "linear-gradient(270deg, var(--color-primary), color-mix(in srgb, var(--color-primary) 30%, transparent))",
+                            }}
+                          />
+                          <b className="text-[13px] font-bold min-w-[34px] text-right tabular-nums" style={{ color: "var(--color-primary)" }}>
+                            {typeof row.a === "number" && !Number.isInteger(row.a) ? row.a.toFixed(1) : row.a}
+                          </b>
                         </span>
                       )}
+                      <span className="text-center text-[11.5px]" style={{ color: "var(--color-text-dim)" }}>
+                        {row.label}
+                      </span>
+                      {row.m === null ? (
+                        <span className="text-[11.5px] italic" style={{ color: "var(--color-text-dim)" }}>
+                          {i === 0 ? "no manual matches" : "—"}
+                        </span>
+                      ) : (
+                        <span className="flex items-center gap-2.5">
+                          <span
+                            className="h-[9px] rounded-[5px]"
+                            style={{
+                              width: `${((row.m as number) / max) * 100}%`,
+                              background:
+                                "linear-gradient(90deg, color-mix(in srgb, var(--color-text) 26%, transparent), color-mix(in srgb, var(--color-text) 55%, transparent))",
+                            }}
+                          />
+                          <b className="text-[13px] font-bold min-w-[34px] tabular-nums">
+                            {typeof row.m === "number" && !Number.isInteger(row.m) ? row.m.toFixed(1) : row.m}
+                          </b>
+                        </span>
+                      )}
+                    </div>
+                  )
+                })}
+                {algorithmMatches.length > 0 && manualMatches.length > 0 && (
+                  <div
+                    className="mt-4 px-3.5 py-3 rounded-[10px] text-xs"
+                    style={
+                      algorithmAvgMargin < manualAvgMargin
+                        ? {
+                            border: "1px solid color-mix(in srgb, #27ae60 35%, transparent)",
+                            backgroundColor: "color-mix(in srgb, #27ae60 10%, transparent)",
+                            color: "color-mix(in srgb, #27ae60 85%, var(--color-text-bright))",
+                          }
+                        : {
+                            border: "1px solid color-mix(in srgb, #f39c12 35%, transparent)",
+                            backgroundColor: "color-mix(in srgb, #f39c12 10%, transparent)",
+                            color: "color-mix(in srgb, #f39c12 85%, var(--color-text-bright))",
+                          }
+                    }
+                  >
+                    {algorithmAvgMargin < manualAvgMargin
+                      ? `Algorithm matches have closer games on average (${algorithmAvgMargin.toFixed(1)} vs ${manualAvgMargin.toFixed(1)} margin).`
+                      : algorithmAvgMargin > manualAvgMargin
+                        ? `Manual matches have closer games on average (${manualAvgMargin.toFixed(1)} vs ${algorithmAvgMargin.toFixed(1)} margin).`
+                        : "Both approaches produced the same average margin."}
+                  </div>
+                )}
+              </>
+            )}
+
+            {hoodView === "accuracy" &&
+              (predictions.length > 0 ? (
+                <>
+                  <p className="text-xs leading-relaxed mb-4 max-w-[78ch]" style={{ color: "var(--color-text-dim)" }}>
+                    Every split names a favourite — the side with the higher combined tier. This is whether that side
+                    went on to win, which is the one number that says if the tiers are calibrated. Level lobbies and
+                    draws are excluded: neither can confirm or deny a prediction.
+                  </p>
+                  <div className="grid sm:grid-cols-3 gap-3.5 mb-5">
+                    <HoodStat
+                      value={`${favouriteRate!.toFixed(0)}%`}
+                      color="var(--color-primary)"
+                      label="Favourite won"
+                      note={`${favouriteWins} of ${predictions.length} decided matches`}
                     />
-                    <Line
-                      type="monotone"
-                      dataKey="tierGap"
-                      stroke="var(--color-primary)"
-                      strokeWidth={2}
-                      dot={(props) => {
-                        const { cx, cy, payload } = props
-                        const isAlgorithm = payload.matchType === "algorithm"
-                        return isAlgorithm ? (
-                          <circle cx={cx} cy={cy} r={4} fill="var(--color-primary)" stroke="none" />
-                        ) : (
-                          <rect x={cx - 4} y={cy - 4} width={8} height={8} fill="var(--color-primary)" opacity={0.6} />
-                        )
-                      }}
-                      label={(props) => {
-                        const { x, y, index } = props
-                        const entry = balanceVsReality[index]
-                        if (!entry) return <g />
-                        const isAlgorithm = entry.matchType === "algorithm"
-                        const tag = isAlgorithm ? "ALG" : "MAN"
-                        const bg = isAlgorithm ? "rgba(102,252,241,0.15)" : "rgba(136,146,160,0.15)"
-                        const color = isAlgorithm ? "var(--color-primary)" : "var(--color-text-dim)"
-                        const border = isAlgorithm ? "rgba(102,252,241,0.5)" : "rgba(136,146,160,0.5)"
-                        const w = 26, h = 13, rx = 3
-                        return (
-                          <g>
-                            <rect x={x - w / 2} y={y - h - 8} width={w} height={h} rx={rx} fill={bg} stroke={border} strokeWidth={0.8} />
-                            <text x={x} y={y - h - 8 + h / 2 + 4} textAnchor="middle" fill={color} fontSize={8} fontWeight={700} letterSpacing="0.05em">
-                              {tag}
-                            </text>
-                          </g>
-                        )
-                      }}
+                    <HoodStat
+                      value={upsets}
+                      color="#f39c12"
+                      label="Upsets"
+                      note="underdog took it anyway"
                     />
-                    <Line
-                      type="monotone"
-                      dataKey="scoreMargin"
-                      stroke="#f39c12"
-                      strokeWidth={2}
-                      dot={(props) => {
-                        const { cx, cy, payload } = props
-                        const isAlgorithm = payload.matchType === "algorithm"
-                        return isAlgorithm ? (
-                          <circle cx={cx} cy={cy} r={4} fill="#f39c12" stroke="none" />
-                        ) : (
-                          <rect x={cx - 4} y={cy - 4} width={8} height={8} fill="#f39c12" opacity={0.6} />
-                        )
-                      }}
+                    <HoodStat
+                      value={evenLobbies}
+                      color="#27ae60"
+                      label="Even lobbies"
+                      note={`tier gap of 1 or less, of ${matchesWithTierSnapshots.length} split`}
                     />
-                  </LineChart>
-                </ResponsiveContainer>
-              </div>
-              <div className="flex items-center justify-center gap-6 mt-2 text-xs text-[var(--color-text-dim)]">
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 rounded-full bg-[var(--color-primary)]"></div>
-                  <span>Algorithm match</span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="w-3 h-3 bg-[var(--color-primary)] opacity-60"></div>
-                  <span>Manual match</span>
-                </div>
-              </div>
-            </div>
-          )}
+                  </div>
+                  <SectionHead title="By predicted gap" tag="50% marks a coin flip" />
+                  {calibration.map((band) => (
+                    <div key={band.label} className="grid grid-cols-[112px_1fr_96px] items-center gap-3 py-1.5 text-xs">
+                      <span>{band.label}</span>
+                      <span
+                        className="relative h-2 rounded overflow-hidden"
+                        style={{
+                          backgroundColor: "color-mix(in srgb, var(--color-background) 50%, transparent)",
+                          boxShadow: "inset 0 1px 2px var(--glass-shade)",
+                        }}
+                      >
+                        {band.rate !== null && (
+                          <span
+                            className="block h-full"
+                            style={{
+                              width: `${band.rate}%`,
+                              background: "linear-gradient(90deg, color-mix(in srgb, var(--color-primary) 30%, transparent), var(--color-primary))",
+                            }}
+                          />
+                        )}
+                        <span
+                          className="absolute -top-0.5 -bottom-0.5 w-0.5"
+                          style={{ left: "50%", backgroundColor: "#f39c12", boxShadow: "0 0 8px -1px #f39c12" }}
+                        />
+                      </span>
+                      <span className="text-right text-[11.5px]" style={{ color: "var(--color-text-dim)" }}>
+                        {band.rate === null ? "no games" : `${band.rate.toFixed(0)}% · ${band.games} games`}
+                      </span>
+                    </div>
+                  ))}
+                  <p
+                    className="text-[11px] leading-relaxed mt-3.5 pt-3 border-t"
+                    style={{ color: "var(--color-text-dim)", borderColor: "color-mix(in srgb, var(--color-border) 45%, transparent)" }}
+                  >
+                    A band sitting near the coin-flip line is one where the tier numbers aren&apos;t carrying real
+                    information — the lobbies play evenly however lopsided they looked on paper.
+                  </p>
+                </>
+              ) : (
+                <EmptyHood>
+                  No decided matches with tier snapshots this month, so there is no prediction to score.
+                </EmptyHood>
+              ))}
+
+            {hoodView === "tiers" && (
+              <>
+                <p className="text-xs leading-relaxed mb-4 max-w-[78ch]" style={{ color: "var(--color-text-dim)" }}>
+                  Tier moves inside the selected month.
+                </p>
+                <TierChangelog year={selectedYear} month={selectedMonth} isAdmin={isAdmin} />
+              </>
+            )}
+          </section>
         </>
       ) : (
         <>
@@ -1206,7 +1708,7 @@ export function ReportsTab() {
           <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg overflow-hidden">
             <div className="p-4 border-b border-[var(--color-border)]">
               <h3 className="text-lg font-bold text-[var(--color-primary)] flex items-center gap-2">
-                <Trophy className="w-5 h-5" />
+                <Emblem src="/badges/champion.svg" className="w-5 h-5" />
                 Wins Leaderboard
               </h3>
               <p className="text-xs text-[var(--color-text-dim)] mt-1">Players with {leaderboardMinMatches}+ matches this month (30% of {totalMatches})</p>
@@ -1236,9 +1738,7 @@ export function ReportsTab() {
                         >
                           <td className="px-4 py-3">
                             {isTop3 ? (
-                              <span style={{ color: medalColors[index] }} className="text-lg">
-                                {index === 0 ? "🥇" : index === 1 ? "🥈" : "🥉"}
-                              </span>
+                              <RankMedal index={index} />
                             ) : (
                               <span className="text-[var(--color-text-dim)]">{index + 1}</span>
                             )}
@@ -1313,95 +1813,9 @@ export function ReportsTab() {
             </div>
           )}
 
-          {/* Star Player of the Month */}
-          <div className="bg-[var(--color-surface)]/60 border border-[#ffd700]/30 rounded-lg p-6">
-            <h3 className="text-lg font-bold text-[#ffd700] mb-4 flex items-center gap-2">
-              <Star className="w-6 h-6 fill-[#ffd700]" />
-              Star Player of the Month
-            </h3>
-            {starPlayer ? (
-              <div className="text-center">
-                <div className="text-3xl font-bold font-mono text-[#ffd700] mb-2">{starPlayer.name}</div>
-                <div className="text-lg mb-3">
-                  <span className="text-[#27ae60] font-bold">{starPlayer.wins}W</span>
-                  <span className="text-[var(--color-text-dim)]"> - </span>
-                  <span className="text-[#ff4757] font-bold">{starPlayer.losses}L</span>
-                  <span className="text-[var(--color-text-dim)] ml-3">|</span>
-                  <span className="text-[var(--color-primary)] font-bold ml-3">{starPlayer.avgScore.toFixed(2)} win-value/game</span>
-                </div>
-                <p className="text-xs text-[var(--color-text-dim)] italic">
-                  Rewards winning the games you weren&apos;t favoured to win. Each win is worth more when your team was the underdog (lower combined tier) and less when you were favoured — so a single upset beats a string of expected wins. The Star Player has the highest average win-value per game.
-                </p>
-                <p className="text-xs text-[var(--color-text-dim)]/60 mt-1">
-                  Min {starPlayerMinMatches} games this month · based on current player tiers
-                </p>
-              </div>
-            ) : (
-              <p className="text-[var(--color-text-dim)] text-sm text-center italic">
-                Not enough data yet — need players with 5+ matches
-              </p>
-            )}
-          </div>
-
-          {/* Winning Streaks & Top Rivalry */}
-          <div className="grid md:grid-cols-2 gap-4">
-            {/* Winning Streaks */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Zap className="w-5 h-5 text-[#f39c12]" />
-                Winning Streaks
-              </h3>
-              {streakLeaders.length > 0 ? (
-                <div className="space-y-3">
-                  {streakLeaders.map((leader, index) => (
-                    <div key={leader.name} className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[var(--color-text-dim)] text-sm w-5">{index + 1}.</span>
-                        <span className="text-[var(--color-text)] font-medium">{leader.name}</span>
-                      </div>
-                      <span className="text-[#f39c12] font-bold">{leader.streak} wins</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <p className="text-[var(--color-text-dim)] text-sm text-center italic">No streaks this month</p>
-              )}
-            </div>
-
-            {/* Top Rivalry */}
-            <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg p-4">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] mb-4 flex items-center gap-2">
-                <Swords className="w-5 h-5 text-[#ff4757]" />
-                Top Rivalry
-              </h3>
-              {topRivalry && topRivalry.count >= 2 ? (
-                <div className="text-center">
-                  <div className="text-lg mb-2">
-                    <span className="text-[var(--color-text)] font-bold">{topRivalry.player1}</span>
-                    <span className="text-[var(--color-text-dim)] mx-2">vs</span>
-                    <span className="text-[var(--color-text)] font-bold">{topRivalry.player2}</span>
-                  </div>
-                  <div className="text-sm text-[var(--color-text-dim)] mb-2">
-                    Faced each other <span className="text-[var(--color-primary)] font-bold">{topRivalry.count}</span> times
-                  </div>
-                  <div className="text-sm">
-                    <span className="text-[var(--color-text)]">{topRivalry.player1}&apos;s teams won </span>
-                    <span className="text-[#27ae60] font-bold">{topRivalry.player1Wins}</span>
-                    <span className="text-[var(--color-text)]">, {topRivalry.player2}&apos;s won </span>
-                    <span className="text-[#27ae60] font-bold">{topRivalry.count - topRivalry.player1Wins}</span>
-                  </div>
-                </div>
-              ) : (
-                <p className="text-[var(--color-text-dim)] text-sm text-center italic">No recurring rivalries yet</p>
-              )}
-            </div>
-          </div>
         </>
       )}
 
-      <div className="mt-12">
-        <TierChangelog year={selectedYear} month={selectedMonth} isAdmin={isAdmin} />
-      </div>
     </div>
   )
 }

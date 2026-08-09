@@ -6,7 +6,7 @@ import { ACHIEVEMENTS, SECRET_ACHIEVEMENTS } from "@/lib/achievement-meta"
 
 export const metadata: Metadata = {
   title: "Achievements — JK2 Capture the Flag",
-  description: "Every crest in the game, who holds it, and who got there first.",
+  description: "Every achievement in the game, who holds it, and who got there first.",
 }
 
 // The ledger walks the entire match history, so it is far too expensive to redo

@@ -21,7 +21,7 @@ function StripCrest({ a }: { a: AchievementView }) {
           <Crest a={a} />
         </Link>
       </TooltipTrigger>
-      <TooltipContent className="bg-[#1f2833] border border-[#66fcf1]/30 text-[#c5c6c7] text-xs max-w-64">
+      <TooltipContent className="bg-[var(--color-surface)] border border-[var(--color-primary)]/30 text-[var(--color-text)] text-xs max-w-64">
         <div className="font-bold text-[#e6edf3]">
           {a.title}
           {a.tiered ? ` ${roman(Math.max(1, a.rank))}` : ""}

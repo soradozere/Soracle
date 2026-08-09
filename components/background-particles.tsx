@@ -102,17 +102,27 @@ interface GeoShape {
   o: number
 }
 
-// One falling column of glyphs for the Slicer code-rain.
-interface RainColumn {
-  x: number
-  head: number
-  speed: number
-  len: number
+// One glyph cell for the Slicer / Hacker backgrounds. Nothing falls: a cell
+// decodes a character in, holds it, fades it out, then does it again with a new
+// one. Purely a function of elapsed time — see drawGlyphField.
+interface GlyphCell {
+  col: number
+  row: number
+  /** Phase offset in seconds, so the field never pulses in unison. */
+  offset: number
+  /** Cycle length: decode + hold + fade + gap. */
+  period: number
+  /** Peak opacity, so the field has depth rather than one flat tone. */
+  peak: number
+  /** Stirred into the glyph hash so two cells never agree for long. */
+  seed: number
+  /** The few drawn bright, like a cursor landing on a character. */
+  hot: boolean
 }
 
 // Code-rain glyph set + cell size (module-level; never changes).
 const RAIN_GLYPHS = "アイウエオカキクケコサシスセソタチツテトﾊﾋﾌﾍﾎ0123456789<>=/\\|+*[]#$%&"
-const RAIN_CELL = 16
+const RAIN_CELL = 18
 
 interface NebulaLobe {
   baseAngle: number
@@ -182,7 +192,7 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
   const voidHoleRef = useRef<VoidDust[]>([])
   const cloudsRef = useRef<Cloud[]>([])
   const shapesRef = useRef<GeoShape[]>([])
-  const rainRef = useRef<RainColumn[]>([])
+  const glyphsRef = useRef<GlyphCell[]>([])
   const cityRef = useRef<CityScene | null>(null)
   // Image-background theme: the loaded wallpaper, the url it was loaded from (so we
   // only reload when it changes), a ready flag, and slow dust motes drifting over it.
@@ -269,7 +279,7 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       initVoidHole()
       initClouds()
       initShapes()
-      initCodeRain()
+      initGlyphField()
       initCity()
       initImageDust()
     }
@@ -513,19 +523,43 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       shapesRef.current = arr
     }
 
-    // Slicer: one falling glyph column per grid cell of the viewport width.
-    const initCodeRain = () => {
+    /*
+     * Slicer / Hacker: a sparse grid of glyphs that decode in and fade out where
+     * they are.
+     *
+     * This replaced a Matrix-style cascade. Falling columns are relentless —
+     * every cell in the viewport moving in one direction, constantly — which is
+     * exhausting to read a profile through. Cycling in place gives the same
+     * "terminal thinking to itself" idea with most of the field settled at any
+     * moment, and it costs less: a fraction of the cells draw per frame rather
+     * than every cell of every column's trail.
+     *
+     * A third of the grid positions get a cell, so it reads as scattered text
+     * rather than a filled screen. Cells hold no animation state — position in the
+     * cycle is derived from elapsed time, which keeps it frame-rate independent
+     * and means a backgrounded tab resumes correctly instead of drifting.
+     */
+    const initGlyphField = () => {
       const cols = Math.ceil(canvas.width / RAIN_CELL)
-      const arr: RainColumn[] = []
-      for (let i = 0; i < cols; i++) {
-        arr.push({
-          x: i * RAIN_CELL,
-          head: -Math.random() * (canvas.height / RAIN_CELL),
-          speed: 0.3 + Math.random() * 0.8,
-          len: 6 + Math.floor(Math.random() * 18),
-        })
+      const rows = Math.ceil(canvas.height / RAIN_CELL)
+      const arr: GlyphCell[] = []
+      for (let col = 0; col < cols; col++) {
+        for (let row = 0; row < rows; row++) {
+          if (Math.random() > 0.34) continue
+          arr.push({
+            col,
+            row,
+            // Short cycles: at 3–9 seconds the first attempt at this looked
+            // static at a glance, which defeated the point.
+            period: 0.9 + Math.random() * 1.9,
+            offset: Math.random() * 4,
+            peak: 0.2 + Math.random() * 0.52,
+            seed: Math.floor(Math.random() * 9973),
+            hot: Math.random() < 0.07,
+          })
+        }
       }
-      rainRef.current = arr
+      glyphsRef.current = arr
     }
 
     const initCity = () => {
@@ -579,9 +613,66 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
 
     let lastMeteorTime = Date.now()
     const meteorInterval = 3000
-    // Built once, reused every code-rain frame (redrawing scanlines as hundreds of
+    // Built once, reused every frame (redrawing scanlines as hundreds of
     // fillRects per frame was the main cause of the Slicer slowdown).
     let scanlinePattern: CanvasPattern | null = null
+
+    /*
+     * Soft-blob sprite cache — the fix for the Nebula and Bespin themes running
+     * hot.
+     *
+     * Both drew their shapes as createRadialGradient + arc + fill, per shape, per
+     * frame: nine nebula lobes and seven clouds, each a gradient object built and
+     * thrown away 60 times a second, filling areas a third of the viewport wide
+     * with `lighter` blending. Building a gradient is not free and the overdraw is
+     * enormous.
+     *
+     * A radial blob is scale-invariant, so it only has to be rasterised once per
+     * COLOUR: 128px sprites, then drawImage with a transform, which is the path
+     * the GPU is actually good at. Keyed by the rgba string so the nebula's nine
+     * lobes share three or four sprites between them.
+     */
+    const blobCache = new Map<string, HTMLCanvasElement>()
+    const blobSprite = (r: number, g: number, b: number, rawPeak: number): HTMLCanvasElement => {
+      // Quantised to 0.02 steps: every init re-rolls each shape's opacity, so
+      // keying on the raw float would mint fresh sprites on every resize and
+      // grow the cache forever (a window drag fires resize continuously). At
+      // 0.02 the visual difference is imperceptible and the cache is bounded
+      // by palette size for the life of the mount.
+      const peak = Math.round(rawPeak * 50) / 50
+      const key = `${r},${g},${b},${peak}`
+      const hit = blobCache.get(key)
+      if (hit) return hit
+      const size = 128
+      const off = document.createElement("canvas")
+      off.width = size
+      off.height = size
+      const octx = off.getContext("2d")!
+      const grad = octx.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2)
+      // Same three stops the per-frame gradients used, so the look is unchanged.
+      grad.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${peak})`)
+      grad.addColorStop(0.5, `rgba(${r}, ${g}, ${b}, ${peak * 0.4})`)
+      grad.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`)
+      octx.fillStyle = grad
+      octx.fillRect(0, 0, size, size)
+      blobCache.set(key, off)
+      return off
+    }
+    /** Draw a cached blob centred at (x,y), rx/ry wide, rotated. */
+    const drawBlob = (
+      sprite: HTMLCanvasElement,
+      x: number,
+      y: number,
+      rx: number,
+      ry: number,
+      rotation = 0,
+    ) => {
+      ctx.save()
+      ctx.translate(x, y)
+      if (rotation) ctx.rotate(rotation)
+      ctx.drawImage(sprite, -rx, -ry, rx * 2, ry * 2)
+      ctx.restore()
+    }
 
     // ---- Profile-background renderers ----
     const drawBigNebula = (time: number) => {
@@ -598,30 +689,12 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
         const a = nb.baseAngle + t * nb.orbit
         const x = cx + Math.cos(a) * nb.dist
         const y = cy + Math.sin(a) * nb.dist * 0.85
-        ctx.save()
-        ctx.translate(x, y)
-        ctx.rotate(a * 0.5 + t * nb.spin * 0.3)
-        ctx.scale(1, nb.ry / nb.rx)
-        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, nb.rx)
-        g.addColorStop(0, `rgba(${nb.r}, ${nb.g}, ${nb.b}, ${nb.opacity})`)
-        g.addColorStop(0.5, `rgba(${nb.r}, ${nb.g}, ${nb.b}, ${nb.opacity * 0.4})`)
-        g.addColorStop(1, `rgba(${nb.r}, ${nb.g}, ${nb.b}, 0)`)
-        ctx.fillStyle = g
-        ctx.beginPath()
-        ctx.arc(0, 0, nb.rx, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.restore()
+        drawBlob(blobSprite(nb.r, nb.g, nb.b, nb.opacity), x, y, nb.rx, nb.ry, a * 0.5 + t * nb.spin * 0.3)
       })
       ctx.restore()
 
       // Bright core
-      const cg = ctx.createRadialGradient(cx, cy, 0, cx, cy, s * 0.18)
-      cg.addColorStop(0, "rgba(240, 225, 255, 0.16)")
-      cg.addColorStop(1, "rgba(240, 225, 255, 0)")
-      ctx.fillStyle = cg
-      ctx.beginPath()
-      ctx.arc(cx, cy, s * 0.18, 0, Math.PI * 2)
-      ctx.fill()
+      drawBlob(blobSprite(240, 225, 255, 0.16), cx, cy, s * 0.18, s * 0.18)
 
       // Sparse stars for depth (reuses the starfield set)
       starsRef.current.forEach((st) => {
@@ -690,11 +763,9 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
     const drawClouds = (time: number) => {
       const w = canvas.width
       const h = canvas.height
-      const sg = ctx.createRadialGradient(w * 0.82, h * 0.08, 0, w * 0.82, h * 0.08, Math.max(w, h) * 0.65)
-      sg.addColorStop(0, "rgba(255, 236, 200, 0.4)")
-      sg.addColorStop(1, "rgba(255, 236, 200, 0)")
-      ctx.fillStyle = sg
-      ctx.fillRect(0, 0, w, h)
+      // Sun: one cached blob rather than a full-canvas gradient fill per frame.
+      const sun = Math.max(w, h) * 0.65
+      drawBlob(blobSprite(255, 236, 200, 0.4), w * 0.82, h * 0.08, sun, sun)
 
       cloudsRef.current.forEach((cl) => {
         if (!reduce) {
@@ -703,18 +774,9 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
           if (cl.x + cl.rx < 0) cl.x = w + cl.rx
         }
         const y = cl.y + (reduce ? 0 : Math.sin(time * 0.2 + cl.ph) * 8)
-        ctx.save()
-        ctx.translate(cl.x, y)
-        ctx.scale(1, cl.ry / cl.rx)
-        const g = ctx.createRadialGradient(0, 0, 0, 0, 0, cl.rx)
-        g.addColorStop(0, `rgba(255, 252, 244, ${cl.o})`)
-        g.addColorStop(0.6, `rgba(255, 248, 236, ${cl.o * 0.5})`)
-        g.addColorStop(1, "rgba(255, 248, 236, 0)")
-        ctx.fillStyle = g
-        ctx.beginPath()
-        ctx.arc(0, 0, cl.rx, 0, Math.PI * 2)
-        ctx.fill()
-        ctx.restore()
+        // Rounded to 2 decimals so slightly different opacities share a sprite
+        // instead of each cloud minting its own.
+        drawBlob(blobSprite(255, 250, 240, Math.round(cl.o * 100) / 100), cl.x, y, cl.rx, cl.ry)
       })
     }
 
@@ -753,46 +815,46 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       })
     }
 
-    // Slicer / Hacker: Matrix-style falling glyphs (bright head, fading trail) in
-    // the theme colour, over faint CRT scanlines. Deliberately no glitch/strobe
-    // tears — the flashing was distracting to read a profile through.
-    const drawCodeRain = (time: number, aggressive: boolean) => {
+    // Slicer / Hacker: glyphs decoding in and out in place, over faint CRT
+    // scanlines. Hacker runs slower and brighter than Slicer, which is what
+    // distinguishes the two now that neither cascades.
+    const drawGlyphField = (time: number, aggressive: boolean) => {
       const w = canvas.width
       const h = canvas.height
       const col = currentColorRef.current
-      const gt = reduce ? 1 : time
-      // Hacker (aggressive) falls slower still than Slicer, keeping the two
-      // distinguishable now that the glitch no longer separates them.
-      const speedScale = aggressive ? 0.4 : 0.7
+      const rate = aggressive ? 0.6 : 1
+      const gain = aggressive ? 1.3 : 1
+      // Reduced motion: hold the field at a fixed point in its cycle rather than
+      // flickering. Every cell is at a different phase, so it still reads as text.
+      const t = reduce ? 12 : time * rate
       ctx.font = `${RAIN_CELL}px ui-monospace, "SF Mono", Menlo, monospace`
       ctx.textBaseline = "top"
-      rainRef.current.forEach((cl, ci) => {
-        const headRow = Math.floor(cl.head)
-        for (let j = 0; j < cl.len; j++) {
-          const row = headRow - j
-          if (row < 0) continue
-          const y = row * RAIN_CELL
-          if (y < -RAIN_CELL || y > h) continue
-          const gi = Math.abs(row * 31 + ci * 17 + Math.floor(gt * 5 + row)) % RAIN_GLYPHS.length
-          const ch = RAIN_GLYPHS[gi]
-          if (j === 0) {
-            // Bright leading glyph. No shadowBlur — that was the perf killer.
-            ctx.fillStyle = "rgba(248, 250, 250, 0.96)"
-          } else {
-            const fade = 1 - j / cl.len
-            ctx.fillStyle = `rgba(${col}, ${0.1 + fade * 0.6})`
-          }
-          ctx.fillText(ch, cl.x, y)
-        }
-        if (!reduce) {
-          cl.head += cl.speed * speedScale
-          if ((cl.head - cl.len) * RAIN_CELL > h) {
-            cl.head = -Math.random() * 8
-            cl.speed = 0.3 + Math.random() * 0.8
-            cl.len = 6 + Math.floor(Math.random() * 14)
-          }
-        }
-      })
+
+      for (const cell of glyphsRef.current) {
+        const elapsed = t + cell.offset
+        const cycle = Math.floor(elapsed / cell.period)
+        const phase = (elapsed % cell.period) / cell.period
+
+        // A quarter decoding, a quarter held, a quarter fading, a quarter dark.
+        if (phase > 0.75) continue
+        const visible = Math.sin((phase / 0.75) * Math.PI)
+        const alpha = visible * cell.peak * gain
+        if (alpha < 0.02) continue
+
+        // The glyph is a pure function of (cell, cycle) — plus, while decoding, a
+        // fast-advancing term so the character churns before settling. That churn
+        // is what reads as "materialising" rather than merely fading in.
+        const settling = phase < 0.22 ? Math.floor(phase * 90) : 0
+        const glyph = RAIN_GLYPHS[(cell.seed + cycle * 37 + settling * 11) % RAIN_GLYPHS.length]
+
+        const x = cell.col * RAIN_CELL
+        const y = cell.row * RAIN_CELL
+        ctx.fillStyle =
+          cell.hot && phase < 0.35
+            ? `rgba(248, 250, 250, ${Math.min(1, alpha * 1.7)})`
+            : `rgba(${col}, ${alpha})`
+        ctx.fillText(glyph, x, y)
+      }
 
       // Faint CRT scanlines — one fill of a cached repeating pattern.
       if (!scanlinePattern) {
@@ -985,8 +1047,8 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       else if (kind === "city") drawCity(time)
       else if (kind === "clouds") drawClouds(time)
       else if (kind === "shapes") drawShapes(time)
-      else if (kind === "coderain") drawCodeRain(time, false)
-      else if (kind === "hackerrain") drawCodeRain(time, true)
+      else if (kind === "coderain") drawGlyphField(time, false)
+      else if (kind === "hackerrain") drawGlyphField(time, true)
     }
 
     const animate = () => {

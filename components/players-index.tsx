@@ -6,6 +6,9 @@ import { Search, Trophy, ArrowRight } from "lucide-react"
 import { RARITY_META, type Rarity } from "@/lib/achievement-meta"
 import { RARITY_ORDER, RARITY_POINTS } from "@/lib/achievement-score"
 import { slug } from "@/lib/achievement-format"
+import { SegmentedRail } from "@/components/segmented-rail"
+import { Emblem } from "@/components/emblem"
+import { ACHIEVEMENTS, SECRET_ACHIEVEMENTS } from "@/lib/achievement-meta"
 
 // The board's row shape. Deliberately plain data — this is a client component,
 // so nothing here may carry a function across the server boundary.
@@ -17,19 +20,47 @@ export interface BoardRow {
   score: number
   unlocks: number
   best: Rarity | null
+  /** Rarest achievement held — a career stat, kept for the row's accent colour. */
   title: string | null
+  /** The title the player has actually equipped on their profile, if any. */
+  equippedTitle: { title: string; rarity: Rarity } | null
   rarityCounts: Record<Rarity, number>
   form: ("W" | "L" | "D")[]
   formWins: number
   formLosses: number
   matches: number
+  /** In-game score this calendar month — the "Monthly Score" sort. */
+  monthScore: number
+  /** Matches played this month, shown beside the score so a big number from one
+   *  heavy night reads differently from the same number over ten games. */
+  monthMatches: number
   inactive: boolean
 }
 
-type SortKey = "score" | "form" | "tier" | "name"
+// Counts for the achievements CTA, read off the catalogue itself so they can't
+// drift from what's actually in the game.
+const ACHIEVEMENT_FAMILIES = ACHIEVEMENTS.length
+// The secret list IS the one-of-ones: no ranked family carries a oneofone rank,
+// so counting the secrets is counting them (6 since #122 retired two unearnable
+// ones — hardcoding "8" here would have gone stale that day).
+const ONE_OF_ONES = SECRET_ACHIEVEMENTS.length
+
+// Five real crests for the CTA's fan, one per rarity step, each in its own
+// rarity colour — the ladder in miniature.
+const CTA_CRESTS = [
+  { icon: "galactic-republic", color: RARITY_META.common.color },
+  { icon: "rebel-alliance", color: RARITY_META.rare.color },
+  { icon: "sith-eternal", color: RARITY_META.epic.color },
+  { icon: "mandalorian-crest", color: RARITY_META.legendary.color },
+  { icon: "lord-revan", color: RARITY_META.oneofone.color },
+]
+const CTA_WATERMARK = "rebel-alliance-jedi-order"
+
+type SortKey = "score" | "month" | "form" | "tier" | "name"
 
 const SORTS: { key: SortKey; label: string }[] = [
   { key: "score", label: "Achievement Score" },
+  { key: "month", label: "Monthly Score" },
   { key: "form", label: "Form" },
   { key: "tier", label: "Tier" },
   { key: "name", label: "Name" },
@@ -133,9 +164,36 @@ function RarityBar({ row }: { row: BoardRow }) {
   )
 }
 
+// What the right-hand cell shows, per sort: the value the board is ordered by,
+// plus the denominator that makes it readable.
+function scoreCell(row: BoardRow, sort: SortKey): { value: string; note: string } {
+  const games = (n: number) => (n === 1 ? "1 game" : `${n} games`)
+  switch (sort) {
+    case "month":
+      return { value: row.monthScore.toLocaleString(), note: games(row.monthMatches) }
+    case "form": {
+      // The sort key is the win rate over the form window, so show it — the pips
+      // to the left already give the shape of it, this gives the number.
+      const played = row.form.length
+      const pct = played ? Math.round((row.formWins / played) * 100) : null
+      return {
+        value: pct === null ? "—" : `${pct}%`,
+        note: played ? `${row.formWins}–${row.formLosses} last ${played}` : "no games yet",
+      }
+    }
+    case "tier":
+      // Tier is the key; career volume is the context that says whether it's a
+      // settled rating or a provisional one.
+      return { value: `T${row.tierValue}`, note: games(row.matches) }
+    default:
+      return { value: row.score.toLocaleString(), note: `${row.unlocks} ranks` }
+  }
+}
+
 export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<SortKey>("score")
+  const heldRanks = useMemo(() => rows.reduce((n, r) => n + r.unlocks, 0), [rows])
 
   // Standings are always by score, independent of the current sort — so a
   // player's "#4" badge doesn't change meaning when you re-sort by name.
@@ -155,11 +213,12 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
       if (sort === "name") return a.name.localeCompare(b.name)
       if (sort === "tier") return b.tierValue - a.tierValue || b.score - a.score
       if (sort === "form") return winRate(b) - winRate(a) || b.score - a.score
+      // In-game score this month. Ties (and everyone on zero) fall back to the
+      // achievement score, so the tail of the board stays in a stable order.
+      if (sort === "month") return b.monthScore - a.monthScore || b.score - a.score
       return b.score - a.score || a.name.localeCompare(b.name)
     })
   }, [rows, query, sort])
-
-  const totalScore = useMemo(() => rows.reduce((n, r) => n + r.score, 0), [rows])
 
   return (
     <>
@@ -169,37 +228,37 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
         PLAYERS
       </h1>
       <p className="text-[#8892a0] mb-6 max-w-2xl">
-        Everyone on record, ranked by Achievement Score — every crest rank they&apos;ve ever unlocked, weighted by how
-        rare it is. Rarer crests are worth dramatically more, so the top of the board can&apos;t be farmed.
+        Everyone on record, ranked by Achievement Score — every achievement rank they&apos;ve ever unlocked, weighted by how
+        rare it is. Rarer ones are worth dramatically more, so the top of the board can&apos;t be farmed.
       </p>
 
       {/* The "look at all achievements" entry point. Full-width and above the
           board, because it's a destination rather than a row-level action. */}
+      {/* The entry point to /achievements. It was a flat bar with a lucide trophy
+          on it, which said nothing about what's behind it — so it now shows the
+          thing itself: real crest emblems, the rarest ones the board actually
+          holds, fanned out and lifting on hover, over a watermark of the rarest
+          of them. The stat line gives a reason to click rather than a
+          restatement of the label. */}
       <Link href="/achievements" className="pl-cta">
+        <Emblem src={`/achievements/${CTA_WATERMARK}.svg`} className="pl-cta-mark" color="var(--color-primary)" />
         <span className="pl-cta-icon">
           <Trophy className="w-5 h-5" />
         </span>
         <span className="pl-cta-body">
           <strong>Browse all achievements</strong>
-          <span>Every crest in the game, who holds it, and who got there first</span>
+          <span>
+            {ACHIEVEMENT_FAMILIES} families · {ONE_OF_ONES} one-of-ones · {heldRanks.toLocaleString()} ranks unlocked
+            so far
+          </span>
+        </span>
+        <span className="pl-cta-fan" aria-hidden>
+          {CTA_CRESTS.map((c, i) => (
+            <Emblem key={c.icon} src={`/achievements/${c.icon}.svg`} color={c.color} style={{ ["--i" as string]: i }} />
+          ))}
         </span>
         <ArrowRight className="w-5 h-5 pl-cta-arrow" />
       </Link>
-
-      <div className="pl-stats">
-        <div className="pl-stat">
-          <b>{rows.length}</b>
-          <span>Players ranked</span>
-        </div>
-        <div className="pl-stat">
-          <b>{rows.reduce((n, r) => n + r.unlocks, 0)}</b>
-          <span>Crest ranks held</span>
-        </div>
-        <div className="pl-stat">
-          <b>{totalScore.toLocaleString()}</b>
-          <span>Total score awarded</span>
-        </div>
-      </div>
 
       <div className="pl-controls">
         <div className="pl-search">
@@ -211,19 +270,15 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
             aria-label="Search players"
           />
         </div>
-        <div className="pl-sorts">
-          <span className="pl-sorts-label">Sort</span>
-          {SORTS.map((s) => (
-            <button
-              key={s.key}
-              onClick={() => setSort(s.key)}
-              className={`pl-sort ${sort === s.key ? "is-on" : ""}`}
-              aria-pressed={sort === s.key}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
+        {/* The same segmented rail the masthead and the Stats views use, so the
+            whole site has one control and one motion for "pick a view". */}
+        <SegmentedRail
+          aria-label="Sort players"
+          dense
+          activeKey={sort}
+          onSelect={(key) => setSort(key as SortKey)}
+          segments={SORTS.map((s) => ({ key: s.key, label: s.label }))}
+        />
       </div>
 
       <div className="pl-head" aria-hidden="true">
@@ -232,8 +287,10 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
         <span>Title</span>
         <span>Tier</span>
         <span>Form (last 5)</span>
-        <span>Crests</span>
-        <span className="pl-head-score">Score</span>
+        <span>Achievements</span>
+        <span className="pl-head-score">
+          {sort === "month" ? "Month" : sort === "form" ? "Win %" : sort === "tier" ? "Tier" : "Score"}
+        </span>
       </div>
 
       <ul className="pl-list">
@@ -268,13 +325,21 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
                           that column is dropped, so it folds in here instead of
                           disappearing. */}
                       <em className="pl-tier-inline">T{row.tierValue} · </em>
-                      {row.matches} matches
+                      {sort === "month" ? `${row.monthMatches} this month` : `${row.matches} matches`}
                     </span>
                   </span>
                 </span>
 
-                <span className="pl-title" style={{ color: accent }} title={row.title ?? undefined}>
-                  {row.title ?? "—"}
+                {/* The equipped title from the player's profile — not the rarest
+                    achievement they hold, which is what this column used to show
+                    and is a different thing entirely (it still drives the row's
+                    accent). Coloured by the title's own rarity. */}
+                <span
+                  className="pl-title"
+                  style={{ color: row.equippedTitle ? RARITY_META[row.equippedTitle.rarity].color : "var(--color-text-dim)" }}
+                  title={row.equippedTitle?.title ?? undefined}
+                >
+                  {row.equippedTitle?.title ?? "—"}
                 </span>
 
                 <span className="pl-tier tabular-nums">T{row.tierValue}</span>
@@ -288,10 +353,15 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
                 </span>
 
                 <span className="pl-score">
+                  {/* Sorting by a number you can't see is disorienting, so this
+                      cell always shows the sort key itself, with the context that
+                      makes it mean something. Under Form and Tier it used to show
+                      the achievement score and rank count, which had nothing to do
+                      with the order the board was in. */}
                   <b className="tabular-nums" style={{ color: accent }}>
-                    {row.score.toLocaleString()}
+                    {scoreCell(row, sort).value}
                   </b>
-                  <span>{row.unlocks} ranks</span>
+                  <span>{scoreCell(row, sort).note}</span>
                 </span>
               </Link>
             </li>
@@ -314,51 +384,63 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
 }
 
 const PLAYERS_CSS = `
-.pl-cta{display:flex;align-items:center;gap:14px;padding:16px 18px;margin-bottom:24px;border:1px solid #2a3542;border-radius:10px;background:linear-gradient(90deg,#151b24,#1a2230);transition:border-color .18s ease,transform .18s ease,box-shadow .18s ease}
-.pl-cta:hover{border-color:#66fcf1;transform:translateY(-2px);box-shadow:0 6px 24px rgba(102,252,241,.12)}
-.pl-cta:focus-visible{outline:2px solid #66fcf1;outline-offset:3px}
-.pl-cta-icon{display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:9px;background:rgba(102,252,241,.1);color:#66fcf1;flex:0 0 auto}
+.pl-cta{display:flex;align-items:center;gap:14px;padding:16px 18px;margin-bottom:24px;border:1px solid color-mix(in srgb, var(--color-border) 72%, var(--color-background));border-radius:10px;background:linear-gradient(90deg,color-mix(in srgb, var(--color-surface) 62%, var(--color-background)),color-mix(in srgb, var(--color-surface) 88%, var(--color-background)));transition:border-color .18s ease,transform .18s ease,box-shadow .18s ease}
+.pl-cta:hover{border-color:var(--color-primary);transform:translateY(-2px);box-shadow:0 6px 24px color-mix(in srgb, var(--color-primary) 14%, transparent)}
+.pl-cta:focus-visible{outline:2px solid var(--color-primary);outline-offset:3px}
+.pl-cta-icon{display:flex;align-items:center;justify-content:center;width:42px;height:42px;border-radius:9px;background:rgba(102,252,241,.1);color:var(--color-primary);flex:0 0 auto}
 .pl-cta-body{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
-.pl-cta-body strong{color:#e8ecf1;font-size:15px}
-.pl-cta-body span{color:#8892a0;font-size:13px}
-.pl-cta-arrow{color:#8892a0;flex:0 0 auto;transition:transform .18s ease,color .18s ease}
-.pl-cta:hover .pl-cta-arrow{color:#66fcf1;transform:translateX(3px)}
+.pl-cta-body strong{color:var(--color-text-bright);font-size:15px}
+.pl-cta-body span{color:var(--color-text-dim);font-size:13px}
+.pl-cta-arrow{color:var(--color-text-dim);flex:0 0 auto;transition:transform .18s ease,color .18s ease;z-index:1}
+.pl-cta:hover .pl-cta-arrow{color:var(--color-primary);transform:translateX(3px)}
 
-.pl-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-bottom:24px}
-.pl-stat{border:1px solid #2a3542;border-radius:8px;background:#151b24;padding:12px 14px;display:flex;flex-direction:column;gap:2px}
-.pl-stat b{font-family:var(--font-orbitron);font-size:22px;color:#66fcf1;font-variant-numeric:tabular-nums}
-.pl-stat span{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#8892a0}
+/* A crest bleeding off the right-hand edge, clipped by the CTA. Sits under
+   everything and never moves — the fan in front of it does the moving. */
+.pl-cta{position:relative;overflow:hidden}
+.pl-cta-mark{position:absolute;right:-26px;top:-38px;width:170px;height:170px;opacity:.06;pointer-events:none}
+
+/* Five crests, overlapped like a hand of cards. On hover they fan apart and
+   lift in sequence, so the panel previews what's behind it instead of
+   describing it. */
+.pl-cta-fan{display:flex;align-items:center;flex:0 0 auto;padding-right:6px;z-index:1}
+.pl-cta-fan > span{
+  width:26px;height:26px;margin-left:-9px;
+  transform:translateY(0) rotate(calc((var(--i) - 2) * 4deg));
+  transition:transform .34s cubic-bezier(.62,.04,.31,1),margin-left .34s cubic-bezier(.62,.04,.31,1),opacity .2s ease;
+  opacity:.75;
+}
+.pl-cta:hover .pl-cta-fan > span{
+  margin-left:-2px;
+  opacity:1;
+  transform:translateY(calc(var(--i) * -1.5px)) rotate(calc((var(--i) - 2) * 7deg));
+}
+@media (max-width:860px){.pl-cta-fan{display:none}}
+@media (prefers-reduced-motion:reduce){
+  .pl-cta-fan > span,.pl-cta:hover .pl-cta-fan > span{transition:none;transform:none;margin-left:-6px}
+}
 
 .pl-controls{display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:16px}
-.pl-search{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #2a3542;border-radius:8px;background:#151b24;flex:1;min-width:200px}
-.pl-search input{background:transparent;border:0;outline:0;color:#e8ecf1;font-size:14px;width:100%}
-.pl-search input::placeholder{color:#5a6472}
-.pl-search:focus-within{border-color:#66fcf1}
-.pl-sorts{display:flex;flex-wrap:wrap;align-items:center;gap:6px}
-.pl-sorts-label{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#8892a0;margin-right:2px}
-.pl-sort{font-size:12px;padding:6px 10px;border-radius:6px;border:1px solid #2a3542;background:#151b24;color:#c5c6c7;transition:all .15s ease}
-.pl-sort:hover{border-color:#3d4855;color:#e8ecf1}
-.pl-sort.is-on{background:#66fcf1;border-color:#66fcf1;color:#0b0c10;font-weight:700}
-
-/* One grid template shared by the header and every row, so the columns line up
-   without the header having to know the row markup. */
+.pl-search{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid color-mix(in srgb, var(--color-border) 72%, var(--color-background));border-radius:8px;background:color-mix(in srgb, var(--color-surface) 62%, var(--color-background));flex:1;min-width:200px}
+.pl-search input{background:transparent;border:0;outline:0;color:var(--color-text-bright);font-size:14px;width:100%}
+.pl-search input::placeholder{color:color-mix(in srgb, var(--color-text-dim) 78%, var(--color-background))}
+.pl-search:focus-within{border-color:var(--color-primary)}
 .pl-head,.pl-row{display:grid;grid-template-columns:44px minmax(150px,1.3fr) minmax(120px,1.1fr) 52px minmax(104px,.7fr) minmax(100px,.7fr) 92px;gap:12px;align-items:center}
-.pl-head{padding:0 14px 8px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:#5a6472}
+.pl-head{padding:0 14px 8px;font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:color-mix(in srgb, var(--color-text-dim) 78%, var(--color-background))}
 .pl-head-score{text-align:right}
 
 .pl-list{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
-.pl-row{padding:10px 14px;border:1px solid #2a3542;border-left:3px solid var(--accent);border-radius:8px;background:#151b24;transition:background .16s ease,transform .16s ease,border-color .16s ease}
-.pl-row:hover{background:#1a2230;transform:translateX(3px);border-color:#3d4855;border-left-color:var(--accent)}
-.pl-row:focus-visible{outline:2px solid #66fcf1;outline-offset:2px}
+.pl-row{padding:10px 14px;border:1px solid color-mix(in srgb, var(--color-border) 72%, var(--color-background));border-left:3px solid var(--accent);border-radius:8px;background:color-mix(in srgb, var(--color-surface) 62%, var(--color-background));transition:background .16s ease,transform .16s ease,border-color .16s ease}
+.pl-row:hover{background:color-mix(in srgb, var(--color-surface) 88%, var(--color-background));transform:translateX(3px);border-color:var(--color-border);border-left-color:var(--accent)}
+.pl-row:focus-visible{outline:2px solid var(--color-primary);outline-offset:2px}
 
-.pl-rank{font-family:var(--font-orbitron);font-size:14px;color:#8892a0;text-align:center;border:1px solid #2a3542;border-radius:6px;padding:4px 0}
+.pl-rank{font-family:var(--font-orbitron);font-size:14px;color:var(--color-text-dim);text-align:center;border:1px solid color-mix(in srgb, var(--color-border) 72%, var(--color-background));border-radius:6px;padding:4px 0}
 .pl-who{display:flex;align-items:center;gap:10px;min-width:0}
 .pl-who-text{display:flex;flex-direction:column;min-width:0}
-.pl-who-text strong{color:#e8ecf1;font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pl-who-text span{font-size:11px;color:#8892a0}
-.pl-tier-inline{display:none;font-style:normal;color:#66fcf1}
+.pl-who-text strong{color:var(--color-text-bright);font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-who-text span{font-size:11px;color:var(--color-text-dim)}
+.pl-tier-inline{display:none;font-style:normal;color:var(--color-primary)}
 .pl-title{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pl-tier{font-family:var(--font-orbitron);font-size:13px;color:#66fcf1;text-align:center}
+.pl-tier{font-family:var(--font-orbitron);font-size:13px;color:var(--color-primary);text-align:center}
 
 /* Inactive players stay on the board — their score is still earned — but drop
    back so the active roster reads first. Hovering restores full opacity, so a
@@ -366,10 +448,12 @@ const PLAYERS_CSS = `
 .pl-row.is-inactive{opacity:.45;filter:saturate(.55)}
 .pl-row.is-inactive:hover,.pl-row.is-inactive:focus-visible{opacity:1;filter:none}
 .pl-score{display:flex;flex-direction:column;align-items:flex-end}
-.pl-score b{font-family:var(--font-orbitron);font-size:19px;line-height:1.1}
-.pl-score span{font-size:10px;color:#8892a0}
+/* Oxanium, matching every figure on the Stats page. Orbitron is a display face
+   — it reads as a logo at 19px, not as a number you compare down a column. */
+.pl-score b{font-family:var(--font-mono);font-size:19px;line-height:1.1;font-variant-numeric:tabular-nums;letter-spacing:-0.01em}
+.pl-score span{font-size:10px;color:var(--color-text-dim)}
 
-.pl-key{margin-top:20px;font-size:11px;color:#5a6472;text-align:center}
+.pl-key{margin-top:20px;font-size:11px;color:color-mix(in srgb, var(--color-text-dim) 78%, var(--color-background));text-align:center}
 
 /* Below the table breakpoint the row becomes a two-line card: identity and score
    on top, form and crests beneath. The grid columns would be unreadable here. */
