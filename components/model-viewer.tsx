@@ -453,19 +453,56 @@ function fitModel(wrapper: Group, scene: Group, bones: Object3D[], overhang: Mes
  * in progress rather than only settling at the end.
  */
 function ZoomAwareTarget({ nearTargetY }: { nearTargetY: number }) {
-  const controls = useThree((s) => s.controls) as { getDistance?: () => number; target?: Vector3 } | null
+  const controls = useThree((s) => s.controls) as {
+    getDistance?: () => number
+    target?: Vector3
+    update?: () => void
+  } | null
   const camera = useThree((s) => s.camera)
 
-  // Seat the target once, by hand. Passing `target` to <OrbitControls> instead
-  // would re-apply it on every React re-render — and since this component moves
-  // the target every frame, any unrelated state change (a control being toggled,
-  // say) would yank the framing back to mid-body in the middle of a zoom.
-  useEffect(() => {
-    controls?.target?.set(0, FAR_TARGET_Y, 0)
-  }, [controls])
+  /*
+   * Seat the target — and RE-SEAT THE CAMERA WITH IT — before anything reads a
+   * distance off them.
+   *
+   * Passing `target` to <OrbitControls> instead would re-apply it on every React
+   * re-render, and since this component moves the target every frame, any
+   * unrelated state change (a control being toggled, say) would yank the framing
+   * back to mid-body mid-zoom. So it's seated by hand.
+   *
+   * But seating the target alone is not enough, and this is the subtle part.
+   * OrbitControls mounts and runs its first update() while its target is still
+   * at its own default, the ORIGIN. Because the polar angle is pinned
+   * (min===max===POLAR_ANGLE), that update doesn't just measure the camera — it
+   * REWRITES its position, clamping the elevation about (0,0,0) instead of about
+   * the target we were about to set. The camera opens at (0, 1.08, 3.1586),
+   * 3.1596 from (0, FAR_TARGET_Y, 0); the clamp swings it down to
+   * (0, 0.0845, 3.3371), and once the target is seated at y=1 that reads as a
+   * distance of 3.46 — comfortably past FAR_DISTANCE. `useFrame` below then
+   * believes the viewer is deliberately zoomed out, takes its pullback branch,
+   * and lifts the target toward head height, which aims the camera above the
+   * figure and pushes it down out of frame. How far it drifted varied with how
+   * many frames each phase got, which is why it only bit "sometimes".
+   *
+   * Re-asserting the camera here makes the clamp a no-op: measured about
+   * (0, FAR_TARGET_Y, 0) the opening position already sits exactly at
+   * POLAR_ANGLE and exactly FAR_DISTANCE away, so update() has nothing to
+   * correct and the pullback branch is never entered by accident.
+   */
+  const seated = useRef(false)
+  useLayoutEffect(() => {
+    if (!controls?.target) return
+    controls.target.set(0, FAR_TARGET_Y, 0)
+    camera.position.set(...INITIAL_CAMERA.position)
+    camera.lookAt(0, FAR_TARGET_Y, 0)
+    controls.update?.()
+    seated.current = true
+  }, [controls, camera])
 
   useFrame(() => {
-    if (!controls?.getDistance || !controls.target) return
+    // Never run the framing logic against an unseated target: it would measure a
+    // distance the camera isn't really at and pan the camera on the strength of
+    // it — and a camera pan is not undone by the seating above.
+    if (!seated.current || !controls?.getDistance || !controls.target) return
     const distance = controls.getDistance()
 
     // Two segments, hinged at the default framing.
