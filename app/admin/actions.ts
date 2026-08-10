@@ -11,7 +11,7 @@ import { classifyTeam, countDistinctPlayers } from "@/lib/scoreboard-csv"
 import { extractKillMatrix, isJsonScoreboard, parseScoreboardFile } from "@/lib/scoreboard-json"
 import { notifyAchievementUnlocks } from "@/lib/achievement-notify"
 import { recordSeasonalTitlesSafely } from "@/lib/titles-server"
-import { HISTORY_TAG, computeStreakRecord } from "@/lib/achievements-server"
+import { HISTORY_TAG, computeAchievementLedger, computeStreakRecord, type LedgerEntry } from "@/lib/achievements-server"
 
 const PENDING_BUCKET = "pending-scoreboards"
 
@@ -1021,6 +1021,30 @@ export async function getStreakRecord() {
       success: false as const,
       error: error instanceof Error ? error.message : "Failed to fetch the streak record",
       data: null,
+    }
+  }
+}
+
+// Every achievement rank crossed (and one-of-one claimed) with a date inside the
+// given month — for the Wrapped card's "unlocked this month" list. The ledger
+// itself is cached (HISTORY_TAG), so this is a cheap filter over already-computed
+// data, not a fresh scan; scoped to one month rather than returning the whole
+// site history to the client.
+export async function getAchievementsEarnedInMonth(year: number, month: number) {
+  try {
+    const startMs = Date.UTC(year, month - 1, 1)
+    const endMs = Date.UTC(year, month, 1) // exclusive
+    const ledger = await computeAchievementLedger()
+    const entries = ledger.recent.filter((e) => {
+      const t = Date.parse(e.date)
+      return t >= startMs && t < endMs
+    })
+    return { success: true as const, data: entries }
+  } catch (error) {
+    return {
+      success: false as const,
+      error: error instanceof Error ? error.message : "Failed to fetch achievements for the month",
+      data: [] as LedgerEntry[],
     }
   }
 }
