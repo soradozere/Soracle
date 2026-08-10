@@ -11,8 +11,12 @@ export async function GET() {
   if (!playerId) return NextResponse.json({ playerId: null })
 
   const supabase = createServiceClient()
-  const { data: player } = await supabase.from("players").select("id, name").eq("id", playerId).maybeSingle()
+  const { data: player } = await supabase
+    .from("players")
+    .select("id, name, avatar_url")
+    .eq("id", playerId)
+    .maybeSingle()
   if (!player) return NextResponse.json({ playerId: null })
 
-  return NextResponse.json({ playerId: player.id, name: player.name })
+  return NextResponse.json({ playerId: player.id, name: player.name, avatarUrl: player.avatar_url })
 }

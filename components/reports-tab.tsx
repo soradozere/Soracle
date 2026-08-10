@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter, usePathname, useSearchParams } from "next/navigation"
 import { getMatchesByMonth, getMatchStatsByMonth, getStreakRecord } from "@/app/admin/actions"
 import type { StreakRecord } from "@/lib/achievements-server"
 import { ChevronLeft, ChevronRight, BarChart3 } from "lucide-react"
@@ -13,6 +14,7 @@ import { checkIsAdmin } from "@/lib/is-admin"
 import { TierChangelog } from "@/components/tier-changelog"
 import { EloLeaderboard } from "@/components/elo-leaderboard"
 import { TrueSkillLeaderboard } from "@/components/trueskill-leaderboard"
+import { WrappedView } from "@/components/wrapped-view"
 import {
   LineChart,
   Line,
@@ -331,13 +333,30 @@ export function RankMedal({ index }: { index: number }) {
   )
 }
 
+type ReportsView = "stats" | "leaderboard" | "wrapped" | "elo" | "trueskill"
+const VALID_VIEWS: ReportsView[] = ["stats", "leaderboard", "wrapped", "elo", "trueskill"]
+
 export function ReportsTab() {
   // "Current month" in UTC, matching the UTC month bucketing used everywhere
   // (badges, boards, server actions) — viewer-local months made viewers in
   // different timezones see different boards.
   const now = new Date()
-  const [selectedYear, setSelectedYear] = useState(now.getUTCFullYear())
-  const [selectedMonth, setSelectedMonth] = useState(now.getUTCMonth() + 1)
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  // Initial state reads the URL once (useState initializers run only on mount),
+  // so a shared link — a past month, the Wrapped tab, a specific player — lands
+  // exactly where it was copied from. Only Wrapped's `player` writes back;
+  // month/view are read-and-restored but otherwise behave as before.
+  const [selectedYear, setSelectedYear] = useState(() => {
+    const y = parseInt(searchParams.get("year") ?? "", 10)
+    return Number.isFinite(y) && y >= 2020 && y <= now.getUTCFullYear() ? y : now.getUTCFullYear()
+  })
+  const [selectedMonth, setSelectedMonth] = useState(() => {
+    const m = parseInt(searchParams.get("month") ?? "", 10)
+    return Number.isFinite(m) && m >= 1 && m <= 12 ? m : now.getUTCMonth() + 1
+  })
   const [matches, setMatches] = useState<Match[]>([])
   const [matchStats, setMatchStats] = useState<MatchStatRow[]>([])
   // Previous month, for the "vs <month>" deltas; and the all-time streak record.
@@ -345,7 +364,11 @@ export function ReportsTab() {
   const [streakRecord, setStreakRecord] = useState<StreakRecord | null>(null)
   const [players, setPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
-  const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "elo" | "trueskill">("stats")
+  const [currentView, setCurrentView] = useState<ReportsView>(() => {
+    const v = searchParams.get("view")
+    return VALID_VIEWS.includes(v as ReportsView) ? (v as ReportsView) : "stats"
+  })
+  const [wrappedPlayer, setWrappedPlayer] = useState<string | null>(() => searchParams.get("player"))
   const [isAdmin, setIsAdmin] = useState(false)
   // The "Under the hood" band: four working views of the same month, sharing one
   // panel rather than stacking four full-width slabs down the page.
@@ -388,19 +411,40 @@ export function ReportsTab() {
     })
   }, [])
 
-  // Visibility logic for leaderboard
+  // Visibility logic for leaderboard and Wrapped — both only make sense once a
+  // month is closed (an in-progress month has no final standings to wrap up),
+  // though admins get an early preview like the leaderboard already allows.
   const isCurrentMonth = selectedYear === now.getUTCFullYear() && selectedMonth === now.getUTCMonth() + 1
   const showLeaderboard = !isCurrentMonth || isAdmin
+  const showWrapped = !isCurrentMonth || isAdmin
 
   // Force view back to stats if the selected view becomes unavailable to this user.
   useEffect(() => {
     if (!showLeaderboard && currentView === "leaderboard") {
       setCurrentView("stats")
     }
+    if (!showWrapped && currentView === "wrapped") {
+      setCurrentView("stats")
+    }
     if (!isAdmin && (currentView === "elo" || currentView === "trueskill")) {
       setCurrentView("stats")
     }
-  }, [showLeaderboard, isAdmin, currentView])
+  }, [showLeaderboard, showWrapped, isAdmin, currentView])
+
+  // Keeps the URL in step with view/month/player so the Wrapped tab (and any
+  // other view) is a real, shareable link — omitted for the plain defaults
+  // (current month, Monthly tab) so a first visit to /stats stays bare.
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (!isCurrentMonth) {
+      params.set("year", String(selectedYear))
+      params.set("month", String(selectedMonth))
+    }
+    if (currentView !== "stats") params.set("view", currentView)
+    if (currentView === "wrapped" && wrappedPlayer) params.set("player", wrappedPlayer)
+    const qs = params.toString()
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false })
+  }, [isCurrentMonth, selectedYear, selectedMonth, currentView, wrappedPlayer, pathname, router])
 
   const canGoNext = !(selectedYear === now.getUTCFullYear() && selectedMonth === now.getUTCMonth() + 1)
 
@@ -917,6 +961,7 @@ export function ReportsTab() {
           segments={[
             { key: "stats", label: "Monthly" },
             ...(showLeaderboard ? [{ key: "leaderboard", label: "Leaderboard" }] : []),
+            ...(showWrapped ? [{ key: "wrapped", label: "Wrapped" }] : []),
             ...(isAdmin ? [{ key: "elo", label: "ELO" }] : []),
             ...(isAdmin ? [{ key: "trueskill", label: "TrueSkill" }] : []),
           ]}
@@ -938,6 +983,16 @@ export function ReportsTab() {
         // TrueSkill is likewise a running rating replayed fresh; the month selector drives
         // its own All-time / Monthly toggle.
         <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} />
+      ) : currentView === "wrapped" ? (
+        // Self-contained like the two leaderboards above — fetches its own
+        // month's data rather than reusing ReportsTab's, so it owns its own
+        // loading/empty states instead of falling into the generic one below.
+        <WrappedView
+          year={selectedYear}
+          month={selectedMonth}
+          selectedName={wrappedPlayer}
+          onSelectName={setWrappedPlayer}
+        />
       ) : totalMatches === 0 ? (
         <div className="text-center py-12 text-[var(--color-text-dim)]">
           <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-50" />
