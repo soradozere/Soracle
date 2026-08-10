@@ -477,32 +477,49 @@ function ZoomAwareTarget({ nearTargetY }: { nearTargetY: number }) {
    * the target we were about to set. The camera opens at (0, 1.08, 3.1586),
    * 3.1596 from (0, FAR_TARGET_Y, 0); the clamp swings it down to
    * (0, 0.0845, 3.3371), and once the target is seated at y=1 that reads as a
-   * distance of 3.46 — comfortably past FAR_DISTANCE. `useFrame` below then
-   * believes the viewer is deliberately zoomed out, takes its pullback branch,
-   * and lifts the target toward head height, which aims the camera above the
-   * figure and pushes it down out of frame. How far it drifted varied with how
-   * many frames each phase got, which is why it only bit "sometimes".
+   * distance of 3.46 — comfortably past FAR_DISTANCE. The framing logic below
+   * then believes the viewer is deliberately zoomed out, takes its pullback
+   * branch, and lifts the target toward head height — aiming the camera above
+   * the figure and pushing it down out of frame.
    *
-   * Re-asserting the camera here makes the clamp a no-op: measured about
-   * (0, FAR_TARGET_Y, 0) the opening position already sits exactly at
-   * POLAR_ANGLE and exactly FAR_DISTANCE away, so update() has nothing to
-   * correct and the pullback branch is never entered by accident.
+   * This USED to be corrected from a useLayoutEffect keyed on `controls`
+   * becoming available. That is a React EFFECT, and OrbitControls' own bad
+   * first update happens inside ITS OWN effect (or its constructor) — so
+   * correctness depended on winning a race between two independent effects on
+   * two independent components, ordered however React/drei happen to schedule
+   * them. It held up under heavy local testing (mount races, tab
+   * backgrounding simulated via visibility toggles, 30s of autorotate,
+   * dragging) and in production across repeated loads — but "wins the race
+   * reliably in my testing" is not "wins the race", and a real report of the
+   * sunk-figure symptom with no scroll/zoom involved means somewhere, on some
+   * device, it lost.
+   *
+   * Seating here instead, INSIDE useFrame, sidesteps the race rather than
+   * trying to win it: r3f's render loop calls every registered useFrame
+   * callback for a tick, in subscription order, and only THEN paints. Whatever
+   * bad position OrbitControls' own effect left behind, it left it behind
+   * before this ever ran — nothing paints between "some effect somewhere set
+   * a bad position" and "the next tick's useFrame callbacks run", because
+   * painting is driven by the SAME tick that runs this callback. So doing the
+   * seed as the first thing this callback ever does, with absolute values,
+   * guarantees the first PAINTED frame is correct regardless of what any
+   * effect, anywhere, did first — there is no longer a cross-system timing
+   * assumption to hold.
    */
-  const seated = useRef(false)
-  useLayoutEffect(() => {
-    if (!controls?.target) return
-    controls.target.set(0, FAR_TARGET_Y, 0)
-    camera.position.set(...INITIAL_CAMERA.position)
-    camera.lookAt(0, FAR_TARGET_Y, 0)
-    controls.update?.()
-    seated.current = true
-  }, [controls, camera])
+  const seeded = useRef(false)
 
   useFrame(() => {
-    // Never run the framing logic against an unseated target: it would measure a
-    // distance the camera isn't really at and pan the camera on the strength of
-    // it — and a camera pan is not undone by the seating above.
-    if (!seated.current || !controls?.getDistance || !controls.target) return
+    if (!controls?.getDistance || !controls.target) return
+
+    if (!seeded.current) {
+      controls.target.set(0, FAR_TARGET_Y, 0)
+      camera.position.set(...INITIAL_CAMERA.position)
+      camera.lookAt(0, FAR_TARGET_Y, 0)
+      controls.update?.()
+      seeded.current = true
+      return // this tick's paint is already correct; the framing maths below has nothing to do yet
+    }
+
     const distance = controls.getDistance()
 
     // Two segments, hinged at the default framing.
