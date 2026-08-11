@@ -5,9 +5,11 @@ import {
   getCapConversionByMonth,
   getMatchesByMonth,
   getMatchStatsByMonth,
+  getReturnerRateByMonth,
   getStreakRecord,
 } from "@/app/admin/actions"
 import type { CapConversion } from "@/lib/cap-conversion"
+import type { ReturnerRate } from "@/lib/returner-rate"
 import type { StreakRecord } from "@/lib/achievements-server"
 import { ChevronLeft, ChevronRight, BarChart3 } from "lucide-react"
 import { SegmentedRail } from "@/components/segmented-rail"
@@ -351,6 +353,7 @@ export function ReportsTab() {
   // Null until loaded, and legitimately null for any month before the kill
   // matrix existed (9 Aug 2026) — the card hides itself rather than showing 0%.
   const [capConversion, setCapConversion] = useState<CapConversion | null>(null)
+  const [returnerRate, setReturnerRate] = useState<ReturnerRate | null>(null)
   const [streakRecord, setStreakRecord] = useState<StreakRecord | null>(null)
   const [players, setPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
@@ -379,7 +382,8 @@ export function ReportsTab() {
       getMatchStatsByMonth(selectedYear, selectedMonth),
       getMatchesByMonth(prevYear, prevMonth),
       getCapConversionByMonth(selectedYear, selectedMonth),
-    ]).then(([matchResult, playersData, statsResult, prevResult, capResult]) => {
+      getReturnerRateByMonth(selectedYear, selectedMonth),
+    ]).then(([matchResult, playersData, statsResult, prevResult, capResult, retResult]) => {
       if (matchResult.success) {
         setMatches(matchResult.data as Match[])
       }
@@ -387,6 +391,7 @@ export function ReportsTab() {
       setMatchStats(statsResult.success ? (statsResult.data as MatchStatRow[]) : [])
       setPrevMatches(prevResult.success ? (prevResult.data as Match[]) : [])
       setCapConversion(capResult.success ? capResult.data : null)
+      setReturnerRate(retResult.success ? retResult.data : null)
       setLoading(false)
     })
   }, [selectedYear, selectedMonth])
@@ -670,11 +675,10 @@ export function ReportsTab() {
       .sort((a, b) => b.dbsKills - a.dbsKills)[0] || null
 
   // Returns per minute of play (TIME-SUM is already in minutes), not raw return count.
-  const topRetsPerMin =
-    [...qualifiedStatPlayers]
-      .filter((p) => p.returns > 0 && p.timePlayed > 0)
-      .map((p) => ({ ...p, retsPerMin: p.returns / p.timePlayed }))
-      .sort((a, b) => b.retsPerMin - a.retsPerMin)[0] || null
+  // Counted over returner games only. Dividing returns by every minute played
+  // ranked players by how often they were put on returning duty rather than how
+  // well they did it — a few games on cap sank the rate. See lib/returner-rate.ts.
+  const topRetsPerMin = returnerRate?.rows[0] ?? null
 
   // Highest kill/death ratio (needs at least one death for a meaningful ratio).
   const highestKd =
@@ -1159,15 +1163,19 @@ export function ReportsTab() {
                 emblem="/achievements/mandalorian-crest.svg"
                 accent="#00d4ff"
                 label="Returns per minute"
-                hint="Flag returns per minute played — a rate rather than a total, so shorter sessions still count."
+                hint="Flag returns per minute, counting only the games you played as one of your team's two returners — cappers, base cleaners and support are working on something else, and including those games measured which role you were given rather than how well you returned it. Roles are read off the scoreboard: most flag hold is a capper, most mines in your own base a cleaner, most in theirs support. Caveat: a player who swaps role mid-game can't be detected, since the scoreboard only records end-of-match totals."
                 who={topRetsPerMin?.name}
-                value={topRetsPerMin ? topRetsPerMin.retsPerMin.toFixed(2) : null}
-                note={topRetsPerMin ? `${topRetsPerMin.returns} rets · ${topRetsPerMin.timePlayed} min` : undefined}
+                value={topRetsPerMin ? topRetsPerMin.perMinute.toFixed(2) : null}
+                note={
+                  topRetsPerMin
+                    ? `${topRetsPerMin.returns} rets · ${topRetsPerMin.games} of ${topRetsPerMin.gamesPlayed} games`
+                    : undefined
+                }
               />
               <RecordRow
                 emblem="/badges/top5.svg"
                 accent="#45a29e"
-                label="Best conversion"
+                label="Best Cap conversions"
                 // The start date is load-bearing, not trivia: the kill matrix this
                 // reads can't be backfilled, so a player looking at July sees "no
                 // data" and a player looking at August sees a figure covering only
