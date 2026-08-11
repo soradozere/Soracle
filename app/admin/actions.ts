@@ -9,6 +9,8 @@ import { createNameResolver, normalizeName } from "@/lib/name-match"
 import { fetchAliasesForBot, fetchPlayersForBot } from "@/lib/bot-api"
 import { classifyTeam, countDistinctPlayers } from "@/lib/scoreboard-csv"
 import { extractKillMatrix, isJsonScoreboard, parseScoreboardFile } from "@/lib/scoreboard-json"
+import { computeCapConversion } from "@/lib/cap-conversion"
+import { computeReturnerRate } from "@/lib/returner-rate"
 import { notifyAchievementUnlocks } from "@/lib/achievement-notify"
 import { recordSeasonalTitlesSafely } from "@/lib/titles-server"
 import { HISTORY_TAG, computeStreakRecord } from "@/lib/achievements-server"
@@ -1096,6 +1098,76 @@ export async function getMatchStatsByMonth(year: number, month: number) {
       success: false,
       error: error instanceof Error ? error.message : "Failed to fetch match stats",
       data: [],
+    }
+  }
+}
+
+// Cap conversion for a month's matches — captures as a share of resolved flag
+// runs. Month-scoped so the Reports card sits consistently beside every other
+// card on that tab, but be aware the underlying match_kills data only starts
+// 9 Aug 2026: earlier months legitimately return nothing, and the current month
+// covers only its JSON-uploaded games rather than all of them.
+export async function getCapConversionByMonth(year: number, month: number) {
+  try {
+    const supabase = await createClient()
+
+    const startDate = new Date(Date.UTC(year, month - 1, 1))
+    const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
+
+    const { data: monthMatches, error: matchError } = await supabase
+      .from("matches")
+      .select("id")
+      .gte("created_at", startDate.toISOString())
+      .lte("created_at", endDate.toISOString())
+    if (matchError) {
+      return { success: false, error: matchError.message, data: null }
+    }
+
+    const matchIds = (monthMatches || []).map((m) => m.id)
+    const { data: players } = await supabase.from("players").select("id, name")
+    const nameById = new Map((players || []).map((p) => [p.id as string, p.name as string]))
+
+    const result = await computeCapConversion(supabase, nameById, matchIds)
+    return { success: true, data: result }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to compute cap conversion",
+      data: null,
+    }
+  }
+}
+
+// Returns per minute over a month's returner games only — see lib/returner-rate.ts
+// for how the two returners are picked out of each side. Unlike cap conversion
+// this works on every month we have, CSV era included.
+export async function getReturnerRateByMonth(year: number, month: number) {
+  try {
+    const supabase = await createClient()
+
+    const startDate = new Date(Date.UTC(year, month - 1, 1))
+    const endDate = new Date(Date.UTC(year, month, 0, 23, 59, 59, 999))
+
+    const { data: monthMatches, error: matchError } = await supabase
+      .from("matches")
+      .select("id")
+      .gte("created_at", startDate.toISOString())
+      .lte("created_at", endDate.toISOString())
+    if (matchError) {
+      return { success: false, error: matchError.message, data: null }
+    }
+
+    const matchIds = (monthMatches || []).map((m) => m.id)
+    const { data: players } = await supabase.from("players").select("id, name")
+    const nameById = new Map((players || []).map((p) => [p.id as string, p.name as string]))
+
+    const result = await computeReturnerRate(supabase, nameById, matchIds)
+    return { success: true, data: result }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to compute returner rate",
+      data: null,
     }
   }
 }
