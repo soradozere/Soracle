@@ -1145,7 +1145,7 @@ export function ReportsTab() {
                 emblem="/badges/dbs-god.svg"
                 accent="#9b59b6"
                 label="Most DBS kills"
-                hint="Death-from-behind special kills, as reported by the uploaded scoreboard."
+                hint="Double Backhanded Slash kills, as reported by the uploaded scoreboard."
                 who={topDbsKills?.name}
                 value={topDbsKills ? topDbsKills.dbsKills : null}
                 note="this month"
