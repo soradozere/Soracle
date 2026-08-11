@@ -22,7 +22,14 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   const yearParam = url.searchParams.get("year")
   const monthParam = url.searchParams.get("month")
-  const target = yearParam && monthParam ? new Date(Number(yearParam), Number(monthParam) - 1, 1) : new Date()
+  // Date.UTC, not new Date(y, m, 1): the local-time constructor lands on the
+  // previous month in any positive-UTC-offset zone, so `?month=7` read June's
+  // matches while still printing "July 2026". Vercel runs in UTC so production
+  // was unaffected, which is exactly why it survived — it only misfires locally.
+  const target =
+    yearParam && monthParam
+      ? new Date(Date.UTC(Number(yearParam), Number(monthParam) - 1, 1))
+      : new Date()
   const monthStart = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), 1))
   const monthEnd = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 1))
 
@@ -38,7 +45,7 @@ export async function GET(request: Request) {
 
   const matchById = new Map((monthMatches || []).map((m) => [m.id, m]))
   const matchIds = [...matchById.keys()]
-  const monthLabel = target.toLocaleString("en-GB", { month: "long", year: "numeric" })
+  const monthLabel = target.toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })
 
   if (matchIds.length === 0) {
     return NextResponse.json({ month: monthLabel, matchCount: 0, players: [] })
