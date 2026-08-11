@@ -1,7 +1,15 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getMatchesByMonth, getMatchStatsByMonth, getStreakRecord } from "@/app/admin/actions"
+import {
+  getCapConversionByMonth,
+  getMatchesByMonth,
+  getMatchStatsByMonth,
+  getReturnerRateByMonth,
+  getStreakRecord,
+} from "@/app/admin/actions"
+import type { CapConversion } from "@/lib/cap-conversion"
+import type { ReturnerRate } from "@/lib/returner-rate"
 import type { StreakRecord } from "@/lib/achievements-server"
 import { ChevronLeft, ChevronRight, BarChart3 } from "lucide-react"
 import { SegmentedRail } from "@/components/segmented-rail"
@@ -342,6 +350,10 @@ export function ReportsTab() {
   const [matchStats, setMatchStats] = useState<MatchStatRow[]>([])
   // Previous month, for the "vs <month>" deltas; and the all-time streak record.
   const [prevMatches, setPrevMatches] = useState<Match[]>([])
+  // Null until loaded, and legitimately null for any month before the kill
+  // matrix existed (9 Aug 2026) — the card hides itself rather than showing 0%.
+  const [capConversion, setCapConversion] = useState<CapConversion | null>(null)
+  const [returnerRate, setReturnerRate] = useState<ReturnerRate | null>(null)
   const [streakRecord, setStreakRecord] = useState<StreakRecord | null>(null)
   const [players, setPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
@@ -369,13 +381,17 @@ export function ReportsTab() {
       fetchPlayersFromDB(),
       getMatchStatsByMonth(selectedYear, selectedMonth),
       getMatchesByMonth(prevYear, prevMonth),
-    ]).then(([matchResult, playersData, statsResult, prevResult]) => {
+      getCapConversionByMonth(selectedYear, selectedMonth),
+      getReturnerRateByMonth(selectedYear, selectedMonth),
+    ]).then(([matchResult, playersData, statsResult, prevResult, capResult, retResult]) => {
       if (matchResult.success) {
         setMatches(matchResult.data as Match[])
       }
       setPlayers(playersData)
       setMatchStats(statsResult.success ? (statsResult.data as MatchStatRow[]) : [])
       setPrevMatches(prevResult.success ? (prevResult.data as Match[]) : [])
+      setCapConversion(capResult.success ? capResult.data : null)
+      setReturnerRate(retResult.success ? retResult.data : null)
       setLoading(false)
     })
   }, [selectedYear, selectedMonth])
@@ -659,11 +675,10 @@ export function ReportsTab() {
       .sort((a, b) => b.dbsKills - a.dbsKills)[0] || null
 
   // Returns per minute of play (TIME-SUM is already in minutes), not raw return count.
-  const topRetsPerMin =
-    [...qualifiedStatPlayers]
-      .filter((p) => p.returns > 0 && p.timePlayed > 0)
-      .map((p) => ({ ...p, retsPerMin: p.returns / p.timePlayed }))
-      .sort((a, b) => b.retsPerMin - a.retsPerMin)[0] || null
+  // Counted over returner games only. Dividing returns by every minute played
+  // ranked players by how often they were put on returning duty rather than how
+  // well they did it — a few games on cap sank the rate. See lib/returner-rate.ts.
+  const topRetsPerMin = returnerRate?.rows[0] ?? null
 
   // Highest kill/death ratio (needs at least one death for a meaningful ratio).
   const highestKd =
@@ -672,16 +687,12 @@ export function ReportsTab() {
       .map((p) => ({ ...p, kd: p.kills / p.deaths }))
       .sort((a, b) => b.kd - a.kd)[0] || null
 
-  // Most Caps per Run — efficiency (minutes of flag hold per cap; lower = better).
-  // To avoid low-volume flukes, only "regular cappers" qualify: caps >= 40% of the
-  // month's highest individual cap total (on top of the min-match threshold).
-  const maxMonthlyCaps = qualifiedStatPlayers.reduce((max, p) => Math.max(max, p.captures), 0)
-  const regularCapperFloor = maxMonthlyCaps * 0.4
-  const mostCapsPerRun =
-    qualifiedStatPlayers
-      .filter((p) => p.captures >= regularCapperFloor && p.flagHoldMs > 0 && p.captures > 0)
-      .map((p) => ({ ...p, minutesPerCap: p.flagHoldMs / 60000 / p.captures }))
-      .sort((a, b) => a.minutesPerCap - b.minutesPerCap)[0] || null
+  // Best conversion — captures as a share of RESOLVED flag runs (capped, or
+  // returned while carrying). Replaces minutes-of-hold-per-cap, which measured
+  // capper mains only and billed support players for the grab-and-/kill resets
+  // that hand the flag to a runner. Computed server-side in lib/cap-conversion.ts
+  // because the "times caught" half lives in match_kills, not match_stats.
+  const bestConversion = capConversion?.rows[0] ?? null
 
   // Highest single-match score this month — a single-game record, so (unlike the
   // cumulative stats above) there's no min-match qualifier. Match date and final
@@ -1134,7 +1145,7 @@ export function ReportsTab() {
                 emblem="/badges/dbs-god.svg"
                 accent="#9b59b6"
                 label="Most DBS kills"
-                hint="Death-from-behind special kills, as reported by the uploaded scoreboard."
+                hint="Double Backhanded Slash kills, as reported by the uploaded scoreboard."
                 who={topDbsKills?.name}
                 value={topDbsKills ? topDbsKills.dbsKills : null}
                 note="this month"
@@ -1152,19 +1163,31 @@ export function ReportsTab() {
                 emblem="/achievements/mandalorian-crest.svg"
                 accent="#00d4ff"
                 label="Returns per minute"
-                hint="Flag returns per minute played — a rate rather than a total, so shorter sessions still count."
+                hint="Flag returns per minute, counting only the games you played as one of your team's two returners. Caveat: a player who swaps role mid-game can't be detected, since the scoreboard only records end-of-match totals."
                 who={topRetsPerMin?.name}
-                value={topRetsPerMin ? topRetsPerMin.retsPerMin.toFixed(2) : null}
-                note={topRetsPerMin ? `${topRetsPerMin.returns} rets · ${topRetsPerMin.timePlayed} min` : undefined}
+                value={topRetsPerMin ? topRetsPerMin.perMinute.toFixed(2) : null}
+                note={
+                  topRetsPerMin
+                    ? `${topRetsPerMin.returns} rets · ${topRetsPerMin.games} of ${topRetsPerMin.gamesPlayed} games`
+                    : undefined
+                }
               />
               <RecordRow
                 emblem="/badges/top5.svg"
                 accent="#45a29e"
-                label="Fastest capper"
-                hint="Fewest minutes of flag hold per capture. Regular cappers only (at least 40% of the month's top cap total), so one lucky grab can't win it."
-                who={mostCapsPerRun?.name}
-                value={mostCapsPerRun ? `${mostCapsPerRun.minutesPerCap.toFixed(1)} min` : null}
-                note="per capture"
+                label="Best Cap conversions"
+                // The start date is load-bearing, not trivia: the kill matrix this
+                // reads can't be backfilled, so a player looking at July sees "no
+                // data" and a player looking at August sees a figure covering only
+                // part of the month. Say so rather than let them assume otherwise.
+                hint="Share of flag runs that ended in a capture. A run only counts once it resolves — you scored, or an enemy returned it off you. Resets and drops are ignored, so playing support doesn't cost you. Needs at least 30% of the month's top run count. Calculating since 9 August 2026."
+                who={bestConversion?.name}
+                value={bestConversion ? `${bestConversion.conversion.toFixed(1)}%` : null}
+                note={
+                  bestConversion
+                    ? `${bestConversion.captures} caps · ${bestConversion.carries} runs`
+                    : undefined
+                }
               />
               <RecordRow
                 emblem="/badges/highscore.svg"
