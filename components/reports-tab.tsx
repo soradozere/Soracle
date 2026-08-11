@@ -1168,7 +1168,11 @@ export function ReportsTab() {
                 emblem="/badges/top5.svg"
                 accent="#45a29e"
                 label="Best conversion"
-                hint="Share of flag runs that ended in a capture. A run only counts once it resolves — you scored, or an enemy returned it off you. Resets and drops are ignored, so playing support doesn't cost you. Needs at least 30% of the month's top run count."
+                // The start date is load-bearing, not trivia: the kill matrix this
+                // reads can't be backfilled, so a player looking at July sees "no
+                // data" and a player looking at August sees a figure covering only
+                // part of the month. Say so rather than let them assume otherwise.
+                hint="Share of flag runs that ended in a capture. A run only counts once it resolves — you scored, or an enemy returned it off you. Resets and drops are ignored, so playing support doesn't cost you. Needs at least 30% of the month's top run count. Calculating since 9 August 2026."
                 who={bestConversion?.name}
                 value={bestConversion ? `${bestConversion.conversion.toFixed(1)}%` : null}
                 note={
