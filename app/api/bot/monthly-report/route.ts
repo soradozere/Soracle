@@ -23,14 +23,21 @@ export async function GET(request: Request) {
   const url = new URL(request.url)
   const yearParam = url.searchParams.get("year")
   const monthParam = url.searchParams.get("month")
-  const target = yearParam && monthParam ? new Date(Number(yearParam), Number(monthParam) - 1, 1) : new Date()
+  // Date.UTC, not new Date(y, m, 1): the local-time constructor lands on the
+  // previous month in any positive-UTC-offset zone, so `?month=7` read June's
+  // matches while still printing "July 2026". Vercel runs in UTC so production
+  // was unaffected, which is exactly why it survived — it only misfires locally.
+  const target =
+    yearParam && monthParam
+      ? new Date(Date.UTC(Number(yearParam), Number(monthParam) - 1, 1))
+      : new Date()
   const monthStart = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth(), 1))
   const monthEnd = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 1))
-  const monthLabel = target.toLocaleString("en-GB", { month: "long", year: "numeric" })
+  const monthLabel = target.toLocaleString("en-GB", { month: "long", year: "numeric", timeZone: "UTC" })
 
   const { data: matchesRaw, error } = await supabase
     .from("matches")
-    .select("red_team, blue_team, red_score, blue_score, created_at")
+    .select("red_team, blue_team, red_score, blue_score, red_tiers, blue_tiers, created_at")
     .gte("created_at", monthStart.toISOString())
     .lt("created_at", monthEnd.toISOString())
   if (error) {
@@ -47,8 +54,18 @@ export async function GET(request: Request) {
     const blueWon = match.blue_score > match.red_score
     if (!redWon && !blueWon) continue
 
-    const redTier = (match.red_team || []).reduce((s: number, n: string) => s + (tierByName.get(n) ?? 5), 0)
-    const blueTier = (match.blue_team || []).reduce((s: number, n: string) => s + (tierByName.get(n) ?? 5), 0)
+    // Tiers come from the match's OWN snapshot, not today's tier list. Summing
+    // live tiers re-scores finished months every time anyone is re-tiered — July
+    // 2026's star player silently changed from original to viktor that way. The
+    // Stats page was fixed in #126; this endpoint was missed, so =potm and the
+    // site disagreed. Matches predating the snapshot columns keep the fallback.
+    const snapshot = match.red_tiers?.length && match.blue_tiers?.length
+    const redTier = snapshot
+      ? match.red_tiers.reduce((s: number, t: number) => s + t, 0)
+      : (match.red_team || []).reduce((s: number, n: string) => s + (tierByName.get(n) ?? 5), 0)
+    const blueTier = snapshot
+      ? match.blue_tiers.reduce((s: number, t: number) => s + t, 0)
+      : (match.blue_team || []).reduce((s: number, n: string) => s + (tierByName.get(n) ?? 5), 0)
 
     for (const [team, won, tierAdvantage] of [
       [match.red_team, redWon, blueTier - redTier] as const,
