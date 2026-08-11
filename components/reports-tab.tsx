@@ -1163,7 +1163,7 @@ export function ReportsTab() {
                 emblem="/achievements/mandalorian-crest.svg"
                 accent="#00d4ff"
                 label="Returns per minute"
-                hint="Flag returns per minute, counting only the games you played as one of your team's two returners — cappers, base cleaners and support are working on something else, and including those games measured which role you were given rather than how well you returned it. Roles are read off the scoreboard: most flag hold is a capper, most mines in your own base a cleaner, most in theirs support. Caveat: a player who swaps role mid-game can't be detected, since the scoreboard only records end-of-match totals."
+                hint="Flag returns per minute, counting only the games you played as one of your team's two returners. Caveat: a player who swaps role mid-game can't be detected, since the scoreboard only records end-of-match totals."
                 who={topRetsPerMin?.name}
                 value={topRetsPerMin ? topRetsPerMin.perMinute.toFixed(2) : null}
                 note={
