@@ -13,7 +13,11 @@
  */
 export const DEMO_REACTIONS = [
   { id: "like", emoji: "👍", label: "Like" },
-  { id: "love", emoji: "❤️", label: "Love" },
+  // Stored id stays "love": the column has a CHECK constraint listing these
+  // exact strings, so renaming it to "fire" needs a migration for a purely
+  // cosmetic change. Nothing is mislabelled by it -- no love reaction was ever
+  // recorded before the swap.
+  { id: "love", emoji: "🔥", label: "Fire" },
   { id: "dislike", emoji: "👎", label: "Dislike" },
   { id: "funny", emoji: "😂", label: "Funny" },
   { id: "wow", emoji: "😮", label: "Wow" },
