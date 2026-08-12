@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { Check, ChevronsUpDown, Heart, Link2, Sparkles, Swords, Trophy } from "lucide-react"
+import { Check, ChevronsUpDown, Crosshair, Ghost, Heart, Link2, Skull, Sparkles, Swords, Target, Trophy, type LucideIcon } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { getAchievementsEarnedInMonth } from "@/app/admin/actions"
 import { Emblem } from "@/components/emblem"
@@ -64,6 +64,48 @@ interface StatRow {
   deaths: number
   score: number
   time_played: number | null
+  team: string | null
+  // Per-style kill columns. These come from the CSV era onwards (83 matches back
+  // to June), which is far wider coverage than the JSON kill matrix below.
+  red_kills: number | null
+  yellow_kills: number | null
+  blue_kills: number | null
+  dfa_kills: number | null
+  ydfa_kills: number | null
+  bs_kills: number | null
+  dbs_kills: number | null
+  blubs_kills: number | null
+  upcut_kills: number | null
+  mine_kills: number | null
+  turret_kills: number | null
+  idle_kills: number | null
+  tele_kills: number | null
+  doom_kills: number | null
+}
+
+/** One (killer, victim) pair in a match — the JSON-era scoreboard matrix. */
+interface KillRow {
+  match_id: string
+  killer_player_id: string
+  victim_player_id: string
+  kills: number
+}
+
+/** How a player fared against one opponent, by kills traded. */
+export interface DuelRecord {
+  name: string
+  /** Kills this player landed on them. */
+  for: number
+  /** Kills they landed on this player. */
+  against: number
+}
+
+/** A single result in the month, oldest first — the shape the W/L strip draws. */
+interface Result {
+  outcome: "W" | "L" | "D"
+  date: string
+  scoreFor: number
+  scoreAgainst: number
 }
 
 interface PlayerRow {
@@ -110,6 +152,18 @@ interface WrappedCard {
   bestScore: { value: number; match: Match } | null
   friends: PairRecord[]
   nemeses: OppRecord[]
+  /** Team-mates you lost most alongside — the dark twin of friends. */
+  curses: PairRecord[]
+  /** Every result this month, oldest first, for the form strip. */
+  results: Result[]
+  /** Record split by which side they were on. */
+  byTeam: { red: { wins: number; losses: number }; blue: { wins: number; losses: number } }
+  /** Kills by style, highest first; only styles they actually landed. */
+  killTypes: { label: string; value: number }[]
+  /** From the JSON kill matrix — empty when the month has no matrix data. */
+  prey: DuelRecord[]
+  bullies: DuelRecord[]
+  rivals: DuelRecord[]
 }
 
 // Same floor and ranking the bot's monthly =friend/=nemesis commands use
@@ -118,6 +172,32 @@ interface WrappedCard {
 // as a bond. Kept in step with those deliberately; if one changes, check the
 // other.
 const PAIR_MIN_GAMES = 3
+
+/*
+ * Kill styles, in the order they read as a scoreboard rather than alphabetically.
+ * Labels are the words players actually use -- "DBS", not "dbs_kills" -- and any
+ * style nobody landed is dropped rather than shown as a zero, so a light month
+ * does not fill the card with blanks.
+ */
+const KILL_STYLES: { key: keyof StatRow; label: string }[] = [
+  { key: "red_kills", label: "Red" },
+  { key: "yellow_kills", label: "Yellow" },
+  { key: "blue_kills", label: "Blue" },
+  { key: "dfa_kills", label: "DFA" },
+  { key: "ydfa_kills", label: "YDFA" },
+  { key: "bs_kills", label: "Backstab" },
+  { key: "dbs_kills", label: "DBS" },
+  { key: "blubs_kills", label: "BluBS" },
+  { key: "upcut_kills", label: "Upcut" },
+  { key: "mine_kills", label: "Mine" },
+  { key: "turret_kills", label: "Turret" },
+  { key: "tele_kills", label: "Tele" },
+  { key: "doom_kills", label: "Doom" },
+  { key: "idle_kills", label: "Idle" },
+]
+
+/** Duels need more than a couple of recorded games to mean anything. */
+const DUEL_MIN_KILLS = 3
 
 function formatFlagHold(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
@@ -232,9 +312,130 @@ interface WrappedViewProps {
   onSelectName: (name: string | null) => void
 }
 
+
+/**
+ * One ranked list of people — best team-mates, nemeses, prey, whatever.
+ *
+ * Six of these appear on a card and they differ only in wording and colour, so
+ * they share a component: six hand-rolled copies would drift the moment one of
+ * them got a fix.
+ */
+function PeopleCard({
+  title,
+  blurb,
+  icon: Icon,
+  accent,
+  rows,
+  empty,
+}: {
+  title: string
+  blurb: string
+  icon: LucideIcon
+  accent: string
+  rows: { name: string; primary: string; secondary: string }[]
+  empty: string
+}) {
+  return (
+    <section className="glass-panel p-5 flex flex-col">
+      <div
+        className="text-[11px] font-semibold uppercase tracking-[0.16em]"
+        style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
+      >
+        {title}
+      </div>
+      <p className="mt-1 mb-3 text-[11px] leading-snug" style={{ color: "var(--color-text-dim)" }}>
+        {blurb}
+      </p>
+      {rows.length === 0 ? (
+        <p className="text-sm" style={{ color: "var(--color-text-dim)" }}>
+          {empty}
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {rows.map((row, i) => (
+            <div
+              key={row.name}
+              className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg"
+              style={{
+                background: "color-mix(in srgb, var(--color-background) 55%, transparent)",
+                border: "1px solid var(--glass-hair)",
+              }}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <span className="text-xs font-mono w-3.5 shrink-0" style={{ color: "var(--color-text-dim)" }}>
+                  {i + 1}
+                </span>
+                <Icon className="w-3.5 h-3.5 shrink-0" style={{ color: accent }} />
+                <Link href={`/player/${playerSlug(row.name)}`} className="text-sm font-semibold truncate hover:underline">
+                  {row.name}
+                </Link>
+              </div>
+              <div className="text-xs shrink-0 tabular-nums" style={{ color: "var(--color-text-dim)" }}>
+                <b style={{ color: accent }}>{row.primary}</b>
+                {row.secondary && <> · {row.secondary}</>}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  )
+}
+
+/**
+ * The month as a line: cumulative wins minus losses, game by game.
+ *
+ * A row of W/L pips says what happened but not the shape of it — a run of six
+ * losses in the middle of a winning month reads the same as six spread out. The
+ * line shows the shape; the pips underneath keep the detail.
+ */
+function FormGraph({ results }: { results: Result[] }) {
+  if (results.length < 2) return null
+  let running = 0
+  const points = results.map((r, i) => {
+    running += r.outcome === "W" ? 1 : r.outcome === "L" ? -1 : 0
+    return { x: i, y: running }
+  })
+  const ys = points.map((p) => p.y)
+  const lo = Math.min(0, ...ys)
+  const hi = Math.max(0, ...ys)
+  const span = hi - lo || 1
+  const W = 100
+  const H = 32
+  const px = (i: number) => (points.length === 1 ? 0 : (i / (points.length - 1)) * W)
+  const py = (y: number) => H - ((y - lo) / span) * H
+  const d = points.map((p, i) => `${i === 0 ? "M" : "L"}${px(p.x).toFixed(2)},${py(p.y).toFixed(2)}`).join(" ")
+  const zeroY = py(0)
+  const end = points[points.length - 1].y
+  const endColour = end > 0 ? "#27ae60" : end < 0 ? "#ff4757" : "var(--color-text-dim)"
+
+  return (
+    <div className="flex flex-col gap-2">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" className="w-full h-12" aria-hidden>
+        <line x1="0" y1={zeroY} x2={W} y2={zeroY} stroke="var(--glass-hair)" strokeWidth="0.5" strokeDasharray="2 2" />
+        <path d={d} fill="none" stroke={endColour} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        <circle cx={px(points.length - 1)} cy={py(end)} r="2" fill={endColour} vectorEffect="non-scaling-stroke" />
+      </svg>
+      <div className="flex flex-wrap gap-1">
+        {results.map((r, i) => (
+          <span
+            key={i}
+            title={`${r.outcome} ${r.scoreFor}-${r.scoreAgainst}`}
+            className="w-2 h-4 rounded-sm"
+            style={{
+              backgroundColor: r.outcome === "W" ? "#27ae60" : r.outcome === "L" ? "#ff4757" : "#5a6472",
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export function WrappedView({ year, month, selectedName, onSelectName }: WrappedViewProps) {
   const [matches, setMatches] = useState<Match[]>([])
   const [stats, setStats] = useState<StatRow[]>([])
+  const [kills, setKills] = useState<KillRow[]>([])
   const [players, setPlayers] = useState<PlayerRow[]>([])
   const [achievements, setAchievements] = useState<LedgerEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -266,17 +467,26 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
       const matchIds = monthMatches.map((m) => m.id)
       if (matchIds.length === 0) {
         setStats([])
+        setKills([])
         setLoading(false)
         return
       }
       const { data: statRows } = await supabase
         .from("match_stats")
         .select(
-          "player_id, match_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, time_played",
+          "player_id, match_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, time_played, team, red_kills, yellow_kills, blue_kills, dfa_kills, ydfa_kills, bs_kills, dbs_kills, blubs_kills, upcut_kills, mine_kills, turret_kills, idle_kills, tele_kills, doom_kills",
         )
+        .in("match_id", matchIds)
+      // The per-opponent matrix only exists for JSON-era scoreboards, so this is
+      // deliberately allowed to come back empty -- the duel sections hide
+      // themselves rather than inventing rivalries out of two recorded games.
+      const { data: killRows } = await supabase
+        .from("match_kills")
+        .select("match_id, killer_player_id, victim_player_id, kills")
         .in("match_id", matchIds)
       if (cancelled) return
       setStats((statRows ?? []) as StatRow[])
+      setKills((killRows ?? []) as KillRow[])
       setLoading(false)
     })
 
@@ -312,6 +522,13 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
           bestScore: null,
           friends: [],
           nemeses: [],
+          curses: [],
+          results: [],
+          byTeam: { red: { wins: 0, losses: 0 }, blue: { wins: 0, losses: 0 } },
+          killTypes: [],
+          prey: [],
+          bullies: [],
+          rivals: [],
         }
         byName.set(name, c)
       }
@@ -329,9 +546,9 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
     for (const match of matches) {
       const redWon = match.red_score > match.blue_score
       const blueWon = match.blue_score > match.red_score
-      for (const [team, opp, won, lost] of [
-        [match.red_team, match.blue_team, redWon, blueWon] as const,
-        [match.blue_team, match.red_team, blueWon, redWon] as const,
+      for (const [team, opp, won, lost, side] of [
+        [match.red_team, match.blue_team, redWon, blueWon, "red"] as const,
+        [match.blue_team, match.red_team, blueWon, redWon, "blue"] as const,
       ]) {
         for (const name of team) {
           const c = ensure(name)
@@ -339,6 +556,17 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
           if (won) c.wins++
           else if (lost) c.losses++
           else c.draws++
+          c.results.push({
+            outcome: won ? "W" : lost ? "L" : "D",
+            date: match.created_at,
+            scoreFor: side === "red" ? match.red_score : match.blue_score,
+            scoreAgainst: side === "red" ? match.blue_score : match.red_score,
+          })
+          // Which side of the map treated them better. Teams are assigned by the
+          // balancer, so this is closer to luck than skill -- but it is the kind
+          // of thing people notice and argue about.
+          if (won) c.byTeam[side].wins++
+          else if (lost) c.byTeam[side].losses++
           if (!history.has(name)) history.set(name, [])
           history.get(name)!.push(won)
 
@@ -396,6 +624,16 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
         .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games))
         .slice(0, 3)
     }
+    for (const [name, mates] of teammateTally) {
+      // Same pairs as friends, ranked the other way up. Matching the bot's
+      // =curse so the site and Discord never name different people.
+      const c = ensure(name)
+      c.curses = Array.from(mates.entries())
+        .map(([mate, rec]) => ({ name: mate, ...rec, rate: rec.losses / rec.games }))
+        .filter((r) => r.games >= PAIR_MIN_GAMES && r.losses > 0)
+        .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games))
+        .slice(0, 3)
+    }
     for (const [name, opps] of opponentTally) {
       const c = ensure(name)
       c.nemeses = Array.from(opps.entries())
@@ -430,6 +668,67 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
         const match = matchById.get(row.match_id)
         if (match) c.bestScore = { value: row.score, match }
       }
+      for (const style of KILL_STYLES) {
+        const n = (row[style.key] as number | null) || 0
+        if (!n) continue
+        const found = c.killTypes.find((k) => k.label === style.label)
+        if (found) found.value += n
+        else c.killTypes.push({ label: style.label, value: n })
+      }
+    }
+    for (const c of byName.values()) c.killTypes.sort((a, b) => b.value - a.value)
+
+    /*
+     * Prey, bullies and rivals, from the JSON kill matrix.
+     *
+     *   prey    -- you killed them most
+     *   bully   -- they killed you most
+     *   rival   -- the closest record between you, i.e. who you actually trade
+     *              with rather than who you beat or lose to
+     *
+     * Rivals are ranked by margin first and volume second, so a 9-8 outranks a
+     * 2-2: both are level, but only one of them is a rivalry.
+     */
+    const duels = new Map<string, Map<string, { for: number; against: number }>>()
+    const pair = (a: string, b: string) => {
+      let m = duels.get(a)
+      if (!m) {
+        m = new Map()
+        duels.set(a, m)
+      }
+      let rec = m.get(b)
+      if (!rec) {
+        rec = { for: 0, against: 0 }
+        m.set(b, rec)
+      }
+      return rec
+    }
+    for (const k of kills) {
+      const killer = nameById.get(k.killer_player_id)
+      const victim = nameById.get(k.victim_player_id)
+      if (!killer || !victim || killer === victim) continue
+      pair(killer, victim).for += k.kills || 0
+      pair(victim, killer).against += k.kills || 0
+    }
+    for (const [name, opps] of duels) {
+      const c = ensure(name)
+      const rows = Array.from(opps.entries()).map(([opp, rec]) => ({ name: opp, ...rec }))
+      c.prey = rows
+        .filter((r) => r.for >= DUEL_MIN_KILLS)
+        .sort((a, b) => b.for - a.for || a.against - b.against)
+        .slice(0, 3)
+      c.bullies = rows
+        .filter((r) => r.against >= DUEL_MIN_KILLS)
+        .sort((a, b) => b.against - a.against || a.for - b.for)
+        .slice(0, 3)
+      c.rivals = rows
+        .filter((r) => r.for + r.against >= DUEL_MIN_KILLS * 2)
+        .sort(
+          (a, b) =>
+            Math.abs(a.for - a.against) - Math.abs(b.for - b.against) ||
+            b.for + b.against - (a.for + a.against),
+        )
+        .slice(0, 3)
     }
 
     return byName
@@ -486,7 +785,8 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
           {MONTH_NAMES[month - 1]} {year} Wrapped
         </div>
         <div className="ml-auto flex items-center gap-2">
-          <PlayerPicker names={names} selected={selectedName} onSelect={onSelectName} />
+          {/* No player picker: the card is the reader's own month now, so a
+              dropdown of 69 names to find yourself in was a step backwards. */}
           <button
             type="button"
             onClick={copyLink}
@@ -575,7 +875,10 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
           <section className="glass-panel p-5">
             {card.hasStats ? (
               <>
-                <div className="grid grid-cols-3 sm:grid-cols-4 gap-2.5">
+                {/* Three columns at every width, not four on desktop. There are
+                    nine stats: 3x3 is a block, 4+4+1 leaves Flag hold stranded
+                    on a row of its own with three empty cells beside it. */}
+                <div className="grid grid-cols-3 gap-2.5">
                   <Stat label="Caps" value={card.captures} />
                   <Stat label="Returns" value={card.returns} />
                   <Stat label="Assists" value={card.assists} />
@@ -615,97 +918,155 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
             )}
           </section>
 
-          {(card.friends.length > 0 || card.nemeses.length > 0) && (
-            <div className="grid sm:grid-cols-2 gap-3.5">
+          {/* The month at a glance: shape of the run, and which side favoured
+              them. Two panels on one row so neither is left half-empty. */}
+          {card.results.length >= 2 && (
+            <div className="grid sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3.5">
               <section className="glass-panel p-5">
                 <div
                   className="text-[11px] font-semibold uppercase tracking-[0.16em] mb-3"
                   style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
                 >
-                  Best team-mates
+                  How the month ran
                 </div>
-                {card.friends.length === 0 ? (
-                  <p className="text-sm" style={{ color: "var(--color-text-dim)" }}>
-                    Not enough games together this month.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {card.friends.map((friend, i) => (
-                      <div
-                        key={friend.name}
-                        className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg"
-                        style={{
-                          background: "color-mix(in srgb, var(--color-background) 55%, transparent)",
-                          border: "1px solid var(--glass-hair)",
-                        }}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="text-xs font-mono w-3.5 shrink-0" style={{ color: "var(--color-text-dim)" }}>
-                            {i + 1}
-                          </span>
-                          <Heart className="w-3.5 h-3.5 shrink-0" style={{ color: "#27ae60" }} />
-                          <Link
-                            href={`/player/${playerSlug(friend.name)}`}
-                            className="text-sm font-semibold truncate hover:underline"
-                          >
-                            {friend.name}
-                          </Link>
-                        </div>
-                        <div className="text-xs shrink-0" style={{ color: "var(--color-text-dim)" }}>
-                          <b style={{ color: "#27ae60" }}>{Math.round(friend.rate * 100)}%</b>
-                          {" · "}
-                          {friend.wins}W–{friend.losses}L
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                <FormGraph results={card.results} />
               </section>
+              <section className="glass-panel p-5">
+                <div
+                  className="text-[11px] font-semibold uppercase tracking-[0.16em] mb-3"
+                  style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
+                >
+                  Red vs Blue
+                </div>
+                <div className="grid grid-cols-2 gap-2.5">
+                  {([["Red", card.byTeam.red, "#ff4757"], ["Blue", card.byTeam.blue, "#62d6e8"]] as const).map(
+                    ([label, rec, colour]) => {
+                      const games = rec.wins + rec.losses
+                      return (
+                        <div
+                          key={label}
+                          className="rounded-lg px-3 py-2.5"
+                          style={{
+                            background: "color-mix(in srgb, var(--color-background) 55%, transparent)",
+                            border: "1px solid var(--glass-hair)",
+                          }}
+                        >
+                          <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: colour }}>
+                            {label}
+                          </div>
+                          <div className="text-lg font-semibold tabular-nums">
+                            {games > 0 ? `${Math.round((rec.wins / games) * 100)}%` : "—"}
+                          </div>
+                          <div className="text-[11px] tabular-nums" style={{ color: "var(--color-text-dim)" }}>
+                            {rec.wins}W–{rec.losses}L
+                          </div>
+                        </div>
+                      )
+                    },
+                  )}
+                </div>
+              </section>
+            </div>
+          )}
 
-              <section className="glass-panel p-5">
-                <div
-                  className="text-[11px] font-semibold uppercase tracking-[0.16em] mb-3"
-                  style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
-                >
-                  Nemeses
-                </div>
-                {card.nemeses.length === 0 ? (
-                  <p className="text-sm" style={{ color: "var(--color-text-dim)" }}>
-                    No recurring opponents this month.
-                  </p>
-                ) : (
-                  <div className="space-y-2">
-                    {card.nemeses.map((nemesis, i) => (
-                      <div
-                        key={nemesis.name}
-                        className="flex items-center justify-between gap-3 px-3 py-2 rounded-lg"
-                        style={{
-                          background: "color-mix(in srgb, var(--color-background) 55%, transparent)",
-                          border: "1px solid var(--glass-hair)",
-                        }}
-                      >
-                        <div className="flex items-center gap-2.5 min-w-0">
-                          <span className="text-xs font-mono w-3.5 shrink-0" style={{ color: "var(--color-text-dim)" }}>
-                            {i + 1}
-                          </span>
-                          <Swords className="w-3.5 h-3.5 shrink-0" style={{ color: "#ff4757" }} />
-                          <Link
-                            href={`/player/${playerSlug(nemesis.name)}`}
-                            className="text-sm font-semibold truncate hover:underline"
-                          >
-                            {nemesis.name}
-                          </Link>
-                        </div>
-                        <div className="text-xs shrink-0" style={{ color: "var(--color-text-dim)" }}>
-                          <b style={{ color: "#ff4757" }}>beats you {Math.round(nemesis.rate * 100)}%</b>
-                          {" · "}
-                          {nemesis.myWins}W–{nemesis.theirWins}L
-                        </div>
-                      </div>
-                    ))}
+          {card.killTypes.length > 0 && (
+            <section className="glass-panel p-5">
+              <div
+                className="text-[11px] font-semibold uppercase tracking-[0.16em] mb-3"
+                style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
+              >
+                How they killed
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {card.killTypes.map((k) => (
+                  <div
+                    key={k.label}
+                    className="rounded-lg px-3 py-2 min-w-[84px]"
+                    style={{
+                      background: "color-mix(in srgb, var(--color-background) 55%, transparent)",
+                      border: "1px solid var(--glass-hair)",
+                    }}
+                  >
+                    <div className="text-base font-semibold tabular-nums">{k.value.toLocaleString()}</div>
+                    <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: "var(--color-text-dim)" }}>
+                      {k.label}
+                    </div>
                   </div>
-                )}
-              </section>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {(card.friends.length > 0 || card.nemeses.length > 0 || card.curses.length > 0) && (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              <PeopleCard
+                title="Best team-mates"
+                blurb="Highest win rate alongside you."
+                icon={Heart}
+                accent="#27ae60"
+                empty="Not enough games together this month."
+                rows={card.friends.map((f) => ({
+                  name: f.name,
+                  primary: `${Math.round(f.rate * 100)}%`,
+                  secondary: `${f.wins}W–${f.losses}L`,
+                }))}
+              />
+              <PeopleCard
+                title="Nemeses"
+                blurb="Beat you more than anyone else did."
+                icon={Swords}
+                accent="#ff4757"
+                empty="Nobody faced enough times this month."
+                rows={card.nemeses.map((n) => ({
+                  name: n.name,
+                  primary: `${Math.round(n.rate * 100)}%`,
+                  secondary: `${n.myWins}W–${n.theirWins}L`,
+                }))}
+              />
+              <PeopleCard
+                title="Curses"
+                blurb="You lose when you play together."
+                icon={Ghost}
+                accent="#f39c12"
+                empty="No unlucky pairings this month."
+                rows={card.curses.map((c) => ({
+                  name: c.name,
+                  primary: `${Math.round(c.rate * 100)}%`,
+                  secondary: `${c.wins}W–${c.losses}L`,
+                }))}
+              />
+            </div>
+          )}
+
+          {/* Duels need the JSON scoreboard matrix, which only exists for recent
+              matches — the row hides entirely rather than crowning a nemesis off
+              two recorded kills. */}
+          {(card.prey.length > 0 || card.bullies.length > 0 || card.rivals.length > 0) && (
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              <PeopleCard
+                title="Prey"
+                blurb="You killed them most."
+                icon={Target}
+                accent="#27ae60"
+                empty="No kills recorded yet."
+                rows={card.prey.map((d) => ({ name: d.name, primary: `${d.for}`, secondary: `${d.against} back` }))}
+              />
+              <PeopleCard
+                title="Rivals"
+                blurb="Closest record — the ones you actually trade with."
+                icon={Crosshair}
+                accent="var(--color-primary)"
+                empty="No close duels yet."
+                rows={card.rivals.map((d) => ({ name: d.name, primary: `${d.for}–${d.against}`, secondary: "" }))}
+              />
+              <PeopleCard
+                title="Bullies"
+                blurb="They killed you most."
+                icon={Skull}
+                accent="#ff4757"
+                empty="Nobody has your number yet."
+                rows={card.bullies.map((d) => ({ name: d.name, primary: `${d.against}`, secondary: `${d.for} back` }))}
+              />
             </div>
           )}
 
