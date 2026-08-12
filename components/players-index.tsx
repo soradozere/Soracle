@@ -19,10 +19,8 @@ export interface BoardRow {
   avatarUrl: string | null
   score: number
   unlocks: number
-  best: Rarity | null
-  /** Rarest achievement held — a career stat, kept for the row's accent colour. */
-  title: string | null
-  /** The title the player has actually equipped on their profile, if any. */
+  /** The title the player has actually equipped on their profile, if any.
+   *  Drives the row's accent colour as well as the Title column. */
   equippedTitle: { title: string; rarity: Rarity } | null
   rarityCounts: Record<Rarity, number>
   form: ("W" | "L" | "D")[]
@@ -66,14 +64,25 @@ const SORTS: { key: SortKey; label: string }[] = [
   { key: "name", label: "Name" },
 ]
 
-const accentFor = (r: Rarity | null) => (r ? RARITY_META[r].color : "#3d4855")
+// A row is coloured by the title the player has CHOSEN to wear, not by the
+// rarest crest they happen to own. The two came apart often enough to be
+// confusing: the Title column already renders the equipped title in its own
+// rarity colour, so a row accented from the rarest achievement put two
+// different colours on the same person. Someone wearing a title they earned
+// three seasons ago should read in that title's colour.
+//
+// No title equipped means no colour rather than a fall back to the rarest
+// crest: the accent means one thing this way, and an untitled row showing "—"
+// in a neutral grey is honest about there being nothing to show.
+const accentFor = (row: BoardRow) =>
+  row.equippedTitle ? RARITY_META[row.equippedTitle.rarity].color : "#3d4855"
 
 // Rank 1-3 get medal colours; everyone else stays quiet so the top of the board
 // reads instantly without turning the whole list into a rainbow.
 const MEDALS = ["#f5c542", "#c7d0da", "#cd7f32"]
 
 function Avatar({ row }: { row: BoardRow }) {
-  const accent = accentFor(row.best)
+  const accent = accentFor(row)
   // Avatars are Discord CDN proxy links, which are signed and do expire — a dead
   // one must degrade to the monogram rather than leaving a broken-image box.
   const [failed, setFailed] = useState(false)
@@ -100,8 +109,9 @@ function Avatar({ row }: { row: BoardRow }) {
       />
     )
   }
-  // Monogram fallback, tinted by the player's rarest crest so the board still
-  // has a colour signal before anyone uploads a picture.
+  // Monogram fallback, tinted by the same equipped-title colour as the rest of
+  // the row so the board still has a colour signal before anyone uploads a
+  // picture.
   return (
     <div
       className="w-11 h-11 rounded-full shrink-0 flex items-center justify-center font-bold text-base"
@@ -296,7 +306,7 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
       <ul className="pl-list">
         {shown.map((row) => {
           const rank = rankById.get(row.id)!
-          const accent = accentFor(row.best)
+          const accent = accentFor(row)
           return (
             <li key={row.id}>
               <Link

@@ -30,7 +30,10 @@ const GAMETYPES: Gametype[] = ["CTF", "FFA", "TeamFFA"]
 // Every demo uploaded so far is CTF -- FFA/TeamFFA stay valid choices at
 // upload (in case that changes), but a filter row offering two buttons that
 // have never matched anything is just clutter on the library page itself.
-const GAMETYPE_FILTERS: (Gametype | "all")[] = ["all", "CTF"]
+// No gametype filter on the browse toolbar. The library is CTF in practice, so
+// the control was a permanent "All | CTF" pair where both choices showed the
+// same demos. Uploads still record a gametype (see GAMETYPES above) and the
+// badge still renders it, so filtering can come back if FFA clips ever arrive.
 
 function GametypeBadge({ gametype }: { gametype: Gametype }) {
   const tint =
@@ -398,7 +401,6 @@ export function DemoLibrary({
   isAdmin: boolean
 }) {
   const [query, setQuery] = useState("")
-  const [gametype, setGametype] = useState<Gametype | "all">("all")
   const [month, setMonth] = useState("all")
   const [sort, setSort] = useState<SortKey>("recent")
   const [tag, setTag] = useState("all")
@@ -419,7 +421,6 @@ export function DemoLibrary({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     const list = demos.filter((d) => {
-      if (gametype !== "all" && d.gametype !== gametype) return false
       if (month !== "all" && monthKeyOf(d) !== month) return false
       if (tag !== "all" && !d.tags.includes(tag as never)) return false
       // A never-rated demo (avgRating null) can't clear any floor above 0 --
@@ -458,7 +459,7 @@ export function DemoLibrary({
      */
     if (!q) return sorted
     return sorted.sort((a, b) => matchRank(b, q) - matchRank(a, q))
-  }, [demos, query, gametype, month, sort, tag, minRating])
+  }, [demos, query, month, sort, tag, minRating])
 
   return (
     <div>
@@ -470,16 +471,6 @@ export function DemoLibrary({
             onChange={(e) => setQuery(e.target.value)}
             className="w-64"
           />
-          {GAMETYPE_FILTERS.map((g) => (
-            <Button
-              key={g}
-              size="sm"
-              variant={gametype === g ? "default" : "outline"}
-              onClick={() => setGametype(g)}
-            >
-              {g === "all" ? "All" : g}
-            </Button>
-          ))}
           <Select value={month} onValueChange={setMonth}>
             <SelectTrigger className="w-40">
               <SelectValue />
