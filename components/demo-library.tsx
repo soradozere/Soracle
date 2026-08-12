@@ -321,7 +321,13 @@ function UploadDialog({
       {/* Stage 2: the bare player. No title, reactions or comments -- this is
           "is this the right recording", not a demo page. */}
       <Dialog open={stage === "preview"} onOpenChange={(o) => !o && reset()}>
-        <DialogContent className="max-w-5xl">
+        {/* sm:max-w-6xl, not max-w-5xl: DialogContent's own base class is
+            sm:max-w-lg, and a responsive variant beats an unprefixed utility at
+            that breakpoint -- so a plain max-w-* here was silently ignored and
+            the dialog stayed 512px wide. Width matters more here than on a
+            normal dialog: the engine sizes its framebuffer once, to whatever
+            the canvas measures at boot, so a wider box is a sharper picture. */}
+        <DialogContent className="sm:max-w-6xl">
           <DialogHeader className="min-w-0">
             {/* A .dm_15 name is one long unbreakable token -- underscores are
                 not break opportunities -- so without these it sets a min-content
@@ -329,7 +335,9 @@ function UploadDialog({
                 included) inflates to match and spills past the border. */}
             <DialogTitle className="min-w-0 break-words">{chosenFile?.name}</DialogTitle>
             <DialogDescription>
-              Playing from your machine. Nothing is uploaded until you publish.
+              Playing from your machine. Nothing is uploaded until you publish. The preview renders at the size of
+              this window, so it can look a little softer than the real thing — publishing does not change the
+              recording, and it plays at full resolution on its own page.
             </DialogDescription>
           </DialogHeader>
           {/* aspect-video, not just a border: the viewer's own root is
