@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Eye, Star } from "lucide-react"
+import { Eye } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -25,6 +25,7 @@ import { DEMO_TAGS, demoTagClasses, demoTagLabel } from "@/lib/demo-tags"
 import { matchRank } from "@/lib/demo-search"
 import { beginDemoUpload, finishDemoUpload } from "@/app/(main)/demos/actions"
 import { cn, formatDuration } from "@/lib/utils"
+import { ReactionSummary } from "@/components/demo-reaction-bar"
 import dynamic from "next/dynamic"
 
 const GAMETYPES: Gametype[] = ["CTF", "FFA", "TeamFFA"]
@@ -61,16 +62,6 @@ function LeadBadge({ demo }: { demo: DemoListItem }) {
   return <Badge className="border bg-sky-500/15 text-sky-400 border-sky-500/30">{demo.protagonist.name}</Badge>
 }
 
-function RatingStars({ value, count }: { value: number | null; count: number }) {
-  if (value === null) return <span className="text-xs text-muted-foreground">Not yet rated</span>
-  return (
-    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-      <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
-      {value.toFixed(1)} <span className="opacity-70">({count})</span>
-    </span>
-  )
-}
-
 // Exported so playlist pages show demos exactly as the library does -- a card
 // that looked subtly different there would read as a different kind of thing.
 export function DemoCard({ demo }: { demo: DemoListItem }) {
@@ -99,7 +90,7 @@ export function DemoCard({ demo }: { demo: DemoListItem }) {
               {demo.durationMs != null && (
                 <span className="text-xs tabular-nums text-muted-foreground">{formatDuration(demo.durationMs)}</span>
               )}
-              <RatingStars value={demo.avgRating} count={demo.ratingCount} />
+              <ReactionSummary counts={demo.reactions} total={demo.reactionTotal} />
             </div>
           </div>
           <div className="flex items-start justify-between gap-3">
@@ -435,12 +426,11 @@ function UploadDialog({
 
 const SORTS = [
   { id: "recent", label: "Date uploaded" },
-  { id: "rating", label: "Rating" },
+  { id: "reacts", label: "Most reacts" },
   { id: "views", label: "Views" },
 ] as const
 type SortKey = (typeof SORTS)[number]["id"]
 
-const RATING_FLOORS = [1, 2, 3, 4, 5] as const
 
 // Grouping key for "which month was this actually played" -- recordedAt when
 // it's known, otherwise the upload date is the closest thing to it. Behind a
@@ -470,7 +460,6 @@ export function DemoLibrary({
   const [month, setMonth] = useState("all")
   const [sort, setSort] = useState<SortKey>("recent")
   const [tag, setTag] = useState("all")
-  const [minRating, setMinRating] = useState(0)
 
   const months = useMemo(() => {
     const keys = [...new Set(demos.map(monthKeyOf))]
@@ -489,9 +478,6 @@ export function DemoLibrary({
     const list = demos.filter((d) => {
       if (month !== "all" && monthKeyOf(d) !== month) return false
       if (tag !== "all" && !d.tags.includes(tag as never)) return false
-      // A never-rated demo (avgRating null) can't clear any floor above 0 --
-      // that's the right call, not an edge case to special-case around.
-      if (minRating > 0 && (d.avgRating === null || d.avgRating < minRating)) return false
       if (!q) return true
       return (
         d.title.toLowerCase().includes(q) ||
@@ -501,8 +487,8 @@ export function DemoLibrary({
       )
     })
     const sorted = [...list]
-    if (sort === "rating") {
-      sorted.sort((a, b) => (b.avgRating ?? -1) - (a.avgRating ?? -1))
+    if (sort === "reacts") {
+      sorted.sort((a, b) => b.reactionTotal - a.reactionTotal)
     } else if (sort === "views") {
       sorted.sort((a, b) => b.viewCount - a.viewCount)
     } else {
@@ -525,7 +511,7 @@ export function DemoLibrary({
      */
     if (!q) return sorted
     return sorted.sort((a, b) => matchRank(b, q) - matchRank(a, q))
-  }, [demos, query, month, sort, tag, minRating])
+  }, [demos, query, month, sort, tag])
 
   return (
     <div>
@@ -565,19 +551,6 @@ export function DemoLibrary({
               </SelectContent>
             </Select>
           )}
-          <Select value={String(minRating)} onValueChange={(v) => setMinRating(Number(v))}>
-            <SelectTrigger className="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="0">All ratings</SelectItem>
-              {RATING_FLOORS.map((n) => (
-                <SelectItem key={n} value={String(n)}>
-                  {n === 5 ? "5 stars" : `${n}+ stars`}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
             <SelectTrigger className="w-44">
               <SelectValue />
