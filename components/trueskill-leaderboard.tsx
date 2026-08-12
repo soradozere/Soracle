@@ -15,7 +15,8 @@ import {
 import { TS, type Rating, rateMatch, conservativeRating } from "@/lib/trueskill"
 import { RankMedal } from "@/components/reports-tab"
 
-// Hidden, admin-only TrueSkill board. Like the ELO board, it's a running rating replayed
+// The TrueSkill board. Public since the leaderboard reorganisation; only its rank
+// suggestions stay admin-only. Like the ELO board, it's a running rating replayed
 // in chronological order on every load — nothing is persisted, it's derived fresh.
 //
 // Each player is a Gaussian N(μ, σ): μ is estimated skill, σ the uncertainty. The board
@@ -46,6 +47,8 @@ const MONTH_NAMES = [
 interface TrueSkillLeaderboardProps {
   year: number
   month: number
+  /** Show the rank suggestions. See the same prop on EloLeaderboard. */
+  isAdmin?: boolean
 }
 
 interface Match {
@@ -87,7 +90,7 @@ function kdRatio(kills: number, deaths: number): string {
   return (kills / deaths).toFixed(2)
 }
 
-export function TrueSkillLeaderboard({ year, month }: TrueSkillLeaderboardProps) {
+export function TrueSkillLeaderboard({ year, month, isAdmin = false }: TrueSkillLeaderboardProps) {
   const [scope, setScope] = useState<"alltime" | "month">("alltime")
   const [allTimeBoard, setAllTimeBoard] = useState<BoardRow[]>([])
   const [monthBoard, setMonthBoard] = useState<BoardRow[]>([])
@@ -374,8 +377,8 @@ export function TrueSkillLeaderboard({ year, month }: TrueSkillLeaderboardProps)
           <span className="inline-block mr-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30 align-middle">
             Experimental
           </span>
-          Hidden TrueSkill — Gaussian skill rating (μ ± σ), replayed across all matches. Admin only; not
-          currently wired into team balancing.
+          A Gaussian skill rating (μ ± σ) replayed across every match, which tracks how confident it is as
+          well as how good you are. Not wired into team balancing — the balancer uses tiers.
         </p>
         <div className="flex items-center gap-2">
           <Dialog>
@@ -579,7 +582,8 @@ export function TrueSkillLeaderboard({ year, month }: TrueSkillLeaderboardProps)
         )}
       </div>
 
-      {/* TrueSkill Rank Suggestions */}
+      {/* TrueSkill Rank Suggestions — admin-only, as on the ELO board. */}
+      {isAdmin && (
       <div>
         <h3 className="text-lg font-bold text-[var(--color-primary)] mb-1 flex items-center gap-2">
           <TrendingUp className="w-5 h-5" />
@@ -663,6 +667,7 @@ export function TrueSkillLeaderboard({ year, month }: TrueSkillLeaderboardProps)
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }

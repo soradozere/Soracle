@@ -357,7 +357,15 @@ export function ReportsTab() {
   const [streakRecord, setStreakRecord] = useState<StreakRecord | null>(null)
   const [players, setPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
-  const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "elo" | "trueskill">("stats")
+  /*
+   * Two levels now. The top rail picks the page -- Monthly stats or the
+   * Leaderboard -- and the Leaderboard picks which board it is showing. ELO and
+   * TrueSkill used to sit at the top level beside Monthly, which read as four
+   * unrelated pages when three of them are the same question answered by
+   * different maths.
+   */
+  const [currentView, setCurrentView] = useState<"stats" | "leaderboard">("stats")
+  const [boardView, setBoardView] = useState<"normal" | "elo" | "trueskill">("normal")
   const [isAdmin, setIsAdmin] = useState(false)
   // The "Under the hood" band: four working views of the same month, sharing one
   // panel rather than stacking four full-width slabs down the page.
@@ -404,19 +412,16 @@ export function ReportsTab() {
     })
   }, [])
 
-  // Visibility logic for leaderboard
   const isCurrentMonth = selectedYear === now.getUTCFullYear() && selectedMonth === now.getUTCMonth() + 1
-  const showLeaderboard = !isCurrentMonth || isAdmin
 
-  // Force view back to stats if the selected view becomes unavailable to this user.
-  useEffect(() => {
-    if (!showLeaderboard && currentView === "leaderboard") {
-      setCurrentView("stats")
-    }
-    if (!isAdmin && (currentView === "elo" || currentView === "trueskill")) {
-      setCurrentView("stats")
-    }
-  }, [showLeaderboard, isAdmin, currentView])
+  /*
+   * Every board is public. The month's own leaderboard used to be admin-only
+   * until the month closed, and ELO and TrueSkill were admin-only outright --
+   * so the people the ratings are about were the only ones who could not see
+   * them. Nothing here is private; it is all derived from matches everybody
+   * played. No view can now become unavailable mid-session, so the effect that
+   * used to force the selection back to Monthly is gone with it.
+   */
 
   const canGoNext = !(selectedYear === now.getUTCFullYear() && selectedMonth === now.getUTCMonth() + 1)
 
@@ -927,28 +932,42 @@ export function ReportsTab() {
           onSelect={(key) => setCurrentView(key as typeof currentView)}
           segments={[
             { key: "stats", label: "Monthly" },
-            ...(showLeaderboard ? [{ key: "leaderboard", label: "Leaderboard" }] : []),
-            ...(isAdmin ? [{ key: "elo", label: "ELO" }] : []),
-            ...(isAdmin ? [{ key: "trueskill", label: "TrueSkill" }] : []),
+            { key: "leaderboard", label: "Leaderboard" },
           ]}
         />
       </div>
 
-      {/* Admin preview notice */}
-      {isAdmin && isCurrentMonth && currentView === "leaderboard" && (
-        <div className="text-center text-sm text-[var(--color-text-dim)] italic">
-          Admin preview — this leaderboard will be published on {MONTH_NAMES[selectedMonth % 12]} 1st
+      {currentView === "leaderboard" && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Which board, not which page. Dense, and left of the frame, so it
+              reads as a setting on the leaderboard rather than a second nav. */}
+          <SegmentedRail
+            dense
+            aria-label="Leaderboard type"
+            activeKey={boardView}
+            onSelect={(key) => setBoardView(key as typeof boardView)}
+            segments={[
+              { key: "normal", label: "Wins", hint: "Won and lost, this month" },
+              { key: "elo", label: "ELO", hint: "Running rating, replayed from every match" },
+              { key: "trueskill", label: "TrueSkill", hint: "Rating with a confidence interval" },
+            ]}
+          />
+          {isCurrentMonth && boardView === "normal" && (
+            <p className="text-sm italic text-[var(--color-text-dim)]">
+              {MONTH_NAMES[selectedMonth - 1]} is still being played — this board moves with it.
+            </p>
+          )}
         </div>
       )}
 
-      {currentView === "elo" ? (
+      {currentView === "leaderboard" && boardView === "elo" ? (
         // ELO is a running, all-time rating — render it regardless of the selected month.
         // The month selector above drives the ELO view's own All-time / Monthly toggle.
-        <EloLeaderboard year={selectedYear} month={selectedMonth} />
-      ) : currentView === "trueskill" ? (
+        <EloLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} />
+      ) : currentView === "leaderboard" && boardView === "trueskill" ? (
         // TrueSkill is likewise a running rating replayed fresh; the month selector drives
         // its own All-time / Monthly toggle.
-        <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} />
+        <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} />
       ) : totalMatches === 0 ? (
         <div className="text-center py-12 text-[var(--color-text-dim)]">
           <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-50" />

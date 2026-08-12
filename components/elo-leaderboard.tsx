@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/dialog"
 import { RankMedal } from "@/components/reports-tab"
 
-// Hidden, admin-only ELO. ELO is a running rating, replayed in chronological order
+// The ELO board. Public since the leaderboard reorganisation; only its rank
+// suggestions stay admin-only. ELO is a running rating, replayed in chronological order
 // every load — nothing is persisted, it's derived fresh.
 //
 // There are TWO ratings, matching the scope toggle:
@@ -62,6 +63,13 @@ const MONTH_NAMES = [
 interface EloLeaderboardProps {
   year: number
   month: number
+  /**
+   * Show the rank suggestions. The board itself is public, but the suggestions
+   * name individual players as over- or under-ranked and label them Promote or
+   * Demote -- a working note for whoever sets tiers, not a verdict to publish
+   * about somebody. Labels only; there is no action here either way.
+   */
+  isAdmin?: boolean
 }
 
 interface Match {
@@ -101,7 +109,7 @@ function kdRatio(kills: number, deaths: number): string {
   return (kills / deaths).toFixed(2)
 }
 
-export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
+export function EloLeaderboard({ year, month, isAdmin = false }: EloLeaderboardProps) {
   const [scope, setScope] = useState<"alltime" | "month">("alltime")
   const [allTimeBoard, setAllTimeBoard] = useState<BoardRow[]>([])
   const [monthBoard, setMonthBoard] = useState<BoardRow[]>([])
@@ -408,7 +416,8 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-[var(--color-text-dim)]">
-          Hidden ELO — running rating across all matches, seeded from tier. Admin only.
+          A running rating across every match ever played, seeded from tier. It does not decide teams —
+          the balancer uses tiers — so read it as a second opinion on where somebody sits.
         </p>
         <div className="flex items-center gap-2">
           <Dialog>
@@ -636,8 +645,9 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
       </div>
 
       {/* ELO Rank Suggestions — all-time uses the tier-anchored rating; monthly flags
-          who's over/under-ranked based on this month's form. */}
-      {(
+          who's over/under-ranked based on this month's form. Admin-only: see the
+          isAdmin prop. */}
+      {isAdmin && (
         <div>
           <h3 className="text-lg font-bold text-[var(--color-primary)] mb-1 flex items-center gap-2">
             <TrendingUp className="w-5 h-5" />
