@@ -146,8 +146,14 @@ function gammaFilterFor(gamma: number): string {
 }
 
 interface DemoViewerProps {
-  /** URL of the .dm_15 to play. */
+  /** URL of the .dm_15 to play. May be a blob: URL for a local preview. */
   demoUrl: string
+  /**
+   * Name to give the demo inside the engine's filesystem. Only needed when
+   * demoUrl carries no usable filename, which is the case for the blob: URL a
+   * pre-upload preview plays from.
+   */
+  demoFileName?: string
   /**
    * Known length in milliseconds. The format states no duration, so without
    * this the scrubber can only span what has been watched so far -- which on a
@@ -221,6 +227,7 @@ interface DemoViewerProps {
 
 export function DemoViewer({
   demoUrl,
+  demoFileName,
   durationMs = 0,
   engineBaseUrl,
   followName,
@@ -693,10 +700,14 @@ export function DemoViewer({
         // Claimed before the load starts, so the demo-swap effect below can
         // tell "already loading this one" from "the route changed".
         loadedUrlRef.current = demoUrl
-        return engine.loadDemo(demoUrl, (f) => {
-          setStatus("Loading demo…")
-          setProgress(f)
-        })
+        return engine.loadDemo(
+          demoUrl,
+          (f) => {
+            setStatus("Loading demo…")
+            setProgress(f)
+          },
+          demoFileName,
+        )
       })
       .then(() => {
         if (cancelled) return
@@ -767,10 +778,14 @@ export function DemoViewer({
     setStatus("Loading demo…")
 
     engine
-      .loadDemo(demoUrl, (f) => {
-        setStatus("Loading demo…")
-        setProgress(f)
-      })
+      .loadDemo(
+        demoUrl,
+        (f) => {
+          setStatus("Loading demo…")
+          setProgress(f)
+        },
+        demoFileName,
+      )
       .then(() => {
         if (cancelled) return
         setStatus(null)
@@ -794,7 +809,7 @@ export function DemoViewer({
     return () => {
       cancelled = true
     }
-  }, [demoUrl, ready, durationMs, applyDefaultFollow])
+  }, [demoUrl, demoFileName, ready, durationMs, applyDefaultFollow])
 
   // ---- poll engine state ---------------------------------------------------
 

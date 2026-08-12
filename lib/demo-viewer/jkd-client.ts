@@ -845,7 +845,18 @@ export class JkdEngine {
    * The engine reads from its own in-memory filesystem, so the bytes have to be
    * written there first; it cannot stream from a URL itself.
    */
-  async loadDemo(url: string, onProgress?: (fraction: number) => void): Promise<void> {
+  async loadDemo(
+    url: string,
+    onProgress?: (fraction: number) => void,
+    /**
+     * What to call the demo inside the engine's filesystem. Normally derived
+     * from the URL, which is right for an R2 link ending in the real filename.
+     * A local pre-upload preview loads from a blob: URL, whose path is a UUID
+     * with no extension -- pass the File's own name so the engine still has
+     * something it can reopen (see the seek note below).
+     */
+    fileNameOverride?: string,
+  ): Promise<void> {
     const res = await fetch(url)
     if (!res.ok) throw new Error(`Could not fetch demo (${res.status})`)
 
@@ -876,7 +887,8 @@ export class JkdEngine {
 
     // Keep the original filename on disk: the engine reopens a demo by name to
     // seek backwards, so a name it cannot find again would break seeking.
-    const file = decodeURIComponent(url.split("/").pop()?.split("?")[0] || "demo.dm_15")
+    const file =
+      fileNameOverride || decodeURIComponent(url.split("/").pop()?.split("?")[0] || "demo.dm_15")
     try {
       ;(window.Module as unknown as { FS: { mkdir: (p: string) => void } }).FS.mkdir("/base/demos")
     } catch {

@@ -1,9 +1,9 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Star } from "lucide-react"
+import { Eye, Star } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -25,15 +25,22 @@ import { DEMO_TAGS, demoTagClasses, demoTagLabel } from "@/lib/demo-tags"
 import { matchRank } from "@/lib/demo-search"
 import { beginDemoUpload, finishDemoUpload } from "@/app/(main)/demos/actions"
 import { cn, formatDuration } from "@/lib/utils"
+import dynamic from "next/dynamic"
 
 const GAMETYPES: Gametype[] = ["CTF", "FFA", "TeamFFA"]
-// Every demo uploaded so far is CTF -- FFA/TeamFFA stay valid choices at
-// upload (in case that changes), but a filter row offering two buttons that
-// have never matched anything is just clutter on the library page itself.
-// No gametype filter on the browse toolbar. The library is CTF in practice, so
-// the control was a permanent "All | CTF" pair where both choices showed the
-// same demos. Uploads still record a gametype (see GAMETYPES above) and the
-// badge still renders it, so filtering can come back if FFA clips ever arrive.
+// There is deliberately no gametype filter on the browse toolbar. Every demo
+// uploaded so far is CTF, so the control was a permanent "All | CTF" pair where
+// both choices showed the same demos. Uploads still record a gametype (the
+// choices above) and the card still badges it, so a filter can come back the
+// day FFA clips actually arrive.
+
+// The viewer boots a WASM engine and pulls ~120MB of game assets, so it must
+// never be part of the library page's bundle -- it is loaded only when someone
+// actually opens the pre-upload preview.
+const DemoViewer = dynamic(() => import("@/components/demo-viewer").then((m) => m.DemoViewer), {
+  ssr: false,
+  loading: () => <p className="p-6 text-sm text-muted-foreground">Starting the viewer…</p>,
+})
 
 function GametypeBadge({ gametype }: { gametype: Gametype }) {
   const tint =
@@ -166,6 +173,19 @@ function UploadDialog({
   // -1 when no file transfer is running; the byte-level progress of the PUT
   // otherwise. Separate from `pending`, which also covers the metadata save.
   const [uploadPct, setUploadPct] = useState(-1)
+  // The file the user has picked, kept so it can be previewed before anything
+  // is uploaded. The object URL is derived from it and revoked on the way out,
+  // since each createObjectURL pins the whole file in memory until it is.
+  const [chosenFile, setChosenFile] = useState<File | null>(null)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const previewUrl = useMemo(
+    () => (chosenFile && previewOpen ? URL.createObjectURL(chosenFile) : null),
+    [chosenFile, previewOpen],
+  )
+  useEffect(() => {
+    if (!previewUrl) return
+    return () => URL.revokeObjectURL(previewUrl)
+  }, [previewUrl])
 
   const visiblePlayers = players.filter((p) => p.name.toLowerCase().includes(playerFilter.toLowerCase()))
 
@@ -283,7 +303,30 @@ function UploadDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="file">Demo file (.dm_15)</Label>
-            <Input id="file" name="file" type="file" accept=".dm_15" required />
+            <Input
+              id="file"
+              name="file"
+              type="file"
+              accept=".dm_15"
+              required
+              onChange={(e) => setChosenFile(e.target.files?.[0] ?? null)}
+            />
+            {/* Watch it before it exists anywhere but this machine. The engine
+                runs in this page and loads over a plain fetch, so a blob: URL
+                plays exactly like the R2 one would -- nothing is uploaded, no
+                row is written, and picking a different file just replaces it. */}
+            {chosenFile && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-full"
+                onClick={() => setPreviewOpen(true)}
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                Preview before publishing
+              </Button>
+            )}
             {!isAdmin && (
               <p className="text-xs text-muted-foreground">
                 Up to 5MB — a single game or highlight reel. Ask an admin to publish anything longer.
@@ -363,6 +406,29 @@ function UploadDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+
+      {/* Nested inside the upload dialog so closing the preview returns to the
+          half-filled form rather than throwing the metadata away. */}
+      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>Preview — {chosenFile?.name}</DialogTitle>
+            <DialogDescription>
+              Playing from this machine. Nothing has been uploaded yet; close this and publish when it looks right.
+            </DialogDescription>
+          </DialogHeader>
+          {previewUrl && (
+            <div className="overflow-hidden rounded-md border">
+              <DemoViewer demoUrl={previewUrl} demoFileName={chosenFile?.name} />
+            </div>
+          )}
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setPreviewOpen(false)}>
+              Back to details
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Dialog>
   )
 }
