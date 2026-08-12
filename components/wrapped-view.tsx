@@ -6,6 +6,7 @@ import { Check, ChevronsUpDown, Crosshair, Ghost, Heart, Link2, Skull, Sparkles,
 import { createClient } from "@/lib/supabase/client"
 import { getAchievementsEarnedInMonth } from "@/app/admin/actions"
 import { Emblem } from "@/components/emblem"
+import { tallyWins } from "@/components/wins-leaderboard"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useToast } from "@/hooks/use-toast"
@@ -185,9 +186,12 @@ const KILL_STYLES: { key: keyof StatRow; label: string }[] = [
   { key: "blue_kills", label: "Blue" },
   { key: "dfa_kills", label: "DFA" },
   { key: "ydfa_kills", label: "YDFA" },
-  { key: "bs_kills", label: "Backstab" },
+  // Names as players use them, which do not follow the column names: bs_kills
+  // is a BACKSLASH, and a backstab is the blue one (blubs). DBS is the Double
+  // Backhanded Slash, not a variant of either.
+  { key: "bs_kills", label: "Backslash" },
   { key: "dbs_kills", label: "DBS" },
-  { key: "blubs_kills", label: "BluBS" },
+  { key: "blubs_kills", label: "Backstab" },
   { key: "upcut_kills", label: "Upcut" },
   { key: "mine_kills", label: "Mine" },
   { key: "turret_kills", label: "Turret" },
@@ -416,12 +420,18 @@ function FormGraph({ results }: { results: Result[] }) {
         <path d={d} fill="none" stroke={endColour} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         <circle cx={px(points.length - 1)} cy={py(end)} r="2" fill={endColour} vectorEffect="non-scaling-stroke" />
       </svg>
-      <div className="flex flex-wrap gap-1">
+      {/* The pips stretch to the same width as the line above them. Fixed-width
+          pips left the strip ending short of the graph, so the last game sat
+          under empty axis and the two rows read as unrelated. */}
+      <div className="flex gap-1">
         {results.map((r, i) => (
           <span
             key={i}
-            title={`${r.outcome} ${r.scoreFor}-${r.scoreAgainst}`}
-            className="w-2 h-4 rounded-sm"
+            title={`${new Date(r.date).toLocaleDateString(undefined, {
+              day: "numeric",
+              month: "short",
+            })} — ${r.outcome === "W" ? "Won" : r.outcome === "L" ? "Lost" : "Drew"} ${r.scoreFor}-${r.scoreAgainst}`}
+            className="flex-1 min-w-[3px] h-4 rounded-sm"
             style={{
               backgroundColor: r.outcome === "W" ? "#27ae60" : r.outcome === "L" ? "#ff4757" : "#5a6472",
             }}
@@ -747,6 +757,22 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
     }
   }, [loading, selectedName, names, onSelectName])
 
+  /*
+   * Where they finished on the month's Wins board.
+   *
+   * Uses the same tally and the same 30%-of-matches bar the Leaderboard tab
+   * uses, rather than a second ranking of its own -- two definitions of "you
+   * came third" would eventually disagree, and the one on your own recap is the
+   * one you would screenshot.
+   */
+  const finish = useMemo(() => {
+    if (!selectedName || matches.length === 0) return null
+    const min = Math.ceil(matches.length * 0.3)
+    const board = tallyWins(matches, min)
+    const at = board.findIndex((r) => r.name === selectedName)
+    return at === -1 ? { qualified: false as const, min } : { qualified: true as const, place: at + 1, of: board.length }
+  }, [selectedName, matches])
+
   const card = selectedName ? cards.get(selectedName) ?? null : null
   const cardAchievements = selectedName ? achievements.filter((a) => a.playerName === selectedName) : []
 
@@ -856,6 +882,27 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
                 </span>
                 <b className="text-base font-semibold tabular-nums">{card.played}</b>
               </div>
+              {finish && (
+                <div className="flex flex-col gap-0.5">
+                  <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: "var(--color-text-dim)" }}>
+                    Leaderboard
+                  </span>
+                  <b className="text-base font-semibold tabular-nums">
+                    {finish.qualified ? (
+                      <>
+                        #{finish.place}
+                        <small className="text-[11px] font-normal ml-1" style={{ color: "var(--color-text-dim)" }}>
+                          of {finish.of}
+                        </small>
+                      </>
+                    ) : (
+                      <small className="text-[11px] font-normal" style={{ color: "var(--color-text-dim)" }}>
+                        Under {finish.min} games
+                      </small>
+                    )}
+                  </b>
+                </div>
+              )}
               {card.streak > 1 && (
                 <div className="flex flex-col gap-0.5">
                   <span className="text-[10px] uppercase tracking-[0.13em]" style={{ color: "var(--color-text-dim)" }}>
@@ -892,6 +939,41 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
                 <p className="mt-3 text-[11px]" style={{ color: "var(--color-text-dim)" }}>
                   Scoreboard stats recorded for {card.statsMatches} of {card.played} matches this month.
                 </p>
+                {/* Folded into the same panel as the headline stats rather than
+                    given a card of its own: it is the same scoreboard, read a
+                    level finer, and a second panel for it left both looking
+                    thin. Smaller boxes so a dozen styles fit without the block
+                    competing with the nine numbers above it. */}
+                {card.killTypes.length > 0 && (
+                  <div className="mt-4 pt-4" style={{ borderTop: "1px solid var(--glass-hair)" }}>
+                    <div
+                      className="text-[11px] font-semibold uppercase tracking-[0.16em] mb-2.5"
+                      style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
+                    >
+                      How you killed
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {card.killTypes.map((k) => (
+                        <div
+                          key={k.label}
+                          className="rounded-md px-2 py-1 flex items-baseline gap-1.5"
+                          style={{
+                            background: "color-mix(in srgb, var(--color-background) 55%, transparent)",
+                            border: "1px solid var(--glass-hair)",
+                          }}
+                        >
+                          <span className="text-sm font-semibold tabular-nums">{k.value.toLocaleString()}</span>
+                          <span
+                            className="text-[10px] uppercase tracking-[0.1em]"
+                            style={{ color: "var(--color-text-dim)" }}
+                          >
+                            {k.label}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 {card.bestScore && (
                   <div className="mt-4 pt-4 flex items-center gap-3" style={{ borderTop: "1px solid var(--glass-hair)" }}>
                     <Trophy className="w-4 h-4 shrink-0" style={{ color: "#ffd700" }} />
@@ -967,34 +1049,6 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
                 </div>
               </section>
             </div>
-          )}
-
-          {card.killTypes.length > 0 && (
-            <section className="glass-panel p-5">
-              <div
-                className="text-[11px] font-semibold uppercase tracking-[0.16em] mb-3"
-                style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
-              >
-                How they killed
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {card.killTypes.map((k) => (
-                  <div
-                    key={k.label}
-                    className="rounded-lg px-3 py-2 min-w-[84px]"
-                    style={{
-                      background: "color-mix(in srgb, var(--color-background) 55%, transparent)",
-                      border: "1px solid var(--glass-hair)",
-                    }}
-                  >
-                    <div className="text-base font-semibold tabular-nums">{k.value.toLocaleString()}</div>
-                    <div className="text-[10px] uppercase tracking-[0.13em]" style={{ color: "var(--color-text-dim)" }}>
-                      {k.label}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </section>
           )}
 
           {(card.friends.length > 0 || card.nemeses.length > 0 || card.curses.length > 0) && (

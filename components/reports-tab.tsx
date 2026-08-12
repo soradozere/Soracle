@@ -970,7 +970,14 @@ export function ReportsTab() {
               Log in
             </Link>
           </div>
-        ) : me === null ? null : (
+        ) : me === null ? null : isCurrentMonth ? (
+          // A month still being played has nothing to wrap up: the record, the
+          // finish position and the "best of" all move until it closes.
+          <div className="glass-panel py-14 text-center text-[var(--color-text-dim)]">
+            {MONTH_NAMES[selectedMonth - 1]} is still being played. Wrapped opens when the month closes — use the
+            arrows above to look back at a finished one.
+          </div>
+        ) : (
           <WrappedView year={selectedYear} month={selectedMonth} selectedName={me.name} onSelectName={() => {}} />
         )
       ) : currentView === "alltime" ? (
