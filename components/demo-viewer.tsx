@@ -54,7 +54,10 @@ const DEFAULT_VOLUME = 0.8
  * with a mouse in hand all match; flying a camera around to look at something
  * wants to cover ground, so the whole range sits higher.
  */
-const SENSITIVITY_MIN = 20
+// The floor was 20, which was still fast enough to overshoot when lining up a
+// specific angle -- the range is for covering ground, but the bottom of it
+// should be usable for aiming, not just for flying.
+const SENSITIVITY_MIN = 10
 const SENSITIVITY_MAX = 40
 const SENSITIVITY_DEFAULT = 20
 
@@ -103,14 +106,20 @@ const readHighDetail = () => localStorage.getItem(DETAIL_KEY) !== "low"
  * band into a visible range recovers real detail, where a linear multiply just
  * washes the whole image out.
  *
- * 1 is the recording as it was rendered, and the default -- lower lifts the
- * shadows. Kept below 1 because there is no reason to make a demo darker.
+ * 1 is the recording exactly as it was rendered -- lower lifts the shadows.
+ * Kept at or below 1 because there is no reason to make a demo darker.
+ *
+ * The default is 0.6, which the slider reads as "+40%". Untouched JK2 is dark
+ * enough on a modern screen that most of a match happens in shadow people
+ * cannot make out, and "as recorded" is only the honest default if the person
+ * watching has the same monitor the demo was recorded on. A stored preference
+ * still wins; this is only where the slider starts.
  */
 const GAMMA_FILTER_ID = "soracle-demo-gamma"
 const GAMMA_KEY = "soracle.demo.gamma"
 const GAMMA_MIN = 0.5
 const GAMMA_MAX = 1
-const GAMMA_DEFAULT = 1
+const GAMMA_DEFAULT = 0.6
 const readGamma = () => {
   const stored = Number(localStorage.getItem(GAMMA_KEY))
   if (!Number.isFinite(stored) || stored < GAMMA_MIN || stored > GAMMA_MAX) return GAMMA_DEFAULT
@@ -146,8 +155,20 @@ function gammaFilterFor(gamma: number): string {
 }
 
 interface DemoViewerProps {
-  /** URL of the .dm_15 to play. */
+  /** URL of the .dm_15 to play. May be a blob: URL for a local preview. */
   demoUrl: string
+  /**
+   * Name to give the demo inside the engine's filesystem. Only needed when
+   * demoUrl carries no usable filename, which is the case for the blob: URL a
+   * pre-upload preview plays from.
+   */
+  demoFileName?: string
+  /**
+   * Offer the "copy a link to this moment" button. Off for the pre-upload
+   * preview, where the demo exists only in the uploader's browser -- the link
+   * it copies would point at whatever page they happen to be on.
+   */
+  showShare?: boolean
   /**
    * Known length in milliseconds. The format states no duration, so without
    * this the scrubber can only span what has been watched so far -- which on a
@@ -221,6 +242,8 @@ interface DemoViewerProps {
 
 export function DemoViewer({
   demoUrl,
+  demoFileName,
+  showShare = true,
   durationMs = 0,
   engineBaseUrl,
   followName,
@@ -693,10 +716,14 @@ export function DemoViewer({
         // Claimed before the load starts, so the demo-swap effect below can
         // tell "already loading this one" from "the route changed".
         loadedUrlRef.current = demoUrl
-        return engine.loadDemo(demoUrl, (f) => {
-          setStatus("Loading demo…")
-          setProgress(f)
-        })
+        return engine.loadDemo(
+          demoUrl,
+          (f) => {
+            setStatus("Loading demo…")
+            setProgress(f)
+          },
+          demoFileName,
+        )
       })
       .then(() => {
         if (cancelled) return
@@ -767,10 +794,14 @@ export function DemoViewer({
     setStatus("Loading demo…")
 
     engine
-      .loadDemo(demoUrl, (f) => {
-        setStatus("Loading demo…")
-        setProgress(f)
-      })
+      .loadDemo(
+        demoUrl,
+        (f) => {
+          setStatus("Loading demo…")
+          setProgress(f)
+        },
+        demoFileName,
+      )
       .then(() => {
         if (cancelled) return
         setStatus(null)
@@ -794,7 +825,7 @@ export function DemoViewer({
     return () => {
       cancelled = true
     }
-  }, [demoUrl, ready, durationMs, applyDefaultFollow])
+  }, [demoUrl, demoFileName, ready, durationMs, applyDefaultFollow])
 
   // ---- poll engine state ---------------------------------------------------
 
@@ -2224,14 +2255,16 @@ export function DemoViewer({
               className="h-1 w-16 cursor-pointer accent-cyan-400 [@media(hover:none)_and_(pointer:coarse)]:h-9 [@media(hover:none)_and_(pointer:coarse)]:w-24"
               aria-label="Volume"
             />
-            <button
-              onClick={copyLink}
-              title="Copy a link to this moment"
-              className="flex items-center gap-1.5 rounded-md bg-white/10 px-2 py-1.5 text-xs text-white hover:bg-white/20"
-            >
-              <Link2 className="h-4 w-4" />
-              {copied ? "Copied" : "Share"}
-            </button>
+            {showShare && (
+              <button
+                onClick={copyLink}
+                title="Copy a link to this moment"
+                className="flex items-center gap-1.5 rounded-md bg-white/10 px-2 py-1.5 text-xs text-white hover:bg-white/20"
+              >
+                <Link2 className="h-4 w-4" />
+                {copied ? "Copied" : "Share"}
+              </button>
+            )}
             <button
               onClick={() => setSettingsOpen((s) => !s)}
               title="Settings"

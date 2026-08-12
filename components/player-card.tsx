@@ -45,6 +45,41 @@ const ROLE_LABELS = {
   Support: "SUP",
 }
 
+// The portrait. Avatars are admin-set URLs (Discord CDN links among them, which
+// are signed and do expire), so a dead one has to fall back to a monogram rather
+// than leave a broken-image box on the card.
+function CardPortrait({ player, accent }: { player: Player; accent: string }) {
+  const [failed, setFailed] = useState(false)
+  const src = player.avatar_url
+
+  if (src && !failed) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- arbitrary admin-set URLs
+      <img
+        src={src}
+        alt=""
+        onError={() => setFailed(true)}
+        className="w-12 h-12 rounded-md object-cover shrink-0"
+        style={{ border: `1px solid ${accent}66`, boxShadow: `0 0 10px ${accent}33` }}
+      />
+    )
+  }
+  return (
+    <div
+      className="w-12 h-12 rounded-md shrink-0 flex items-center justify-center font-extrabold text-lg"
+      style={{
+        border: `1px solid ${accent}66`,
+        boxShadow: `0 0 10px ${accent}33`,
+        backgroundColor: `${accent}1f`,
+        color: accent,
+        fontFamily: "var(--font-orbitron)",
+      }}
+    >
+      {player.name.slice(0, 1).toUpperCase()}
+    </div>
+  )
+}
+
 export const PlayerCard = memo(function PlayerCard({
   player,
   isSelected,
@@ -116,13 +151,20 @@ export const PlayerCard = memo(function PlayerCard({
          * border itself IS the selection, with a transparent one held in place
          * so nothing shifts by a pixel when it appears. Hover still previews it.
          */
-        className={`relative bg-[#1f2833]/30 border rounded-lg p-4 text-left transition-all cursor-pointer hover:border-[#66fcf1]/60 hover:shadow-[0_0_14px_-2px_var(--color-primary-glow)] ${
+        className={`relative overflow-hidden bg-[#1f2833]/30 border rounded-lg p-4 text-left transition-all cursor-pointer hover:border-[#66fcf1]/60 hover:shadow-[0_0_14px_-2px_var(--color-primary-glow)] ${
           didNotMakeCut
             ? "border-[#ff4757] opacity-60"
             : isSelected
               ? "border-[#66fcf1] glow-border"
               : "border-transparent"
         } backdrop-blur-lg w-full`}
+        style={{
+          // Trading-card foil: a soft wash of the player's primary-role colour
+          // from the top-left, so a row of cards reads as a set of different
+          // characters rather than a wall of identical grey boxes. Kept low
+          // enough that it never competes with the selection border.
+          backgroundImage: `radial-gradient(120% 100% at 0% 0%, ${ROLE_COLORS[primaryRole]}1c 0%, transparent 58%)`,
+        }}
       >
         {isSelected && selectionNumber && (
           <div
@@ -239,9 +281,21 @@ export const PlayerCard = memo(function PlayerCard({
           </Popover>
         )}
 
-        <div className="flex items-start justify-between mb-3">
-          <div className="flex-1">
-            <h3 className="text-white font-extrabold text-lg mb-2 truncate" style={{ fontFamily: "var(--font-orbitron)" }}>{player.name}</h3>
+        <div className="flex items-start justify-between mb-3 gap-2">
+          <CardPortrait player={player} accent={ROLE_COLORS[primaryRole]} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-baseline gap-2">
+              <h3 className="text-white font-extrabold text-lg mb-2 truncate" style={{ fontFamily: "var(--font-orbitron)" }}>{player.name}</h3>
+              {/* Tier as the card's headline stat, the way a trading card leads
+                  with its cost. It was only visible in the tooltip before. */}
+              <span
+                className="ml-auto shrink-0 text-sm font-extrabold tabular-nums"
+                style={{ color: ROLE_COLORS[primaryRole], fontFamily: "var(--font-orbitron)" }}
+                title={`Tier ${player.tierValue}`}
+              >
+                T{player.tierValue}
+              </span>
+            </div>
             <div className="flex flex-wrap gap-2 items-center">
               <span
                 className="inline-block px-2 py-1 text-xs font-bold rounded opacity-60"
@@ -288,8 +342,14 @@ export const PlayerCard = memo(function PlayerCard({
                       width: `${(value / 10) * 100}%`,
                       backgroundColor: ROLE_COLORS[role as keyof typeof ROLE_COLORS],
                       // Role colours are fixed hues; on a light ground they need
-                      // to be near-solid to read, on a dark one they'd shout.
-                      opacity: isDisabled ? 0.2 : isLightTheme ? 0.85 : 0.32,
+                      // to be near-solid to read. On dark they sat at 0.32, which
+                      // made a 9 and a 5 hard to tell apart at a glance -- brought
+                      // up so the fill carries the value, with a matching glow so
+                      // the bar reads as lit rather than painted on.
+                      opacity: isDisabled ? 0.2 : isLightTheme ? 0.9 : 0.62,
+                      boxShadow: isDisabled
+                        ? "none"
+                        : `0 0 6px ${ROLE_COLORS[role as keyof typeof ROLE_COLORS]}55`,
                     }}
                   />
                 </div>

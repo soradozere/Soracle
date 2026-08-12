@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/dialog"
 import { RankMedal } from "@/components/reports-tab"
 
-// Hidden, admin-only ELO. ELO is a running rating, replayed in chronological order
+// The ELO board. Public since the leaderboard reorganisation; only its rank
+// suggestions stay admin-only. ELO is a running rating, replayed in chronological order
 // every load — nothing is persisted, it's derived fresh.
 //
 // There are TWO ratings, matching the scope toggle:
@@ -62,6 +63,15 @@ const MONTH_NAMES = [
 interface EloLeaderboardProps {
   year: number
   month: number
+  /**
+   * Show the rank suggestions. The board itself is public, but the suggestions
+   * name individual players as over- or under-ranked and label them Promote or
+   * Demote -- a working note for whoever sets tiers, not a verdict to publish
+   * about somebody. Labels only; there is no action here either way.
+   */
+  isAdmin?: boolean
+  /** Which rating to show: every match ever played, or the selected month. */
+  scope: "alltime" | "month"
 }
 
 interface Match {
@@ -101,8 +111,15 @@ function kdRatio(kills: number, deaths: number): string {
   return (kills / deaths).toFixed(2)
 }
 
-export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
-  const [scope, setScope] = useState<"alltime" | "month">("alltime")
+export function EloLeaderboard({ year, month, isAdmin = false, scope: scopeProp }: EloLeaderboardProps) {
+  /*
+   * Which scope this board shows is decided by the caller, not here. It used to
+   * be a pair of buttons in the middle of the board, which meant the Stats tab
+   * said one thing ("Leaderboard") and the board could be showing another
+   * ("All-time"). The tab is the scope now: Leaderboard is the selected month,
+   * the admin-only All-Time tab is every match ever played.
+   */
+  const scope = scopeProp
   const [allTimeBoard, setAllTimeBoard] = useState<BoardRow[]>([])
   const [monthBoard, setMonthBoard] = useState<BoardRow[]>([])
   const [monthMinMatches, setMonthMinMatches] = useState(0)
@@ -408,7 +425,11 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-[var(--color-text-dim)]">
-          Hidden ELO — running rating across all matches, seeded from tier. Admin only.
+          {scope === "alltime"
+            ? "A running rating across every match ever played, seeded from tier."
+            : `How ${monthLabel} alone would have rated everyone, seeded from tier.`}{" "}
+          It does not decide teams — the balancer uses tiers — so read it as a second opinion on where
+          somebody sits.
         </p>
         <div className="flex items-center gap-2">
           <Dialog>
@@ -529,29 +550,6 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
         </div>
       </div>
 
-      {/* Scope toggle */}
-      <div className="flex items-center justify-center gap-2">
-        <button
-          onClick={() => setScope("alltime")}
-          className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-            scope === "alltime"
-              ? "bg-[var(--color-primary)] text-[var(--color-background)]"
-              : "bg-[var(--color-surface)] text-[var(--color-text-dim)] hover:bg-[var(--color-border)]/50"
-          }`}
-        >
-          All-time
-        </button>
-        <button
-          onClick={() => setScope("month")}
-          className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-            scope === "month"
-              ? "bg-[var(--color-primary)] text-[var(--color-background)]"
-              : "bg-[var(--color-surface)] text-[var(--color-text-dim)] hover:bg-[var(--color-border)]/50"
-          }`}
-        >
-          {monthLabel}
-        </button>
-      </div>
 
       {/* ELO Leaderboard */}
       <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg overflow-hidden">
@@ -636,8 +634,9 @@ export function EloLeaderboard({ year, month }: EloLeaderboardProps) {
       </div>
 
       {/* ELO Rank Suggestions — all-time uses the tier-anchored rating; monthly flags
-          who's over/under-ranked based on this month's form. */}
-      {(
+          who's over/under-ranked based on this month's form. Admin-only: see the
+          isAdmin prop. */}
+      {isAdmin && (
         <div>
           <h3 className="text-lg font-bold text-[var(--color-primary)] mb-1 flex items-center gap-2">
             <TrendingUp className="w-5 h-5" />

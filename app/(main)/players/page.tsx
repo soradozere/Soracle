@@ -30,8 +30,6 @@ export default async function PlayersPage() {
     avatarUrl: r.avatarUrl,
     score: r.score,
     unlocks: r.unlocks,
-    best: r.best,
-    title: r.title,
     equippedTitle: (() => {
       const t = equippedTitles.get(r.id)
       return t ? { title: t.title, rarity: t.rarity } : null

@@ -15,7 +15,8 @@ import {
 import { TS, type Rating, rateMatch, conservativeRating } from "@/lib/trueskill"
 import { RankMedal } from "@/components/reports-tab"
 
-// Hidden, admin-only TrueSkill board. Like the ELO board, it's a running rating replayed
+// The TrueSkill board. Public since the leaderboard reorganisation; only its rank
+// suggestions stay admin-only. Like the ELO board, it's a running rating replayed
 // in chronological order on every load — nothing is persisted, it's derived fresh.
 //
 // Each player is a Gaussian N(μ, σ): μ is estimated skill, σ the uncertainty. The board
@@ -46,6 +47,10 @@ const MONTH_NAMES = [
 interface TrueSkillLeaderboardProps {
   year: number
   month: number
+  /** Show the rank suggestions. See the same prop on EloLeaderboard. */
+  isAdmin?: boolean
+  /** Which rating to show: every match ever played, or the selected month. */
+  scope: "alltime" | "month"
 }
 
 interface Match {
@@ -87,8 +92,15 @@ function kdRatio(kills: number, deaths: number): string {
   return (kills / deaths).toFixed(2)
 }
 
-export function TrueSkillLeaderboard({ year, month }: TrueSkillLeaderboardProps) {
-  const [scope, setScope] = useState<"alltime" | "month">("alltime")
+export function TrueSkillLeaderboard({ year, month, isAdmin = false, scope: scopeProp }: TrueSkillLeaderboardProps) {
+  /*
+   * Which scope this board shows is decided by the caller, not here. It used to
+   * be a pair of buttons in the middle of the board, which meant the Stats tab
+   * said one thing ("Leaderboard") and the board could be showing another
+   * ("All-time"). The tab is the scope now: Leaderboard is the selected month,
+   * the admin-only All-Time tab is every match ever played.
+   */
+  const scope = scopeProp
   const [allTimeBoard, setAllTimeBoard] = useState<BoardRow[]>([])
   const [monthBoard, setMonthBoard] = useState<BoardRow[]>([])
   const [monthMinMatches, setMonthMinMatches] = useState(0)
@@ -374,8 +386,11 @@ export function TrueSkillLeaderboard({ year, month }: TrueSkillLeaderboardProps)
           <span className="inline-block mr-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wide bg-[var(--color-primary)]/15 text-[var(--color-primary)] border border-[var(--color-primary)]/30 align-middle">
             Experimental
           </span>
-          Hidden TrueSkill — Gaussian skill rating (μ ± σ), replayed across all matches. Admin only; not
-          currently wired into team balancing.
+          {scope === "alltime"
+            ? "A Gaussian skill rating (μ ± σ) replayed across every match ever played."
+            : `A Gaussian skill rating (μ ± σ) from ${monthLabel} alone.`}{" "}
+          It tracks how confident it is as well as how good you are. Not wired into team balancing — the
+          balancer uses tiers.
         </p>
         <div className="flex items-center gap-2">
           <Dialog>
@@ -465,29 +480,6 @@ export function TrueSkillLeaderboard({ year, month }: TrueSkillLeaderboardProps)
         </div>
       </div>
 
-      {/* Scope toggle */}
-      <div className="flex items-center justify-center gap-2">
-        <button
-          onClick={() => setScope("alltime")}
-          className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-            scope === "alltime"
-              ? "bg-[var(--color-primary)] text-[var(--color-background)]"
-              : "bg-[var(--color-surface)] text-[var(--color-text-dim)] hover:bg-[var(--color-border)]/50"
-          }`}
-        >
-          All-time
-        </button>
-        <button
-          onClick={() => setScope("month")}
-          className={`px-4 py-2 rounded-lg text-sm font-bold transition-all ${
-            scope === "month"
-              ? "bg-[var(--color-primary)] text-[var(--color-background)]"
-              : "bg-[var(--color-surface)] text-[var(--color-text-dim)] hover:bg-[var(--color-border)]/50"
-          }`}
-        >
-          {monthLabel}
-        </button>
-      </div>
 
       {/* TrueSkill Leaderboard */}
       <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg overflow-hidden">
@@ -579,7 +571,8 @@ export function TrueSkillLeaderboard({ year, month }: TrueSkillLeaderboardProps)
         )}
       </div>
 
-      {/* TrueSkill Rank Suggestions */}
+      {/* TrueSkill Rank Suggestions — admin-only, as on the ELO board. */}
+      {isAdmin && (
       <div>
         <h3 className="text-lg font-bold text-[var(--color-primary)] mb-1 flex items-center gap-2">
           <TrendingUp className="w-5 h-5" />
@@ -663,6 +656,7 @@ export function TrueSkillLeaderboard({ year, month }: TrueSkillLeaderboardProps)
           </div>
         )}
       </div>
+      )}
     </div>
   )
 }

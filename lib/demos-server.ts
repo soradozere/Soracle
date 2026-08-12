@@ -3,6 +3,13 @@ import { createClient } from "@/lib/supabase/server"
 import { createAnonClient } from "@/lib/supabase/anon"
 import { normaliseTags, type DemoTagId } from "@/lib/demo-tags"
 import { demoFileUrl } from "@/lib/r2"
+import {
+  EMPTY_REACTION_COUNTS,
+  REACTION_IDS,
+  isReactionId,
+  type ReactionCounts,
+  type ReactionId,
+} from "@/lib/demo-reactions"
 
 export type Gametype = "CTF" | "FFA" | "TeamFFA"
 
@@ -26,8 +33,10 @@ export interface DemoListItem {
   viewCount: number
   protagonist: DemoPlayerTag | null
   tags: DemoTagId[]
-  avgRating: number | null
-  ratingCount: number
+  /** Per-reaction tallies, zero-filled. No reaction outranks another. */
+  reactions: ReactionCounts
+  /** Sum of the above — the only orderable thing about a set of reactions. */
+  reactionTotal: number
   players: DemoPlayerTag[]
 }
 
@@ -76,9 +85,9 @@ interface DemoRow {
   announce_in_feed: boolean
 }
 
-// The three related tables (who's tagged, who uploaded it, its rating) are
+// The three related tables (who's tagged, who uploaded it, its reactions) are
 // fetched as their own queries and merged here rather than as PostgREST
-// embeds. demo_rating_summary is a view (no FK metadata for PostgREST to
+// embeds. demo_reaction_summary is a view (no FK metadata for PostgREST to
 // infer an embed from), so it needs its own query regardless -- doing all
 // three the same way keeps this one code path instead of a mix of embedded
 // and manual joins.
@@ -96,20 +105,28 @@ async function attachRelations(rows: DemoRow[]): Promise<DemoListItem[]> {
     ),
   ]
 
-  const [tagsResult, peopleResult, ratingsResult] = await Promise.all([
+  const [tagsResult, peopleResult, reactionsResult] = await Promise.all([
     supabase.from("demo_players").select("demo_id, player:players(id, name, avatar_url)").in("demo_id", demoIds),
     peopleIds.length
       ? supabase.from("players").select("id, name, avatar_url").in("id", peopleIds)
       : Promise.resolve({ data: [] as { id: string; name: string; avatar_url: string | null }[], error: null }),
-    supabase.from("demo_rating_summary").select("demo_id, avg_rating, rating_count").in("demo_id", demoIds),
+    supabase
+      .from("demo_reaction_summary")
+      .select("demo_id, total, like_count, love_count, dislike_count, funny_count, wow_count, mindblown_count")
+      .in("demo_id", demoIds),
   ])
 
   const peopleById = new Map(
     (peopleResult.data ?? []).map((p) => [p.id as string, p as { id: string; name: string; avatar_url: string | null }]),
   )
-  const ratingByDemoId = new Map(
-    (ratingsResult.data ?? []).map((r) => [r.demo_id as string, r as { avg_rating: number; rating_count: number }]),
-  )
+  // The view returns one column per reaction (see scripts/040_demo_reactions.sql);
+  // fold it back into the id-keyed shape the UI iterates over.
+  const reactionsByDemoId = new Map<string, { counts: ReactionCounts; total: number }>()
+  for (const row of (reactionsResult.data ?? []) as Record<string, unknown>[]) {
+    const counts = { ...EMPTY_REACTION_COUNTS }
+    for (const id of REACTION_IDS) counts[id] = Number(row[`${id}_count`] ?? 0)
+    reactionsByDemoId.set(row.demo_id as string, { counts, total: Number(row.total ?? 0) })
+  }
   // Supabase's untyped client (no generated schema types in this project)
   // infers every embed as an array regardless of cardinality. demo_players.player_id
   // is a to-one FK, so this is really a single object per row at runtime --
@@ -124,7 +141,7 @@ async function attachRelations(rows: DemoRow[]): Promise<DemoListItem[]> {
   }
 
   return rows.map((r) => {
-    const rating = ratingByDemoId.get(r.id)
+    const reactions = reactionsByDemoId.get(r.id)
     const uploader = r.uploader_player_id ? peopleById.get(r.uploader_player_id) : undefined
     const protagonist = r.protagonist_player_id ? peopleById.get(r.protagonist_player_id) : undefined
     return {
@@ -145,8 +162,8 @@ async function attachRelations(rows: DemoRow[]): Promise<DemoListItem[]> {
       // Normalised on the way out as well as the way in: a tag retired from
       // the vocabulary later shouldn't render as a mystery badge.
       tags: normaliseTags(r.tags ?? []),
-      avgRating: rating ? Number(rating.avg_rating) : null,
-      ratingCount: rating ? Number(rating.rating_count) : 0,
+      reactions: reactions?.counts ?? { ...EMPTY_REACTION_COUNTS },
+      reactionTotal: reactions?.total ?? 0,
       players: tagsByDemoId.get(r.id) ?? [],
     }
   })
@@ -250,15 +267,18 @@ async function fetchDemoCardUncached(id: string): Promise<DemoCard | null> {
 // lib/achievements-server.ts.
 export const getDemoCard = unstable_cache(fetchDemoCardUncached, ["demo-card"], { revalidate: 86400 })
 
-export async function getOwnRating(demoId: string, playerId: string): Promise<number | null> {
+export async function getOwnReaction(demoId: string, playerId: string): Promise<ReactionId | null> {
   const supabase = await createClient()
   const { data } = await supabase
-    .from("demo_ratings")
-    .select("rating")
+    .from("demo_reactions")
+    .select("reaction")
     .eq("demo_id", demoId)
     .eq("player_id", playerId)
     .maybeSingle()
-  return data ? Number(data.rating) : null
+  // Guarded rather than cast: a reaction retired from the vocabulary later
+  // should read as "nothing selected", not light up a button that no longer
+  // exists.
+  return data && isReactionId(data.reaction) ? data.reaction : null
 }
 
 export async function listPlaylists(): Promise<DemoPlaylist[]> {
