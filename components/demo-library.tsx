@@ -311,7 +311,10 @@ function UploadDialog({
             </DialogDescription>
           </DialogHeader>
           {previewUrl && (
-            <div className="overflow-hidden rounded-md border">
+            // aspect-video, not just a border: the viewer's own root is
+            // h-full/w-full, so it collapses to a zero-height canvas unless the
+            // parent states a height. Same wrapper the demo page uses.
+            <div className="aspect-video w-full overflow-hidden rounded-md border">
               <DemoViewer demoUrl={previewUrl} demoFileName={chosenFile?.name} />
             </div>
           )}
