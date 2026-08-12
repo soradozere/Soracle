@@ -1750,15 +1750,17 @@ export function ReportsTab() {
         </>
       ) : (
         <>
-          {/* Leaderboard View */}
+          {/* Leaderboard View. The standing is stated before the table, not
+              after it -- read underneath, it lands once you have already taken
+              the numbers at face value. */}
+          <p className="text-sm text-[var(--color-text-dim)]">
+            This is the true monthly leaderboard. ELO and TrueSkill are for fun reference only.
+          </p>
           <WinsLeaderboard
             rows={leaderboard}
             qualifier={`Players with ${leaderboardMinMatches}+ matches this month (30% of ${totalMatches})`}
             emptyLabel={`No players with ${leaderboardMinMatches}+ matches yet`}
           />
-          <p className="text-sm text-[var(--color-text-dim)]">
-            This is the true monthly leaderboard. ELO and TrueSkill are for fun reference only.
-          </p>
 
           {/* Summary Bar */}
           {leaderboard.length > 0 && (
