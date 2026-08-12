@@ -847,6 +847,12 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
               color="var(--color-primary)"
               className="absolute -right-[52px] -top-[44px] w-[210px] h-[210px] opacity-[0.06] pointer-events-none"
             />
+            {/* Identity down the left, the nine numbers down the right, both
+                starting at the top edge. Stacked, the card ran nearly a full
+                screen for one player's month; side by side it reads at a
+                glance and the record strip fills the height the grid needs. */}
+            <div className="grid lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1fr)] gap-x-8 gap-y-5 items-start">
+            <div className="min-w-0">
             <div className="flex flex-wrap items-start justify-between gap-4">
               <div className="flex items-center gap-4 min-w-0">
                 {card.avatarUrl && (
@@ -948,13 +954,13 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
             {/* The stat block lives in the same card as the name and record --
                 two panels left both half-empty, and this is all one player's
                 month. */}
-            <div className="mt-5 pt-5" style={{ borderTop: "1px solid var(--glass-hair)" }}>
+            </div>
+
             {card.hasStats ? (
-              <>
-                {/* Three columns at every width, not four on desktop. There are
-                    nine stats: 3x3 is a block, 4+4+1 leaves Flag hold stranded
-                    on a row of its own with three empty cells beside it. */}
-                <div className="grid grid-cols-3 gap-2.5">
+              /* Three columns at every width, not four on desktop. There are
+                 nine stats: 3x3 is a block, 4+4+1 leaves Flag hold stranded on a
+                 row of its own with three empty cells beside it. */
+              <div className="grid grid-cols-3 gap-2.5">
                   <Stat label="Caps" value={card.captures} />
                   <Stat label="Returns" value={card.returns} />
                   <Stat label="Assists" value={card.assists} />
@@ -964,8 +970,13 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
                   <Stat label="Deaths" value={card.deaths} />
                   <Stat label="K/D" value={kdRatio(card.kills, card.deaths)} accent="var(--color-primary)" />
                   <Stat label="Flag hold" value={formatFlagHold(card.flagHoldMs)} />
-                </div>
-                <p className="mt-3 text-[11px]" style={{ color: "var(--color-text-dim)" }}>
+              </div>
+            ) : null}
+            </div>
+
+            {card.hasStats ? (
+              <>
+                <p className="mt-4 text-[11px]" style={{ color: "var(--color-text-dim)" }}>
                   Scoreboard stats recorded for {card.statsMatches} of {card.played} matches this month.
                 </p>
                 {/* Folded into the same panel as the headline stats rather than
@@ -1027,7 +1038,6 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
                 No scoreboard stats recorded this month.
               </p>
             )}
-            </div>
           </section>
 
           {/* The month at a glance: shape of the run, and which side favoured
