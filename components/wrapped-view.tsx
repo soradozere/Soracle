@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { Check, ChevronsUpDown, Crosshair, Ghost, Heart, Link2, Skull, Sparkles, Swords, Target, type LucideIcon } from "lucide-react"
+import { Check, ChevronsUpDown, Crosshair, Ghost, Heart, Skull, Sparkles, Swords, Target, type LucideIcon } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { getAchievementsEarnedInMonth } from "@/app/admin/actions"
 import { Emblem } from "@/components/emblem"
@@ -790,14 +790,6 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
   const card = selectedName ? cards.get(selectedName) ?? null : null
   const cardAchievements = selectedName ? achievements.filter((a) => a.playerName === selectedName) : []
 
-  const copyLink = () => {
-    if (typeof window === "undefined") return
-    navigator.clipboard
-      .writeText(window.location.href)
-      .then(() => toast({ description: "Link copied." }))
-      .catch(() => toast({ description: "Couldn't copy the link.", variant: "destructive" }))
-  }
-
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -824,24 +816,33 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
           <Sparkles className="w-3.5 h-3.5" style={{ color: "var(--color-primary)" }} />
           {MONTH_NAMES[month - 1]} {year} Wrapped
         </div>
-        <div className="ml-auto flex items-center gap-2">
-          {/* No player picker: the card is the reader's own month now, so a
-              dropdown of 69 names to find yourself in was a step backwards. */}
-          <button
-            type="button"
-            onClick={copyLink}
-            className="hint-left w-9 h-9 rounded-xl grid place-items-center transition-colors"
-            data-hint="Copy a link to this player's Wrapped"
-            style={{ border: "1px solid var(--glass-hair)", color: "var(--color-text-dim)" }}
-          >
-            <Link2 className="w-3.5 h-3.5" />
-          </button>
-        </div>
+        {/* No player picker and no share button: the card is the reader's own
+            month now, so there is no selection to link to -- and the URL state
+            that made one shareable went with the picker it belonged to. */}
       </div>
 
       {card && (
         <>
           <section className="glass-panel p-6 relative overflow-hidden">
+            {/* Foil sheen. A trading card catches the light in a band across
+                its face, so this is one angled sweep rather than an even wash:
+                a cool edge, a bright core, a warm edge, all at low opacity so
+                it reads as light on the panel and never as a coloured stripe.
+                Sits above the watermark and below the content, and takes no
+                pointer events so nothing here becomes unclickable. */}
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0"
+              style={{
+                backgroundImage:
+                  "linear-gradient(104deg," +
+                  " transparent 26%," +
+                  " color-mix(in srgb, var(--color-primary) 9%, transparent) 40%," +
+                  " color-mix(in srgb, #ffffff 8%, transparent) 47%," +
+                  " color-mix(in srgb, #b98cff 7%, transparent) 54%," +
+                  " transparent 68%)",
+              }}
+            />
             <Emblem
               src="/badges/star.svg"
               color="var(--color-primary)"
