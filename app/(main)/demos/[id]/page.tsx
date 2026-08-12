@@ -4,7 +4,7 @@ import { cookies } from "next/headers"
 import {
   getDemo,
   getAdjacentDemos,
-  getOwnRating,
+  getOwnReaction,
   listComments,
   listOtherDemos,
   listPlaylists,
@@ -39,8 +39,8 @@ export default async function DemoDetailPage({ params }: { params: Promise<{ id:
     createClient(),
   ])
   const playerId = verifySessionValue(cookieStore.get(PLAYER_SESSION_COOKIE)?.value)
-  const [ownRating, auth, { data: players }] = await Promise.all([
-    playerId ? getOwnRating(id, playerId) : Promise.resolve(null),
+  const [ownReaction, auth, { data: players }] = await Promise.all([
+    playerId ? getOwnReaction(id, playerId) : Promise.resolve(null),
     supabase.auth.getUser(),
     supabase.from("players").select("id, name").order("name"),
   ])
@@ -56,8 +56,8 @@ export default async function DemoDetailPage({ params }: { params: Promise<{ id:
         others={others}
         previousDemo={adjacent.previous}
         nextDemo={adjacent.next}
-        canRate={!!playerId}
-        ownRating={ownRating}
+        canReact={!!playerId}
+        ownReaction={ownReaction}
         isAdmin={isAdmin}
         players={players ?? []}
         comments={comments}

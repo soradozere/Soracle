@@ -39,7 +39,6 @@ import {
   deleteComment,
   finishDemoTrim,
   deleteDemo,
-  rateDemo,
   recordDemoView,
   removeDemoMoment,
   reportDemoMap,
@@ -47,6 +46,8 @@ import {
   updateDemo,
 } from "@/app/(main)/demos/actions"
 import { cn, formatDuration } from "@/lib/utils"
+import { ReactionPicker } from "@/components/demo-reaction-bar"
+import type { ReactionId } from "@/lib/demo-reactions"
 
 const GAMETYPES: Gametype[] = ["CTF", "FFA", "TeamFFA"]
 
@@ -75,91 +76,6 @@ function GametypeBadge({ gametype }: { gametype: Gametype }) {
         ? "bg-orange-500/15 text-orange-400 border-orange-500/30"
         : "bg-purple-500/15 text-purple-400 border-purple-500/30"
   return <Badge className={cn("border", tint)}>{gametype}</Badge>
-}
-
-function RatingWidget({
-  demoId,
-  canRate,
-  initial,
-  avgRating,
-  ratingCount,
-}: {
-  demoId: string
-  canRate: boolean
-  initial: number | null
-  avgRating: number | null
-  ratingCount: number
-}) {
-  const [hover, setHover] = useState<number | null>(null)
-  const [mine, setMine] = useState<number | null>(initial)
-  const [error, setError] = useState<string | null>(null)
-  const [pending, startTransition] = useTransition()
-
-  /*
-   * What everyone else made of it, under whatever the stars are showing.
-   *
-   * The stars are personal -- they show your own rating, and swing to follow
-   * the cursor while you pick -- so without this the page could tell you what
-   * you thought and nothing about what anyone else did. The count comes with
-   * it because "4.5" from two people and from forty are not the same claim.
-   *
-   * Not live: this is the figure from page load, so it will not include a
-   * rating just cast. Refreshing is the honest way to see that, rather than
-   * doing arithmetic on a number whose denominator we would be guessing at.
-   */
-  const summary =
-    avgRating !== null && ratingCount > 0 ? (
-      <p className="mt-1 text-xs text-muted-foreground">
-        Global rating: <span className="font-medium text-foreground">{avgRating.toFixed(1)}</span>
-        <span className="tabular-nums"> / 5</span> · {ratingCount} {ratingCount === 1 ? "rating" : "ratings"}
-      </p>
-    ) : (
-      <p className="mt-1 text-xs text-muted-foreground">No ratings yet</p>
-    )
-
-  if (!canRate) {
-    return (
-      <div className="text-right">
-        {summary}
-        <p className="text-sm text-muted-foreground">Log in as a player to rate this demo.</p>
-      </div>
-    )
-  }
-
-  function submit(n: number) {
-    setError(null)
-    startTransition(async () => {
-      const result = await rateDemo(demoId, n)
-      if (!result.success) {
-        setError(result.error)
-        return
-      }
-      setMine(n)
-    })
-  }
-
-  const shown = hover ?? mine ?? 0
-  return (
-    <div>
-      <div className="flex items-center gap-1" onMouseLeave={() => setHover(null)}>
-        {[1, 2, 3, 4, 5].map((n) => (
-          <button
-            key={n}
-            type="button"
-            disabled={pending}
-            onMouseEnter={() => setHover(n)}
-            onClick={() => submit(n)}
-            className="disabled:opacity-50"
-            aria-label={`Rate ${n} star${n > 1 ? "s" : ""}`}
-          >
-            <Star className={cn("h-5 w-5", n <= shown ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground")} />
-          </button>
-        ))}
-      </div>
-      {summary}
-      {error && <p className="mt-1 text-xs text-destructive">{error}</p>}
-    </div>
-  )
 }
 
 function OtherDemoRow({ demo }: { demo: DemoListItem }) {
@@ -927,8 +843,8 @@ export function DemoDetail({
   others,
   previousDemo,
   nextDemo,
-  canRate,
-  ownRating,
+  canReact,
+  ownReaction,
   isAdmin,
   players,
   comments,
@@ -941,8 +857,8 @@ export function DemoDetail({
   /** The demos either side of this one, for the end-of-demo overlay. */
   previousDemo: DemoLink | null
   nextDemo: DemoLink | null
-  canRate: boolean
-  ownRating: number | null
+  canReact: boolean
+  ownReaction: ReactionId | null
   isAdmin: boolean
   players: { id: string; name: string }[]
   comments: DemoComment[]
@@ -1114,16 +1030,15 @@ export function DemoDetail({
               </div>
             )}
           </div>
-          {/* Column, so the button sits under the rating rather than beside it
-              -- the row this lives in would otherwise lay them out side by
-              side. Right-aligned to follow the rating above it. */}
+          {/* Column, so the button sits under the reactions rather than beside
+              them -- the row this lives in would otherwise lay them out side by
+              side. Right-aligned to follow the reactions above it. */}
           <div className="flex flex-col items-end gap-3">
-            <RatingWidget
+            <ReactionPicker
               demoId={demo.id}
-              canRate={canRate}
-              initial={ownRating}
-              avgRating={demo.avgRating}
-              ratingCount={demo.ratingCount}
+              counts={demo.reactions}
+              mine={ownReaction}
+              canReact={canReact}
             />
 
             {/* Same gate as trimming and moments: the uploader or an admin.

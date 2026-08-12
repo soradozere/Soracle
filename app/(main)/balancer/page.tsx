@@ -9,6 +9,7 @@ import { BalanceOptions } from "@/components/balance-options"
 import { BalanceHistory } from "@/components/balance-history"
 import { HelpFab } from "@/components/help-fab"
 import { TierListView } from "@/components/tier-list-view"
+import { SegmentedRail } from "@/components/segmented-rail"
 import { getMonthlyPlayerStats } from "@/app/admin/actions"
 import { balanceTeamsWithOptions, balanceTeamsCompetitive, balanceTeamsByElo } from "@/lib/balance-algorithm"
 import { computeMonthlyEloMap } from "@/lib/elo"
@@ -552,56 +553,17 @@ export default function TeamBalancer() {
               row rather than in the global nav or the sticky panel: it explains
               this page specifically, but isn't a control for it. */}
           <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
-            <div
-              className="inline-flex rounded-lg border p-1"
-              style={{
-                backgroundColor: "var(--color-surface)",
-                borderColor: "var(--color-border)",
-              }}
-            >
-              <button
-                onClick={() => setPlayerView("select")}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
-                  playerView === "select" ? "font-bold" : ""
-                }`}
-                style={
-                  playerView === "select"
-                    ? {
-                        backgroundColor: "var(--color-primary)",
-                        color: "var(--color-background)",
-                        boxShadow: "0 0 10px var(--color-primary-glow)",
-                      }
-                    : {
-                        backgroundColor: "transparent",
-                        color: "var(--color-text)",
-                      }
-                }
-              >
-                <Grid3x3 className="w-4 h-4" />
-                Player Cards
-              </button>
-              <button
-                onClick={() => setPlayerView("tierList")}
-                className={`px-4 py-2 rounded-md text-sm font-medium transition-all flex items-center gap-2 ${
-                  playerView === "tierList" ? "font-bold" : ""
-                }`}
-                style={
-                  playerView === "tierList"
-                    ? {
-                        backgroundColor: "var(--color-primary)",
-                        color: "var(--color-background)",
-                        boxShadow: "0 0 10px var(--color-primary-glow)",
-                      }
-                    : {
-                        backgroundColor: "transparent",
-                        color: "var(--color-text)",
-                      }
-                }
-              >
-                <Trophy className="w-4 h-4" />
-                Tier List
-              </button>
-            </div>
+            {/* The same rail as the masthead and the Stats views, rather than a
+                hand-rolled pair of buttons: one sliding thumb, one motion. */}
+            <SegmentedRail
+              aria-label="Player view"
+              activeKey={playerView}
+              onSelect={(key) => setPlayerView(key as typeof playerView)}
+              segments={[
+                { key: "select", label: "Player Cards", icon: Grid3x3 },
+                { key: "tierList", label: "Tier List", icon: Trophy },
+              ]}
+            />
 
             <Link
               href="/how-it-works"

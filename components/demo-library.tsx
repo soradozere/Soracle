@@ -1,9 +1,9 @@
 "use client"
 
-import { useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Star } from "lucide-react"
+import { Eye } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -25,12 +25,23 @@ import { DEMO_TAGS, demoTagClasses, demoTagLabel } from "@/lib/demo-tags"
 import { matchRank } from "@/lib/demo-search"
 import { beginDemoUpload, finishDemoUpload } from "@/app/(main)/demos/actions"
 import { cn, formatDuration } from "@/lib/utils"
+import { ReactionSummary } from "@/components/demo-reaction-bar"
+import dynamic from "next/dynamic"
 
 const GAMETYPES: Gametype[] = ["CTF", "FFA", "TeamFFA"]
-// Every demo uploaded so far is CTF -- FFA/TeamFFA stay valid choices at
-// upload (in case that changes), but a filter row offering two buttons that
-// have never matched anything is just clutter on the library page itself.
-const GAMETYPE_FILTERS: (Gametype | "all")[] = ["all", "CTF"]
+// There is deliberately no gametype filter on the browse toolbar. Every demo
+// uploaded so far is CTF, so the control was a permanent "All | CTF" pair where
+// both choices showed the same demos. Uploads still record a gametype (the
+// choices above) and the card still badges it, so a filter can come back the
+// day FFA clips actually arrive.
+
+// The viewer boots a WASM engine and pulls ~120MB of game assets, so it must
+// never be part of the library page's bundle -- it is loaded only when someone
+// actually opens the pre-upload preview.
+const DemoViewer = dynamic(() => import("@/components/demo-viewer").then((m) => m.DemoViewer), {
+  ssr: false,
+  loading: () => <p className="p-6 text-sm text-muted-foreground">Starting the viewer…</p>,
+})
 
 function GametypeBadge({ gametype }: { gametype: Gametype }) {
   const tint =
@@ -49,16 +60,6 @@ function GametypeBadge({ gametype }: { gametype: Gametype }) {
 function LeadBadge({ demo }: { demo: DemoListItem }) {
   if (!demo.protagonist) return <GametypeBadge gametype={demo.gametype} />
   return <Badge className="border bg-sky-500/15 text-sky-400 border-sky-500/30">{demo.protagonist.name}</Badge>
-}
-
-function RatingStars({ value, count }: { value: number | null; count: number }) {
-  if (value === null) return <span className="text-xs text-muted-foreground">Not yet rated</span>
-  return (
-    <span className="flex items-center gap-1 text-xs text-muted-foreground">
-      <Star className="h-3.5 w-3.5 fill-yellow-400 text-yellow-400" />
-      {value.toFixed(1)} <span className="opacity-70">({count})</span>
-    </span>
-  )
 }
 
 // Exported so playlist pages show demos exactly as the library does -- a card
@@ -89,7 +90,7 @@ export function DemoCard({ demo }: { demo: DemoListItem }) {
               {demo.durationMs != null && (
                 <span className="text-xs tabular-nums text-muted-foreground">{formatDuration(demo.durationMs)}</span>
               )}
-              <RatingStars value={demo.avgRating} count={demo.ratingCount} />
+              <ReactionSummary counts={demo.reactions} total={demo.reactionTotal} />
             </div>
           </div>
           <div className="flex items-start justify-between gap-3">
@@ -153,7 +154,19 @@ function UploadDialog({
   players: { id: string; name: string }[]
   isAdmin: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  /*
+   * The flow is one file moving through three stages, so it is one piece of
+   * state rather than three booleans that could contradict each other:
+   *
+   *   idle    -- nothing picked; the button opens the OS file picker
+   *   preview -- watching it locally, from a blob: URL. Nothing uploaded yet
+   *   details -- filling in the metadata, having decided it is worth keeping
+   *
+   * Publishing is the only thing that touches R2 (see submit), so backing out
+   * of either dialog costs nothing but the object URL, which is revoked below.
+   */
+  const [stage, setStage] = useState<"idle" | "preview" | "details">("idle")
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [playerFilter, setPlayerFilter] = useState("")
   const [taggedIds, setTaggedIds] = useState<string[]>([])
@@ -163,6 +176,46 @@ function UploadDialog({
   // -1 when no file transfer is running; the byte-level progress of the PUT
   // otherwise. Separate from `pending`, which also covers the metadata save.
   const [uploadPct, setUploadPct] = useState(-1)
+  // The file the user has picked, kept so it can be previewed before anything
+  // is uploaded. The object URL is derived from it and revoked on the way out,
+  // since each createObjectURL pins the whole file in memory until it is.
+  const [chosenFile, setChosenFile] = useState<File | null>(null)
+  const previewUrl = useMemo(
+    () => (chosenFile && stage === "preview" ? URL.createObjectURL(chosenFile) : null),
+    [chosenFile, stage],
+  )
+  useEffect(() => {
+    if (!previewUrl) return
+    return () => URL.revokeObjectURL(previewUrl)
+  }, [previewUrl])
+
+  /*
+   * The engine sizes its framebuffer to the canvas once, at boot, and the
+   * dialog animates in with a scale transform -- so mounting the viewer with
+   * the dialog measured a box that was still moving, baked a framebuffer at the
+   * wrong aspect, and object-contain pillarboxed the picture inside a correctly
+   * sized canvas for the rest of the session. Waiting for the animation to
+   * settle means the first measurement is the final one.
+   */
+  const [viewerMounted, setViewerMounted] = useState(false)
+  useEffect(() => {
+    if (stage !== "preview") {
+      setViewerMounted(false)
+      return
+    }
+    const t = setTimeout(() => setViewerMounted(true), 250)
+    return () => clearTimeout(t)
+  }, [stage])
+
+  /** Back to nothing: drops the file so its object URL is revoked. */
+  function reset() {
+    setStage("idle")
+    setChosenFile(null)
+    setError(null)
+    // The input keeps its value, so picking the same file twice in a row would
+    // fire no change event and look broken.
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
 
   const visiblePlayers = players.filter((p) => p.name.toLowerCase().includes(playerFilter.toLowerCase()))
 
@@ -204,13 +257,13 @@ function UploadDialog({
     setError(null)
     for (const id of taggedIds) formData.append("playerIds", id)
     for (const id of highlightTags) formData.append("tags", id)
-    const file = formData.get("file")
-    // The file rides the signed PUT, never the action -- a multi-MB action
-    // body is exactly what this flow exists to avoid.
-    formData.delete("file")
+    // The file is held in state, not in the form: it was chosen back at the
+    // preview step, and it rides the signed PUT rather than the action anyway
+    // -- a multi-MB action body is exactly what this flow exists to avoid.
+    const file = chosenFile
     startTransition(async () => {
       try {
-        if (!(file instanceof File) || file.size === 0) {
+        if (!file || file.size === 0) {
           setError("Choose a demo file.")
           return
         }
@@ -231,7 +284,7 @@ function UploadDialog({
           setError(result.error)
           return
         }
-        setOpen(false)
+        reset()
         setTaggedIds([])
         // Client-side, like the cards: a resident engine is re-attached to,
         // not fought with, so there is nothing a full page load would fix.
@@ -243,14 +296,77 @@ function UploadDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button>Upload a demo</Button>
-      </DialogTrigger>
+    <>
+      {/* Watching comes first: the button opens the OS file picker straight
+          away, and the metadata form is not asked for until the demo has been
+          seen and judged worth keeping. */}
+      <Button onClick={() => fileInputRef.current?.click()}>
+        <Eye className="mr-2 h-4 w-4" />
+        Preview / Upload demo
+      </Button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".dm_15"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (!file) return
+          setChosenFile(file)
+          setError(null)
+          setStage("preview")
+        }}
+      />
+
+      {/* Stage 2: the bare player. No title, reactions or comments -- this is
+          "is this the right recording", not a demo page. */}
+      <Dialog open={stage === "preview"} onOpenChange={(o) => !o && reset()}>
+        {/* sm:max-w-6xl, not max-w-5xl: DialogContent's own base class is
+            sm:max-w-lg, and a responsive variant beats an unprefixed utility at
+            that breakpoint -- so a plain max-w-* here was silently ignored and
+            the dialog stayed 512px wide. Width matters more here than on a
+            normal dialog: the engine sizes its framebuffer once, to whatever
+            the canvas measures at boot, so a wider box is a sharper picture. */}
+        <DialogContent className="sm:max-w-6xl">
+          <DialogHeader className="min-w-0">
+            {/* A .dm_15 name is one long unbreakable token -- underscores are
+                not break opportunities -- so without these it sets a min-content
+                width wider than the dialog, and every w-full sibling (the player
+                included) inflates to match and spills past the border. */}
+            <DialogTitle className="min-w-0 break-words">{chosenFile?.name}</DialogTitle>
+            <DialogDescription>
+              Playing from your machine. Nothing is uploaded until you publish. The preview renders at the size of
+              this window, so it can look a little softer than the real thing — publishing does not change the
+              recording, and it plays at full resolution on its own page.
+            </DialogDescription>
+          </DialogHeader>
+          {/* aspect-video, not just a border: the viewer's own root is
+              h-full/w-full, so it collapses to a zero-height canvas unless the
+              parent states a height. Same wrapper the demo page uses. */}
+          <div className="aspect-video w-full min-w-0 overflow-hidden rounded-md border">
+            {previewUrl && viewerMounted && (
+              <DemoViewer demoUrl={previewUrl} demoFileName={chosenFile?.name} showShare={false} />
+            )}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={reset}>
+              Discard
+            </Button>
+            <Button type="button" onClick={() => setStage("details")}>
+              Publish…
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stage 3: everything the library needs to file it. */}
+      <Dialog open={stage === "details"} onOpenChange={(o) => !o && setStage("preview")}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Upload a demo</DialogTitle>
-          <DialogDescription>JK2 .dm_15 files only. Give it a real title, not the raw filename.</DialogDescription>
+          <DialogTitle>Publish demo</DialogTitle>
+          <DialogDescription className="min-w-0 break-words">
+            {chosenFile?.name} — give it a real title, not the raw filename.
+          </DialogDescription>
         </DialogHeader>
         <form action={submit} className="space-y-4">
           <div className="space-y-1.5">
@@ -277,15 +393,6 @@ function UploadDialog({
           <div className="space-y-1.5">
             <Label htmlFor="recordedAt">Date recorded</Label>
             <Input id="recordedAt" name="recordedAt" type="date" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="file">Demo file (.dm_15)</Label>
-            <Input id="file" name="file" type="file" accept=".dm_15" required />
-            {!isAdmin && (
-              <p className="text-xs text-muted-foreground">
-                Up to 5MB — a single game or highlight reel. Ask an admin to publish anything longer.
-              </p>
-            )}
           </div>
           {isAdmin && (
             <div className="space-y-1.5">
@@ -360,18 +467,18 @@ function UploadDialog({
           </DialogFooter>
         </form>
       </DialogContent>
-    </Dialog>
+      </Dialog>
+    </>
   )
 }
 
 const SORTS = [
   { id: "recent", label: "Date uploaded" },
-  { id: "rating", label: "Rating" },
+  { id: "reacts", label: "Most reacts" },
   { id: "views", label: "Views" },
 ] as const
 type SortKey = (typeof SORTS)[number]["id"]
 
-const RATING_FLOORS = [1, 2, 3, 4, 5] as const
 
 // Grouping key for "which month was this actually played" -- recordedAt when
 // it's known, otherwise the upload date is the closest thing to it. Behind a
@@ -398,11 +505,9 @@ export function DemoLibrary({
   isAdmin: boolean
 }) {
   const [query, setQuery] = useState("")
-  const [gametype, setGametype] = useState<Gametype | "all">("all")
   const [month, setMonth] = useState("all")
   const [sort, setSort] = useState<SortKey>("recent")
   const [tag, setTag] = useState("all")
-  const [minRating, setMinRating] = useState(0)
 
   const months = useMemo(() => {
     const keys = [...new Set(demos.map(monthKeyOf))]
@@ -419,12 +524,8 @@ export function DemoLibrary({
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase()
     const list = demos.filter((d) => {
-      if (gametype !== "all" && d.gametype !== gametype) return false
       if (month !== "all" && monthKeyOf(d) !== month) return false
       if (tag !== "all" && !d.tags.includes(tag as never)) return false
-      // A never-rated demo (avgRating null) can't clear any floor above 0 --
-      // that's the right call, not an edge case to special-case around.
-      if (minRating > 0 && (d.avgRating === null || d.avgRating < minRating)) return false
       if (!q) return true
       return (
         d.title.toLowerCase().includes(q) ||
@@ -434,8 +535,8 @@ export function DemoLibrary({
       )
     })
     const sorted = [...list]
-    if (sort === "rating") {
-      sorted.sort((a, b) => (b.avgRating ?? -1) - (a.avgRating ?? -1))
+    if (sort === "reacts") {
+      sorted.sort((a, b) => b.reactionTotal - a.reactionTotal)
     } else if (sort === "views") {
       sorted.sort((a, b) => b.viewCount - a.viewCount)
     } else {
@@ -458,28 +559,28 @@ export function DemoLibrary({
      */
     if (!q) return sorted
     return sorted.sort((a, b) => matchRank(b, q) - matchRank(a, q))
-  }, [demos, query, gametype, month, sort, tag, minRating])
+  }, [demos, query, month, sort, tag])
 
   return (
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
+          {/* First control on the row on purpose: watching a demo you already
+              have is the reason most people open this page with a file in
+              hand, and it used to be tucked away on the far right. */}
+          {canUpload ? (
+            <UploadDialog players={players} isAdmin={isAdmin} />
+          ) : (
+            <Button variant="outline" disabled title="Log in to upload a demo">
+              Log in to upload
+            </Button>
+          )}
           <Input
             placeholder="Search title, map, or player..."
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             className="w-64"
           />
-          {GAMETYPE_FILTERS.map((g) => (
-            <Button
-              key={g}
-              size="sm"
-              variant={gametype === g ? "default" : "outline"}
-              onClick={() => setGametype(g)}
-            >
-              {g === "all" ? "All" : g}
-            </Button>
-          ))}
           <Select value={month} onValueChange={setMonth}>
             <SelectTrigger className="w-40">
               <SelectValue />
@@ -508,19 +609,6 @@ export function DemoLibrary({
               </SelectContent>
             </Select>
           )}
-          <Select value={String(minRating)} onValueChange={(v) => setMinRating(Number(v))}>
-            <SelectTrigger className="w-36">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="0">All ratings</SelectItem>
-              {RATING_FLOORS.map((n) => (
-                <SelectItem key={n} value={String(n)}>
-                  {n === 5 ? "5 stars" : `${n}+ stars`}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
           <Select value={sort} onValueChange={(v) => setSort(v as SortKey)}>
             <SelectTrigger className="w-44">
               <SelectValue />
@@ -534,13 +622,6 @@ export function DemoLibrary({
             </SelectContent>
           </Select>
         </div>
-        {canUpload ? (
-          <UploadDialog players={players} isAdmin={isAdmin} />
-        ) : (
-          <Button variant="outline" disabled title="Log in to upload a demo">
-            Log in to upload
-          </Button>
-        )}
       </div>
 
 

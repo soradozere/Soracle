@@ -12,7 +12,13 @@ const CONFIG = {
   },
   elite: {
     THRESHOLD: 8,
-    STACK_PENALTY: 1500, // flat penalty when one team has 3+ elites and the other is short by 2+
+    // Flat penalty when one team has 3+ elites and the other is short by 2+. Raised from
+    // 1500 to constraint level (same band as the cluster rules) in August 2026: at 1500 it
+    // sat in the same numeric range as the role heuristics, so the search could BUY a 3-v-1
+    // elite stack by paying for it with role-balance gains. Nothing in the 260-lobby history
+    // picked a stacking split at the old weight, so raising it changes no existing
+    // recommendation — it only stops a stack being traded for.
+    STACK_PENALTY: 8000,
   },
   roles: {
     COVERAGE_PENALTY: 500,
@@ -32,9 +38,23 @@ const CONFIG = {
   // cappers across teams, but nothing stops the single best capper and the single best
   // chase returner from landing together — a frequent complaint, since that one team then
   // owns both pivotal duels. This flat penalty fires when one side holds BOTH and the other
-  // holds NEITHER, nudging the search to break the pair apart.
+  // holds NEITHER, nudging the search to break the pair apart. When one player holds both
+  // crowns, RUNNER_UP_PENALTY applies per monopolised runner-up role instead — see
+  // capperChaseSplitPenalty.
+  //
+  // RUNNER_UP_PENALTY is set at constraint level rather than as a nudge, and that took two
+  // goes to get right. At 1200 it was strong enough to move the recommendation but weak
+  // enough to be traded against, and what it bought the separation with was 3-v-1 elite
+  // stacks — five of them across the history, which is a worse problem than the one being
+  // fixed. Weight-tuning could not separate the two: every increment that unstacked a chaser
+  // pair created another elite stack. Checking all 37 dual-threat lobbies exhaustively showed
+  // a split satisfying BOTH rules always exists, so this is not a real trade-off — it was the
+  // soft terms outbidding both. Pricing both as constraints finds those splits: chaser
+  // stacking 13 -> 0 with elite stacking still at 0. If this is ever loosened back into the
+  // 1000-2000 band, re-check the elite-stack count, not just tier balance.
   split: {
     CAPPER_CHASE_PENALTY: 1200,
+    RUNNER_UP_PENALTY: 4000,
   },
   cluster: {
     TOP_TWO_PENALTY: 8000,
@@ -85,6 +105,69 @@ function bottomClusterPenalty(team1: Player[], team2: Player[]): number {
   const imbalance = Math.abs(inTeam1 * 2 - cluster.length) // == |count in team1 - count in team2|
   const excess = imbalance - (cluster.length % 2)
   return excess > 0 ? excess * CONFIG.cluster.BOTTOM_CLUSTER_PENALTY * 0.5 : 0
+}
+
+// Best-capper / best-chaser separation — keep one team from owning BOTH pivotal duel
+// roles. Shared by the tier and ELO evaluators, which differ only in penalty scale.
+//
+// Ratings are compared by VALUE, not identity, so role ties are order-independent: if a
+// role's top rating appears on both teams, each side already holds one and nothing fires.
+//
+// The dual-threat case (one player is the sole best capper AND the sole best chaser) used
+// to switch the whole rule off, on the logic that a player can't be split from himself.
+// That was too blunt — it also stopped the search caring where the RUNNER-UP in each role
+// landed, so the second-best chaser routinely stacked onto the dual threat's team and the
+// opposition was left with no answer in either direction (August 2026: bizzle, cap 10 /
+// chase 10, pulled the next-best chaser onto his side in every suggested option). He still
+// can't be split from himself, so instead we ask where the counters go: the opposition's
+// only answer to him capping is the best remaining chaser, and its only threat while he
+// chases is the best remaining capper. Each runner-up his team monopolises costs
+// runnerUpPenalty — see CONFIG.split for why that is priced as a constraint rather than a
+// nudge, and what goes wrong when it isn't.
+function capperChaseSplitPenalty(
+  team1: Player[],
+  team2: Player[],
+  pairPenalty: number,
+  runnerUpPenalty: number,
+): number {
+  const everyone = [...team1, ...team2]
+  const capOf = (p: Player) => Math.max(p.roles.Capper, 0)
+  const chaseOf = (p: Player) => Math.max(p.roles.Chase, 0)
+
+  const bestCapperVal = Math.max(...everyone.map(capOf))
+  const bestChaseVal = Math.max(...everyone.map(chaseOf))
+  const topCappers = everyone.filter((p) => capOf(p) === bestCapperVal)
+  const topChasers = everyone.filter((p) => chaseOf(p) === bestChaseVal)
+  const dualThreat =
+    topCappers.length === 1 && topChasers.length === 1 && topCappers[0] === topChasers[0] ? topCappers[0] : null
+
+  if (!dualThreat) {
+    const hasTopCapper = (team: Player[]) => team.some((p) => capOf(p) === bestCapperVal)
+    const hasTopChase = (team: Player[]) => team.some((p) => chaseOf(p) === bestChaseVal)
+    const team1Both = hasTopCapper(team1) && hasTopChase(team1)
+    const team2Both = hasTopCapper(team2) && hasTopChase(team2)
+    const team1Neither = !hasTopCapper(team1) && !hasTopChase(team1)
+    const team2Neither = !hasTopCapper(team2) && !hasTopChase(team2)
+    return (team1Both && team2Neither) || (team2Both && team1Neither) ? pairPenalty : 0
+  }
+
+  const dualTeam = team1.includes(dualThreat) ? team1 : team2
+  const otherTeam = team1.includes(dualThreat) ? team2 : team1
+  const others = everyone.filter((p) => p !== dualThreat)
+
+  // A runner-up counts as monopolised only when the dual threat's team holds that rating
+  // and the opposition holds nobody matching it — the same tie handling as above. When the
+  // runner-up rating is 0 (nobody else plays the role at all) both teams trivially match,
+  // so this can't fire: there is no counter to distribute.
+  const monopolised = (of: (p: Player) => number) => {
+    const runnerUpVal = Math.max(...others.map(of))
+    return dualTeam.some((p) => p !== dualThreat && of(p) === runnerUpVal) && !otherTeam.some((p) => of(p) === runnerUpVal)
+  }
+
+  let penalty = 0
+  if (monopolised(chaseOf)) penalty += runnerUpPenalty
+  if (monopolised(capOf)) penalty += runnerUpPenalty
+  return penalty
 }
 
 export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Player, topCluster: Player[]) {
@@ -142,32 +225,13 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const eliteCappers2 = team2.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
   score += Math.pow(eliteCappers1 - eliteCappers2, 2) * CONFIG.capper.CONCENTRATION_WEIGHT
 
-  // 3c. Best-capper / best-chaser separation — keep one team from owning BOTH the single
-  // strongest capper and the single strongest chase returner, the two pivotal duel roles.
-  // We compare by rating value (not identity) so role ties are handled order-independently,
-  // mirroring the elite-capper count fix above: the penalty only fires when one side has
-  // BOTH and the other has NEITHER. If a role is tied across both teams, each side already
-  // holds one and nothing trips. When the same lone player is best at both they can't be
-  // split, so the penalty would fire on every split — a constant that can't change the
-  // ranking but inflates every score (and anything derived from it, like the confidence
-  // display). Skip it entirely in that case.
-  const everyone = [...team1, ...team2]
-  const bestCapperVal = Math.max(...everyone.map((p) => Math.max(p.roles.Capper, 0)))
-  const bestChaseVal = Math.max(...everyone.map((p) => Math.max(p.roles.Chase, 0)))
-  const topCappers = everyone.filter((p) => Math.max(p.roles.Capper, 0) === bestCapperVal)
-  const topChasers = everyone.filter((p) => Math.max(p.roles.Chase, 0) === bestChaseVal)
-  const sameLonePlayer = topCappers.length === 1 && topChasers.length === 1 && topCappers[0] === topChasers[0]
-  if (!sameLonePlayer) {
-    const hasTopCapper = (team: Player[]) => team.some((p) => p.roles.Capper === bestCapperVal)
-    const hasTopChase = (team: Player[]) => team.some((p) => p.roles.Chase === bestChaseVal)
-    const team1Both = hasTopCapper(team1) && hasTopChase(team1)
-    const team2Both = hasTopCapper(team2) && hasTopChase(team2)
-    const team1Neither = !hasTopCapper(team1) && !hasTopChase(team1)
-    const team2Neither = !hasTopCapper(team2) && !hasTopChase(team2)
-    if ((team1Both && team2Neither) || (team2Both && team1Neither)) {
-      score += CONFIG.split.CAPPER_CHASE_PENALTY
-    }
-  }
+  // 3c. Best-capper / best-chaser separation. See capperChaseSplitPenalty.
+  score += capperChaseSplitPenalty(
+    team1,
+    team2,
+    CONFIG.split.CAPPER_CHASE_PENALTY,
+    CONFIG.split.RUNNER_UP_PENALTY,
+  )
 
   // 4a. Top-3 strength balance
   const sortedTier1 = team1.map((p) => p.tierValue).sort((a, b) => b - a)
@@ -532,6 +596,12 @@ const ELO_CONFIG = {
   CAPPER_BEST_WEIGHT: 2.0, // split each team's single best capper (scarcest role)
   CAPPER_STACK_PENALTY: 50, // per elite-capper (8+) count difference between teams
   CAPPER_CHASE_PENALTY: 80, // flat: one side holds both the best capper and best chaser
+  // Per runner-up role monopolised in the dual-threat case. Deliberately left at parity with
+  // CAPPER_CHASE_PENALTY rather than raised to constraint level as the tier balancer's
+  // equivalent was: that decision rested on a 260-lobby replay, and there is no comparable
+  // validation for ELO mode (it needs a historical ELO map, not just rosters). Revisit
+  // together with the "calibrated by eye" note above once ELO mode has real usage data.
+  RUNNER_UP_PENALTY: 80,
 }
 
 /**
@@ -587,28 +657,13 @@ function evaluateEloSplit(team1: Player[], team2: Player[], eloOf: (p: Player) =
   const eliteCappers2 = team2.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
   score += Math.abs(eliteCappers1 - eliteCappers2) * ELO_CONFIG.CAPPER_STACK_PENALTY
 
-  // Best-capper / best-chaser separation — keep one side from owning both pivotal duel
-  // roles (mirrors the tier balancer's 3c). Compare by rating value so role ties are
-  // order-independent; only fires when one team has both and the other has neither.
-  // Skipped when the same lone player is best at both, as in 3c: unsplittable, so the
-  // penalty would just be a constant on every split.
-  const everyone = [...team1, ...team2]
-  const bestCapperVal = Math.max(...everyone.map((p) => Math.max(p.roles.Capper, 0)))
-  const bestChaseVal = Math.max(...everyone.map((p) => Math.max(p.roles.Chase, 0)))
-  const topCappers = everyone.filter((p) => Math.max(p.roles.Capper, 0) === bestCapperVal)
-  const topChasers = everyone.filter((p) => Math.max(p.roles.Chase, 0) === bestChaseVal)
-  const sameLonePlayer = topCappers.length === 1 && topChasers.length === 1 && topCappers[0] === topChasers[0]
-  if (!sameLonePlayer) {
-    const hasTopCapper = (team: Player[]) => team.some((p) => p.roles.Capper === bestCapperVal)
-    const hasTopChase = (team: Player[]) => team.some((p) => p.roles.Chase === bestChaseVal)
-    const team1Both = hasTopCapper(team1) && hasTopChase(team1)
-    const team2Both = hasTopCapper(team2) && hasTopChase(team2)
-    const team1Neither = !hasTopCapper(team1) && !hasTopChase(team1)
-    const team2Neither = !hasTopCapper(team2) && !hasTopChase(team2)
-    if ((team1Both && team2Neither) || (team2Both && team1Neither)) {
-      score += ELO_CONFIG.CAPPER_CHASE_PENALTY
-    }
-  }
+  // Best-capper / best-chaser separation (mirrors the tier balancer's 3c, at ELO scale).
+  score += capperChaseSplitPenalty(
+    team1,
+    team2,
+    ELO_CONFIG.CAPPER_CHASE_PENALTY,
+    ELO_CONFIG.RUNNER_UP_PENALTY,
+  )
 
   return { score, avgDiff, sum1, sum2 }
 }

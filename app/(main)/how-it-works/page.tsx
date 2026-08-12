@@ -59,6 +59,15 @@ export default function HowItWorksPage() {
               <li className="flex items-start gap-3">
                 <span className="text-primary font-mono font-bold">•</span>
                 <div>
+                  <strong className="text-text-bright">The best capper and best chaser go to opposite teams</strong>
+                  <p className="text-sm text-text-dim mt-1">
+                    Those are the two duels that decide most rounds, so one side shouldn&apos;t own both. Sometimes the same player is the best at both, and a dual threat like that can&apos;t be split from himself — so the balancer sends the next-best chaser to the other team instead, making sure someone over there can actually contest his caps.
+                  </p>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="text-primary font-mono font-bold">•</span>
+                <div>
                   <strong className="text-text-bright">Even role spread</strong>
                   <p className="text-sm text-text-dim mt-1">
                     Beyond capping, each team should have similar total ratings in every other role (Chase, Camp, Cleaner, Support) — not just a matching overall score.
@@ -88,7 +97,7 @@ export default function HowItWorksPage() {
                 <div>
                   <strong className="text-text-bright">No stacked elites</strong>
                   <p className="text-sm text-text-dim mt-1">
-                    One team shouldn&apos;t hoard the tier 8+ players while the other goes without.
+                    One team shouldn&apos;t hoard the tier 8+ players while the other goes without. This one is close to a hard rule rather than a preference — the balancer won&apos;t hand you a top-heavy team just because the roles happen to line up nicely.
                   </p>
                 </div>
               </li>
@@ -104,15 +113,15 @@ export default function HowItWorksPage() {
               <li className="flex items-start gap-3">
                 <span className="text-primary font-mono font-bold">•</span>
                 <div>
-                  <strong className="text-text-bright">Mic balance</strong>
+                  <strong className="text-text-bright">Weakest players spread out</strong>
                   <p className="text-sm text-text-dim mt-1">
-                    A light tiebreaker that spreads mic users evenly.
+                    The bottom of the lobby gets split across both sides, the way a manual draft&apos;s last picks naturally would, instead of pooling on one team to pay for a stack on the other.
                   </p>
                 </div>
               </li>
             </ul>
             <p className="leading-relaxed mt-4">
-              The balancer combines all of these into one score and returns the split with the lowest total penalty — plus a couple of close alternatives in case the top pick doesn&apos;t feel right.
+              The balancer combines all of these into one score and returns the split with the lowest total penalty — plus a couple of close alternatives in case the top pick doesn&apos;t feel right. Mic counts are shown on each team for convenience, but they no longer affect the score.
             </p>
           </section>
 
@@ -127,6 +136,9 @@ export default function HowItWorksPage() {
             <h3 className="text-xl font-bold text-text-bright mb-3">Balance Confidence</h3>
             <p className="leading-relaxed">
               Each balance option shows a confidence percentage based on the penalty score — lower penalty translates to higher confidence. You&apos;ll also see this on logged matches in the Match History tab, so you can track whether higher-confidence balances actually produce closer games.
+            </p>
+            <p className="leading-relaxed mt-3">
+              One caveat when comparing the three cards: the Off-Role option is graded on tiers alone, because ignoring role ratings is the whole point of it. Fewer checks means fewer ways to lose points, so it will almost always show a higher percentage than the other two. Read its number against other Off-Role splits, not against the main recommendation.
             </p>
           </section>
 
