@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, useTransition } from "react"
+import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Eye } from "lucide-react"
@@ -154,7 +154,19 @@ function UploadDialog({
   players: { id: string; name: string }[]
   isAdmin: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  /*
+   * The flow is one file moving through three stages, so it is one piece of
+   * state rather than three booleans that could contradict each other:
+   *
+   *   idle    -- nothing picked; the button opens the OS file picker
+   *   preview -- watching it locally, from a blob: URL. Nothing uploaded yet
+   *   details -- filling in the metadata, having decided it is worth keeping
+   *
+   * Publishing is the only thing that touches R2 (see submit), so backing out
+   * of either dialog costs nothing but the object URL, which is revoked below.
+   */
+  const [stage, setStage] = useState<"idle" | "preview" | "details">("idle")
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [error, setError] = useState<string | null>(null)
   const [playerFilter, setPlayerFilter] = useState("")
   const [taggedIds, setTaggedIds] = useState<string[]>([])
@@ -168,15 +180,24 @@ function UploadDialog({
   // is uploaded. The object URL is derived from it and revoked on the way out,
   // since each createObjectURL pins the whole file in memory until it is.
   const [chosenFile, setChosenFile] = useState<File | null>(null)
-  const [previewOpen, setPreviewOpen] = useState(false)
   const previewUrl = useMemo(
-    () => (chosenFile && previewOpen ? URL.createObjectURL(chosenFile) : null),
-    [chosenFile, previewOpen],
+    () => (chosenFile && stage === "preview" ? URL.createObjectURL(chosenFile) : null),
+    [chosenFile, stage],
   )
   useEffect(() => {
     if (!previewUrl) return
     return () => URL.revokeObjectURL(previewUrl)
   }, [previewUrl])
+
+  /** Back to nothing: drops the file so its object URL is revoked. */
+  function reset() {
+    setStage("idle")
+    setChosenFile(null)
+    setError(null)
+    // The input keeps its value, so picking the same file twice in a row would
+    // fire no change event and look broken.
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
 
   const visiblePlayers = players.filter((p) => p.name.toLowerCase().includes(playerFilter.toLowerCase()))
 
@@ -218,13 +239,13 @@ function UploadDialog({
     setError(null)
     for (const id of taggedIds) formData.append("playerIds", id)
     for (const id of highlightTags) formData.append("tags", id)
-    const file = formData.get("file")
-    // The file rides the signed PUT, never the action -- a multi-MB action
-    // body is exactly what this flow exists to avoid.
-    formData.delete("file")
+    // The file is held in state, not in the form: it was chosen back at the
+    // preview step, and it rides the signed PUT rather than the action anyway
+    // -- a multi-MB action body is exactly what this flow exists to avoid.
+    const file = chosenFile
     startTransition(async () => {
       try {
-        if (!(file instanceof File) || file.size === 0) {
+        if (!file || file.size === 0) {
           setError("Choose a demo file.")
           return
         }
@@ -245,7 +266,7 @@ function UploadDialog({
           setError(result.error)
           return
         }
-        setOpen(false)
+        reset()
         setTaggedIds([])
         // Client-side, like the cards: a resident engine is re-attached to,
         // not fought with, so there is nothing a full page load would fix.
@@ -257,14 +278,62 @@ function UploadDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button>Upload a demo</Button>
-      </DialogTrigger>
+    <>
+      {/* Watching comes first: the button opens the OS file picker straight
+          away, and the metadata form is not asked for until the demo has been
+          seen and judged worth keeping. */}
+      <Button onClick={() => fileInputRef.current?.click()}>
+        <Eye className="mr-2 h-4 w-4" />
+        Preview / Upload demo
+      </Button>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".dm_15"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0]
+          if (!file) return
+          setChosenFile(file)
+          setError(null)
+          setStage("preview")
+        }}
+      />
+
+      {/* Stage 2: the bare player. No title, reactions or comments -- this is
+          "is this the right recording", not a demo page. */}
+      <Dialog open={stage === "preview"} onOpenChange={(o) => !o && reset()}>
+        <DialogContent className="max-w-5xl">
+          <DialogHeader>
+            <DialogTitle>{chosenFile?.name}</DialogTitle>
+            <DialogDescription>
+              Playing from your machine. Nothing is uploaded until you publish.
+            </DialogDescription>
+          </DialogHeader>
+          {previewUrl && (
+            <div className="overflow-hidden rounded-md border">
+              <DemoViewer demoUrl={previewUrl} demoFileName={chosenFile?.name} />
+            </div>
+          )}
+          <DialogFooter className="gap-2">
+            <Button type="button" variant="outline" onClick={reset}>
+              Discard
+            </Button>
+            <Button type="button" onClick={() => setStage("details")}>
+              Publish…
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Stage 3: everything the library needs to file it. */}
+      <Dialog open={stage === "details"} onOpenChange={(o) => !o && setStage("preview")}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Upload a demo</DialogTitle>
-          <DialogDescription>JK2 .dm_15 files only. Give it a real title, not the raw filename.</DialogDescription>
+          <DialogTitle>Publish demo</DialogTitle>
+          <DialogDescription>
+            {chosenFile?.name} — give it a real title, not the raw filename.
+          </DialogDescription>
         </DialogHeader>
         <form action={submit} className="space-y-4">
           <div className="space-y-1.5">
@@ -291,38 +360,6 @@ function UploadDialog({
           <div className="space-y-1.5">
             <Label htmlFor="recordedAt">Date recorded</Label>
             <Input id="recordedAt" name="recordedAt" type="date" />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="file">Demo file (.dm_15)</Label>
-            <Input
-              id="file"
-              name="file"
-              type="file"
-              accept=".dm_15"
-              required
-              onChange={(e) => setChosenFile(e.target.files?.[0] ?? null)}
-            />
-            {/* Watch it before it exists anywhere but this machine. The engine
-                runs in this page and loads over a plain fetch, so a blob: URL
-                plays exactly like the R2 one would -- nothing is uploaded, no
-                row is written, and picking a different file just replaces it. */}
-            {chosenFile && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="w-full"
-                onClick={() => setPreviewOpen(true)}
-              >
-                <Eye className="mr-2 h-4 w-4" />
-                Preview before publishing
-              </Button>
-            )}
-            {!isAdmin && (
-              <p className="text-xs text-muted-foreground">
-                Up to 5MB — a single game or highlight reel. Ask an admin to publish anything longer.
-              </p>
-            )}
           </div>
           {isAdmin && (
             <div className="space-y-1.5">
@@ -397,30 +434,8 @@ function UploadDialog({
           </DialogFooter>
         </form>
       </DialogContent>
-
-      {/* Nested inside the upload dialog so closing the preview returns to the
-          half-filled form rather than throwing the metadata away. */}
-      <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="max-w-5xl">
-          <DialogHeader>
-            <DialogTitle>Preview — {chosenFile?.name}</DialogTitle>
-            <DialogDescription>
-              Playing from this machine. Nothing has been uploaded yet; close this and publish when it looks right.
-            </DialogDescription>
-          </DialogHeader>
-          {previewUrl && (
-            <div className="overflow-hidden rounded-md border">
-              <DemoViewer demoUrl={previewUrl} demoFileName={chosenFile?.name} />
-            </div>
-          )}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setPreviewOpen(false)}>
-              Back to details
-            </Button>
-          </DialogFooter>
-        </DialogContent>
       </Dialog>
-    </Dialog>
+    </>
   )
 }
 
@@ -517,6 +532,16 @@ export function DemoLibrary({
     <div>
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
+          {/* First control on the row on purpose: watching a demo you already
+              have is the reason most people open this page with a file in
+              hand, and it used to be tucked away on the far right. */}
+          {canUpload ? (
+            <UploadDialog players={players} isAdmin={isAdmin} />
+          ) : (
+            <Button variant="outline" disabled title="Log in to upload a demo">
+              Log in to upload
+            </Button>
+          )}
           <Input
             placeholder="Search title, map, or player..."
             value={query}
@@ -564,13 +589,6 @@ export function DemoLibrary({
             </SelectContent>
           </Select>
         </div>
-        {canUpload ? (
-          <UploadDialog players={players} isAdmin={isAdmin} />
-        ) : (
-          <Button variant="outline" disabled title="Log in to upload a demo">
-            Log in to upload
-          </Button>
-        )}
       </div>
 
 
