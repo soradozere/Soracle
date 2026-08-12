@@ -189,6 +189,24 @@ function UploadDialog({
     return () => URL.revokeObjectURL(previewUrl)
   }, [previewUrl])
 
+  /*
+   * The engine sizes its framebuffer to the canvas once, at boot, and the
+   * dialog animates in with a scale transform -- so mounting the viewer with
+   * the dialog measured a box that was still moving, baked a framebuffer at the
+   * wrong aspect, and object-contain pillarboxed the picture inside a correctly
+   * sized canvas for the rest of the session. Waiting for the animation to
+   * settle means the first measurement is the final one.
+   */
+  const [viewerMounted, setViewerMounted] = useState(false)
+  useEffect(() => {
+    if (stage !== "preview") {
+      setViewerMounted(false)
+      return
+    }
+    const t = setTimeout(() => setViewerMounted(true), 250)
+    return () => clearTimeout(t)
+  }, [stage])
+
   /** Back to nothing: drops the file so its object URL is revoked. */
   function reset() {
     setStage("idle")
@@ -310,14 +328,14 @@ function UploadDialog({
               Playing from your machine. Nothing is uploaded until you publish.
             </DialogDescription>
           </DialogHeader>
-          {previewUrl && (
-            // aspect-video, not just a border: the viewer's own root is
-            // h-full/w-full, so it collapses to a zero-height canvas unless the
-            // parent states a height. Same wrapper the demo page uses.
-            <div className="aspect-video w-full overflow-hidden rounded-md border">
-              <DemoViewer demoUrl={previewUrl} demoFileName={chosenFile?.name} />
-            </div>
-          )}
+          {/* aspect-video, not just a border: the viewer's own root is
+              h-full/w-full, so it collapses to a zero-height canvas unless the
+              parent states a height. Same wrapper the demo page uses. */}
+          <div className="aspect-video w-full overflow-hidden rounded-md border">
+            {previewUrl && viewerMounted && (
+              <DemoViewer demoUrl={previewUrl} demoFileName={chosenFile?.name} showShare={false} />
+            )}
+          </div>
           <DialogFooter className="gap-2">
             <Button type="button" variant="outline" onClick={reset}>
               Discard

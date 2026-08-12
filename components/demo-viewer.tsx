@@ -164,6 +164,12 @@ interface DemoViewerProps {
    */
   demoFileName?: string
   /**
+   * Offer the "copy a link to this moment" button. Off for the pre-upload
+   * preview, where the demo exists only in the uploader's browser -- the link
+   * it copies would point at whatever page they happen to be on.
+   */
+  showShare?: boolean
+  /**
    * Known length in milliseconds. The format states no duration, so without
    * this the scrubber can only span what has been watched so far -- which on a
    * long demo looks like a bar that refuses to move.
@@ -237,6 +243,7 @@ interface DemoViewerProps {
 export function DemoViewer({
   demoUrl,
   demoFileName,
+  showShare = true,
   durationMs = 0,
   engineBaseUrl,
   followName,
@@ -2248,14 +2255,16 @@ export function DemoViewer({
               className="h-1 w-16 cursor-pointer accent-cyan-400 [@media(hover:none)_and_(pointer:coarse)]:h-9 [@media(hover:none)_and_(pointer:coarse)]:w-24"
               aria-label="Volume"
             />
-            <button
-              onClick={copyLink}
-              title="Copy a link to this moment"
-              className="flex items-center gap-1.5 rounded-md bg-white/10 px-2 py-1.5 text-xs text-white hover:bg-white/20"
-            >
-              <Link2 className="h-4 w-4" />
-              {copied ? "Copied" : "Share"}
-            </button>
+            {showShare && (
+              <button
+                onClick={copyLink}
+                title="Copy a link to this moment"
+                className="flex items-center gap-1.5 rounded-md bg-white/10 px-2 py-1.5 text-xs text-white hover:bg-white/20"
+              >
+                <Link2 className="h-4 w-4" />
+                {copied ? "Copied" : "Share"}
+              </button>
+            )}
             <button
               onClick={() => setSettingsOpen((s) => !s)}
               title="Settings"
