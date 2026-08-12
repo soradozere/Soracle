@@ -113,6 +113,7 @@ interface PlayerRow {
   id: string
   name: string
   tier_value: number
+  avatar_url: string | null
 }
 
 interface PairRecord {
@@ -134,6 +135,7 @@ interface OppRecord {
 interface WrappedCard {
   name: string
   tier: number | null
+  avatarUrl: string | null
   wins: number
   losses: number
   draws: number
@@ -160,7 +162,7 @@ interface WrappedCard {
   /** Record split by which side they were on. */
   byTeam: { red: { wins: number; losses: number }; blue: { wins: number; losses: number } }
   /** Kills by style, highest first; only styles they actually landed. */
-  killTypes: { label: string; value: number }[]
+  killTypes: { label: string; value: number; order: number }[]
   /** From the JSON kill matrix — empty when the month has no matrix data. */
   prey: DuelRecord[]
   bullies: DuelRecord[]
@@ -181,22 +183,27 @@ const PAIR_MIN_GAMES = 3
  * does not fill the card with blanks.
  */
 const KILL_STYLES: { key: keyof StatRow; label: string }[] = [
-  { key: "red_kills", label: "Red" },
+  // Fixed running order, not sorted by count: sabre styles first in stance
+  // order, then the special moves, then everything that is not a sabre at all.
+  // A value-sorted list reshuffles itself every month, so you can never learn
+  // where to look.
+  //
+  // Names as players use them, which do not follow the column names: bs_kills is
+  // a BACKSLASH, and a backstab is the blue one (blubs). DBS is the Double
+  // Backhanded Slash, and not a variant of either.
   { key: "yellow_kills", label: "Yellow" },
+  { key: "red_kills", label: "Red" },
   { key: "blue_kills", label: "Blue" },
   { key: "dfa_kills", label: "DFA" },
-  { key: "ydfa_kills", label: "YDFA" },
-  // Names as players use them, which do not follow the column names: bs_kills
-  // is a BACKSLASH, and a backstab is the blue one (blubs). DBS is the Double
-  // Backhanded Slash, not a variant of either.
   { key: "bs_kills", label: "Backslash" },
   { key: "dbs_kills", label: "DBS" },
-  { key: "blubs_kills", label: "Backstab" },
   { key: "upcut_kills", label: "Upcut" },
-  { key: "mine_kills", label: "Mine" },
+  { key: "ydfa_kills", label: "YDFA" },
+  { key: "blubs_kills", label: "Backstab" },
+  { key: "mine_kills", label: "Mines" },
   { key: "turret_kills", label: "Turret" },
-  { key: "tele_kills", label: "Tele" },
   { key: "doom_kills", label: "Doom" },
+  { key: "tele_kills", label: "Tele" },
   { key: "idle_kills", label: "Idle" },
 ]
 
@@ -427,11 +434,14 @@ function FormGraph({ results }: { results: Result[] }) {
         {results.map((r, i) => (
           <span
             key={i}
-            title={`${new Date(r.date).toLocaleDateString(undefined, {
+            // data-hint, not title: the site's own CSS tooltip appears on hover
+            // straight away, where the browser's native one waits a second and
+            // reads as nothing happening.
+            data-hint={`${new Date(r.date).toLocaleDateString(undefined, {
               day: "numeric",
               month: "short",
             })} — ${r.outcome === "W" ? "Won" : r.outcome === "L" ? "Lost" : "Drew"} ${r.scoreFor}-${r.scoreAgainst}`}
-            className="flex-1 min-w-[3px] h-4 rounded-sm"
+            className="relative flex-1 min-w-[3px] h-4 rounded-sm"
             style={{
               backgroundColor: r.outcome === "W" ? "#27ae60" : r.outcome === "L" ? "#ff4757" : "#5a6472",
             }}
@@ -465,7 +475,7 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
         .gte("created_at", startIso)
         .lte("created_at", endIso)
         .order("created_at", { ascending: true }),
-      supabase.from("players").select("id, name, tier_value"),
+      supabase.from("players").select("id, name, tier_value, avatar_url"),
       getAchievementsEarnedInMonth(year, month),
     ]).then(async ([matchResult, playerResult, achResult]) => {
       if (cancelled) return
@@ -513,6 +523,7 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
         c = {
           name,
           tier: null,
+          avatarUrl: null,
           wins: 0,
           losses: 0,
           draws: 0,
@@ -656,7 +667,10 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
     const nameById = new Map(players.map((p) => [p.id, p.name] as const))
     for (const p of players) {
       const c = byName.get(p.name)
-      if (c) c.tier = p.tier_value
+      if (c) {
+        c.tier = p.tier_value
+        c.avatarUrl = p.avatar_url
+      }
     }
 
     const matchById = new Map(matches.map((m) => [m.id, m] as const))
@@ -683,10 +697,10 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
         if (!n) continue
         const found = c.killTypes.find((k) => k.label === style.label)
         if (found) found.value += n
-        else c.killTypes.push({ label: style.label, value: n })
+        else c.killTypes.push({ label: style.label, value: n, order: KILL_STYLES.indexOf(style) })
       }
+      c.killTypes.sort((a, b) => a.order - b.order)
     }
-    for (const c of byName.values()) c.killTypes.sort((a, b) => b.value - a.value)
 
     /*
      * Prey, bullies and rivals, from the JSON kill matrix.
@@ -834,7 +848,20 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
               className="absolute -right-[52px] -top-[44px] w-[210px] h-[210px] opacity-[0.06] pointer-events-none"
             />
             <div className="flex flex-wrap items-start justify-between gap-4">
-              <div>
+              <div className="flex items-center gap-4 min-w-0">
+                {card.avatarUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element -- admin-set URLs
+                  <img
+                    src={card.avatarUrl}
+                    alt=""
+                    className="w-16 h-16 rounded-xl object-cover shrink-0"
+                    style={{
+                      border: "1px solid color-mix(in srgb, var(--color-primary) 45%, transparent)",
+                      boxShadow: "0 0 18px -6px var(--color-primary-glow)",
+                    }}
+                  />
+                )}
+              <div className="min-w-0">
                 <div
                   className="text-[40px] font-bold leading-[1.05]"
                   style={{
@@ -853,6 +880,7 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
                     Tier {card.tier} — {TIER_NAMES[card.tier] ?? "Unranked"}
                   </span>
                 )}
+              </div>
               </div>
             </div>
 
@@ -917,9 +945,10 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
                 </div>
               )}
             </div>
-          </section>
-
-          <section className="glass-panel p-5">
+            {/* The stat block lives in the same card as the name and record --
+                two panels left both half-empty, and this is all one player's
+                month. */}
+            <div className="mt-5 pt-5" style={{ borderTop: "1px solid var(--glass-hair)" }}>
             {card.hasStats ? (
               <>
                 {/* Three columns at every width, not four on desktop. There are
@@ -998,13 +1027,19 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
                 No scoreboard stats recorded this month.
               </p>
             )}
+            </div>
           </section>
 
           {/* The month at a glance: shape of the run, and which side favoured
-              them. Two panels on one row so neither is left half-empty. */}
+              them.
+
+              Same three-column grid as the people rows below, with the graph
+              spanning two of them -- a 2fr/1fr split looks equivalent but is off
+              by a third of the gap, so the panel edges never quite lined up with
+              the row underneath. */}
           {card.results.length >= 2 && (
-            <div className="grid sm:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-3.5">
-              <section className="glass-panel p-5">
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+              <section className="glass-panel p-5 sm:col-span-1 lg:col-span-2">
                 <div
                   className="text-[11px] font-semibold uppercase tracking-[0.16em] mb-3"
                   style={{ fontFamily: "var(--font-mono)", color: "var(--color-text-dim)" }}
