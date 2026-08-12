@@ -2,17 +2,21 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { Check, ChevronsUpDown, Crosshair, Ghost, Heart, Skull, Sparkles, Swords, Target, type LucideIcon } from "lucide-react"
+import { Check, ChevronsUpDown, Crosshair, Ghost, Heart, Share2, Skull, Sparkles, Swords, Target, type LucideIcon } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { getAchievementsEarnedInMonth } from "@/app/admin/actions"
 import { Emblem } from "@/components/emblem"
 import { tallyWins } from "@/components/wins-leaderboard"
+import type { ShareCardData } from "@/lib/wrapped-card-data"
+import { renderWrappedCard } from "@/lib/wrapped-card-image"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useToast } from "@/hooks/use-toast"
 import { fmtDate, roman } from "@/lib/achievement-format"
 import { rarityColor, rarityLabel } from "@/lib/achievement-pages"
 import type { LedgerEntry } from "@/lib/achievements-server"
+import { RARITY_ORDER } from "@/lib/achievement-score"
+import type { Rarity } from "@/lib/achievement-meta"
 import { playerSlug } from "@/lib/player-profile"
 import { cn } from "@/lib/utils"
 
@@ -468,6 +472,13 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
   const [matches, setMatches] = useState<Match[]>([])
   const [stats, setStats] = useState<StatRow[]>([])
   const [kills, setKills] = useState<KillRow[]>([])
+  /*
+   * Seasonal titles banked for this month. A separate system from achievements:
+   * player_titles records the season ladder as it is cleared, keyed by
+   * season_key ("2026-07"), because a past season's ladder no longer exists to
+   * recompute against once the catalogue rolls over.
+   */
+  const [monthTitles, setMonthTitles] = useState<{ player_id: string; title: string; rarity: string }[]>([])
   const [players, setPlayers] = useState<PlayerRow[]>([])
   const [achievements, setAchievements] = useState<LedgerEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -488,12 +499,17 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
         .lte("created_at", endIso)
         .order("created_at", { ascending: true }),
       supabase.from("players").select("id, name, tier_value, avatar_url"),
+      supabase
+        .from("player_titles")
+        .select("player_id, title, rarity")
+        .eq("season_key", `${year}-${String(month).padStart(2, "0")}`),
       getAchievementsEarnedInMonth(year, month),
-    ]).then(async ([matchResult, playerResult, achResult]) => {
+    ]).then(async ([matchResult, playerResult, titleResult, achResult]) => {
       if (cancelled) return
       const monthMatches = (matchResult.data ?? []) as Match[]
       setMatches(monthMatches)
       setPlayers((playerResult.data ?? []) as PlayerRow[])
+      setMonthTitles((titleResult.data ?? []) as { player_id: string; title: string; rarity: string }[])
       setAchievements(achResult.success ? achResult.data : [])
 
       const matchIds = monthMatches.map((m) => m.id)
@@ -802,7 +818,113 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
   const medal = finish?.qualified && finish.place <= 3 ? MEDAL_FOIL[finish.place - 1] : null
 
   const card = selectedName ? cards.get(selectedName) ?? null : null
+  /*
+   * What goes on the shareable card. Built here rather than inside the card so
+   * the card stays a pure render of numbers someone else decided on -- and so
+   * the four headline stats can be chosen once, in the place that knows what
+   * the month actually held.
+   */
+  const shareData: ShareCardData | null = card
+    ? {
+        name: card.name,
+        month: MONTH_NAMES[month - 1],
+        year,
+        avatarUrl: card.avatarUrl,
+        tier: card.tier,
+        tierName: card.tier !== null ? TIER_NAMES[card.tier] ?? "Unranked" : "Unranked",
+        wins: card.wins,
+        losses: card.losses,
+        winPct: card.played > 0 ? Math.round((card.wins / card.played) * 100) : 0,
+        played: card.played,
+        streak: card.streak,
+        place: finish?.qualified ? finish.place : null,
+        of: finish?.qualified ? finish.of : 0,
+        // Six, in a 2x3 block. Four left a band of dead card between the stats
+        // and the footer, and these two are the ones people quote at each other
+        // anyway.
+        stats: [
+          { label: "Caps", value: String(card.captures) },
+          { label: "Returns", value: String(card.returns) },
+          { label: "Kills", value: card.kills.toLocaleString() },
+          { label: "K/D", value: kdRatio(card.kills, card.deaths) },
+          { label: "Grabs", value: String(card.flagGrabs) },
+          { label: "Flag hold", value: formatFlagHold(card.flagHoldMs) },
+        ],
+        topFriend: card.friends[0]?.name ?? null,
+        topNemesis: card.nemeses[0]?.name ?? null,
+        bestScore: card.bestScore?.value ?? null,
+        medal,
+      }
+    : null
+
   const cardAchievements = selectedName ? achievements.filter((a) => a.playerName === selectedName) : []
+
+  /*
+   * The highest title they climbed to that month, for the line under the month
+   * name. The season ladder, not the achievement ledger: an achievement is a
+   * thing you did once, a title is the rank you finished the season at, which
+   * is what somebody would actually put on a card.
+   */
+  const monthTitle = useMemo(() => {
+    const mine = selectedName ? players.find((p) => p.name === selectedName) : null
+    if (!mine) return null
+    const earned = monthTitles.filter((t) => t.player_id === mine.id)
+    if (earned.length === 0) return null
+    return [...earned].sort(
+      (a, b) => RARITY_ORDER.indexOf(b.rarity as Rarity) - RARITY_ORDER.indexOf(a.rarity as Rarity),
+    )[0].title
+  }, [monthTitles, players, selectedName])
+
+  const [rendering, setRendering] = useState(false)
+
+  /*
+   * Draw the card and hand it over as a PNG.
+   *
+   * The two font families are read off the live DOM rather than named: next/font
+   * rewrites them to generated names, so "Orbitron" would silently fall back to
+   * sans-serif on the canvas while looking fine everywhere else.
+   */
+  async function downloadCard() {
+    if (!shareData || rendering) return
+    setRendering(true)
+    try {
+      await document.fonts?.ready
+      const probe = document.createElement("div")
+      probe.style.cssText = "position:absolute;visibility:hidden;font-family:var(--font-orbitron)"
+      document.body.appendChild(probe)
+      const displayFont = getComputedStyle(probe).fontFamily
+      probe.style.fontFamily = "var(--font-sans, system-ui)"
+      const bodyFont = getComputedStyle(probe).fontFamily
+      const primary = getComputedStyle(document.documentElement).getPropertyValue("--color-primary").trim() || "#66fcf1"
+      probe.remove()
+
+      const blob = await renderWrappedCard(shareData, {
+        displayFont,
+        bodyFont,
+        primary,
+        results: card?.results.map((r) => r.outcome) ?? [],
+        title: monthTitle,
+      })
+      if (!blob) throw new Error("Could not draw the card.")
+
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${shareData.name}-${shareData.month}-${shareData.year}-wrapped.png`.toLowerCase()
+      a.click()
+      // Revoked on a later tick, not immediately: some browsers hand the
+      // download off asynchronously and cancel it if the blob URL disappears
+      // out from under them first.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (e) {
+      toast({
+        description: e instanceof Error ? e.message : "Couldn't build the card.",
+        variant: "destructive",
+      })
+    } finally {
+      setRendering(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -830,9 +952,27 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
           <Sparkles className="w-3.5 h-3.5" style={{ color: "var(--color-primary)" }} />
           {MONTH_NAMES[month - 1]} {year} Wrapped
         </div>
-        {/* No player picker and no share button: the card is the reader's own
-            month now, so there is no selection to link to -- and the URL state
-            that made one shareable went with the picker it belonged to. */}
+        {/* No player picker: the card is the reader's own month now. Share
+            prints the compact card rather than the page -- see the
+            .wrapped-share-print rules in globals.css. */}
+        {shareData && (
+          <button
+            type="button"
+            onClick={downloadCard}
+            disabled={rendering}
+            className="hint-left ml-auto flex items-center gap-2 rounded-xl px-4 h-9 text-[11px] font-semibold uppercase tracking-[0.14em] transition-opacity disabled:opacity-60"
+            data-hint="Download your card as an image"
+            style={{
+              background: "var(--color-primary)",
+              color: "var(--color-background)",
+              boxShadow: "0 0 14px -4px var(--color-primary-glow)",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            {rendering ? "Saving…" : "Share"}
+          </button>
+        )}
       </div>
 
       {card && (
