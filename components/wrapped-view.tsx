@@ -7,13 +7,16 @@ import { createClient } from "@/lib/supabase/client"
 import { getAchievementsEarnedInMonth } from "@/app/admin/actions"
 import { Emblem } from "@/components/emblem"
 import { tallyWins } from "@/components/wins-leaderboard"
-import { WrappedShareCard, type ShareCardData } from "@/components/wrapped-share-card"
+import type { ShareCardData } from "@/lib/wrapped-card-data"
+import { renderWrappedCard } from "@/lib/wrapped-card-image"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useToast } from "@/hooks/use-toast"
 import { fmtDate, roman } from "@/lib/achievement-format"
 import { rarityColor, rarityLabel } from "@/lib/achievement-pages"
 import type { LedgerEntry } from "@/lib/achievements-server"
+import { RARITY_ORDER } from "@/lib/achievement-score"
+import type { Rarity } from "@/lib/achievement-meta"
 import { playerSlug } from "@/lib/player-profile"
 import { cn } from "@/lib/utils"
 
@@ -469,6 +472,13 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
   const [matches, setMatches] = useState<Match[]>([])
   const [stats, setStats] = useState<StatRow[]>([])
   const [kills, setKills] = useState<KillRow[]>([])
+  /*
+   * Seasonal titles banked for this month. A separate system from achievements:
+   * player_titles records the season ladder as it is cleared, keyed by
+   * season_key ("2026-07"), because a past season's ladder no longer exists to
+   * recompute against once the catalogue rolls over.
+   */
+  const [monthTitles, setMonthTitles] = useState<{ player_id: string; title: string; rarity: string }[]>([])
   const [players, setPlayers] = useState<PlayerRow[]>([])
   const [achievements, setAchievements] = useState<LedgerEntry[]>([])
   const [loading, setLoading] = useState(true)
@@ -489,12 +499,17 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
         .lte("created_at", endIso)
         .order("created_at", { ascending: true }),
       supabase.from("players").select("id, name, tier_value, avatar_url"),
+      supabase
+        .from("player_titles")
+        .select("player_id, title, rarity")
+        .eq("season_key", `${year}-${String(month).padStart(2, "0")}`),
       getAchievementsEarnedInMonth(year, month),
-    ]).then(async ([matchResult, playerResult, achResult]) => {
+    ]).then(async ([matchResult, playerResult, titleResult, achResult]) => {
       if (cancelled) return
       const monthMatches = (matchResult.data ?? []) as Match[]
       setMatches(monthMatches)
       setPlayers((playerResult.data ?? []) as PlayerRow[])
+      setMonthTitles((titleResult.data ?? []) as { player_id: string; title: string; rarity: string }[])
       setAchievements(achResult.success ? achResult.data : [])
 
       const matchIds = monthMatches.map((m) => m.id)
@@ -844,6 +859,73 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
 
   const cardAchievements = selectedName ? achievements.filter((a) => a.playerName === selectedName) : []
 
+  /*
+   * The highest title they climbed to that month, for the line under the month
+   * name. The season ladder, not the achievement ledger: an achievement is a
+   * thing you did once, a title is the rank you finished the season at, which
+   * is what somebody would actually put on a card.
+   */
+  const monthTitle = useMemo(() => {
+    const mine = selectedName ? players.find((p) => p.name === selectedName) : null
+    if (!mine) return null
+    const earned = monthTitles.filter((t) => t.player_id === mine.id)
+    if (earned.length === 0) return null
+    return [...earned].sort(
+      (a, b) => RARITY_ORDER.indexOf(b.rarity as Rarity) - RARITY_ORDER.indexOf(a.rarity as Rarity),
+    )[0].title
+  }, [monthTitles, players, selectedName])
+
+  const [rendering, setRendering] = useState(false)
+
+  /*
+   * Draw the card and hand it over as a PNG.
+   *
+   * The two font families are read off the live DOM rather than named: next/font
+   * rewrites them to generated names, so "Orbitron" would silently fall back to
+   * sans-serif on the canvas while looking fine everywhere else.
+   */
+  async function downloadCard() {
+    if (!shareData || rendering) return
+    setRendering(true)
+    try {
+      await document.fonts?.ready
+      const probe = document.createElement("div")
+      probe.style.cssText = "position:absolute;visibility:hidden;font-family:var(--font-orbitron)"
+      document.body.appendChild(probe)
+      const displayFont = getComputedStyle(probe).fontFamily
+      probe.style.fontFamily = "var(--font-sans, system-ui)"
+      const bodyFont = getComputedStyle(probe).fontFamily
+      const primary = getComputedStyle(document.documentElement).getPropertyValue("--color-primary").trim() || "#66fcf1"
+      probe.remove()
+
+      const blob = await renderWrappedCard(shareData, {
+        displayFont,
+        bodyFont,
+        primary,
+        results: card?.results.map((r) => r.outcome) ?? [],
+        title: monthTitle,
+      })
+      if (!blob) throw new Error("Could not draw the card.")
+
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement("a")
+      a.href = url
+      a.download = `${shareData.name}-${shareData.month}-${shareData.year}-wrapped.png`.toLowerCase()
+      a.click()
+      // Revoked on a later tick, not immediately: some browsers hand the
+      // download off asynchronously and cancel it if the blob URL disappears
+      // out from under them first.
+      setTimeout(() => URL.revokeObjectURL(url), 60_000)
+    } catch (e) {
+      toast({
+        description: e instanceof Error ? e.message : "Couldn't build the card.",
+        variant: "destructive",
+      })
+    } finally {
+      setRendering(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
@@ -876,29 +958,22 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
         {shareData && (
           <button
             type="button"
-            onClick={() => window.print()}
-            className="hint-left ml-auto flex items-center gap-2 rounded-xl px-3 h-9 text-[11px] font-semibold uppercase tracking-[0.14em] transition-colors"
-            data-hint="Save your card as a PDF"
+            onClick={downloadCard}
+            disabled={rendering}
+            className="hint-left ml-auto flex items-center gap-2 rounded-xl px-4 h-9 text-[11px] font-semibold uppercase tracking-[0.14em] transition-opacity disabled:opacity-60"
+            data-hint="Download your card as an image"
             style={{
-              border: "1px solid var(--glass-hair)",
-              color: "var(--color-text-dim)",
+              background: "var(--color-primary)",
+              color: "var(--color-background)",
+              boxShadow: "0 0 14px -4px var(--color-primary-glow)",
               fontFamily: "var(--font-mono)",
             }}
           >
             <Share2 className="w-3.5 h-3.5" />
-            Share
+            {rendering ? "Saving…" : "Share"}
           </button>
         )}
       </div>
-
-      {/* Always mounted, parked off-screen: print cannot bring back an element
-          that was never laid out, and building it only on click would print an
-          empty page on the first press. */}
-      {shareData && (
-        <div className="wrapped-share-print" aria-hidden>
-          <WrappedShareCard data={shareData} />
-        </div>
-      )}
 
       {card && (
         <>
