@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { Check, ChevronsUpDown, Crosshair, Ghost, Heart, Skull, Sparkles, Swords, Target, type LucideIcon } from "lucide-react"
+import { Check, ChevronsUpDown, Crosshair, Ghost, Heart, Share2, Skull, Sparkles, Swords, Target, type LucideIcon } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { getAchievementsEarnedInMonth } from "@/app/admin/actions"
 import { Emblem } from "@/components/emblem"
 import { tallyWins } from "@/components/wins-leaderboard"
+import { WrappedShareCard, type ShareCardData } from "@/components/wrapped-share-card"
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useToast } from "@/hooks/use-toast"
@@ -802,6 +803,45 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
   const medal = finish?.qualified && finish.place <= 3 ? MEDAL_FOIL[finish.place - 1] : null
 
   const card = selectedName ? cards.get(selectedName) ?? null : null
+  /*
+   * What goes on the shareable card. Built here rather than inside the card so
+   * the card stays a pure render of numbers someone else decided on -- and so
+   * the four headline stats can be chosen once, in the place that knows what
+   * the month actually held.
+   */
+  const shareData: ShareCardData | null = card
+    ? {
+        name: card.name,
+        month: MONTH_NAMES[month - 1],
+        year,
+        avatarUrl: card.avatarUrl,
+        tier: card.tier,
+        tierName: card.tier !== null ? TIER_NAMES[card.tier] ?? "Unranked" : "Unranked",
+        wins: card.wins,
+        losses: card.losses,
+        winPct: card.played > 0 ? Math.round((card.wins / card.played) * 100) : 0,
+        played: card.played,
+        streak: card.streak,
+        place: finish?.qualified ? finish.place : null,
+        of: finish?.qualified ? finish.of : 0,
+        // Six, in a 2x3 block. Four left a band of dead card between the stats
+        // and the footer, and these two are the ones people quote at each other
+        // anyway.
+        stats: [
+          { label: "Caps", value: String(card.captures) },
+          { label: "Returns", value: String(card.returns) },
+          { label: "Kills", value: card.kills.toLocaleString() },
+          { label: "K/D", value: kdRatio(card.kills, card.deaths) },
+          { label: "Grabs", value: String(card.flagGrabs) },
+          { label: "Flag hold", value: formatFlagHold(card.flagHoldMs) },
+        ],
+        topFriend: card.friends[0]?.name ?? null,
+        topNemesis: card.nemeses[0]?.name ?? null,
+        bestScore: card.bestScore?.value ?? null,
+        medal,
+      }
+    : null
+
   const cardAchievements = selectedName ? achievements.filter((a) => a.playerName === selectedName) : []
 
   if (loading) {
@@ -830,10 +870,35 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
           <Sparkles className="w-3.5 h-3.5" style={{ color: "var(--color-primary)" }} />
           {MONTH_NAMES[month - 1]} {year} Wrapped
         </div>
-        {/* No player picker and no share button: the card is the reader's own
-            month now, so there is no selection to link to -- and the URL state
-            that made one shareable went with the picker it belonged to. */}
+        {/* No player picker: the card is the reader's own month now. Share
+            prints the compact card rather than the page -- see the
+            .wrapped-share-print rules in globals.css. */}
+        {shareData && (
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="hint-left ml-auto flex items-center gap-2 rounded-xl px-3 h-9 text-[11px] font-semibold uppercase tracking-[0.14em] transition-colors"
+            data-hint="Save your card as a PDF"
+            style={{
+              border: "1px solid var(--glass-hair)",
+              color: "var(--color-text-dim)",
+              fontFamily: "var(--font-mono)",
+            }}
+          >
+            <Share2 className="w-3.5 h-3.5" />
+            Share
+          </button>
+        )}
       </div>
+
+      {/* Always mounted, parked off-screen: print cannot bring back an element
+          that was never laid out, and building it only on click would print an
+          empty page on the first press. */}
+      {shareData && (
+        <div className="wrapped-share-print" aria-hidden>
+          <WrappedShareCard data={shareData} />
+        </div>
+      )}
 
       {card && (
         <>
