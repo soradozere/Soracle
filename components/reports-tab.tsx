@@ -364,8 +364,12 @@ export function ReportsTab() {
    * unrelated pages when three of them are the same question answered by
    * different maths.
    */
-  const [currentView, setCurrentView] = useState<"stats" | "leaderboard">("stats")
+  const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "alltime">("stats")
   const [boardView, setBoardView] = useState<"normal" | "elo" | "trueskill">("normal")
+  // The All-Time tab shows the same two rating boards, so it needs its own
+  // selection -- sharing boardView would leave it on "Wins", which has no
+  // all-time form.
+  const [allTimeBoard, setAllTimeBoard] = useState<"elo" | "trueskill">("elo")
   const [isAdmin, setIsAdmin] = useState(false)
   // The "Under the hood" band: four working views of the same month, sharing one
   // panel rather than stacking four full-width slabs down the page.
@@ -413,6 +417,13 @@ export function ReportsTab() {
   }, [])
 
   const isCurrentMonth = selectedYear === now.getUTCFullYear() && selectedMonth === now.getUTCMonth() + 1
+
+  // isAdmin resolves after the first render, so a non-admin could be sitting on
+  // All-Time for a frame. Send them back rather than leave them on a tab that
+  // is about to vanish from the rail.
+  useEffect(() => {
+    if (!isAdmin && currentView === "alltime") setCurrentView("stats")
+  }, [isAdmin, currentView])
 
   /*
    * Every board is public. The month's own leaderboard used to be admin-only
@@ -933,9 +944,28 @@ export function ReportsTab() {
           segments={[
             { key: "stats", label: "Monthly" },
             { key: "leaderboard", label: "Leaderboard" },
+            ...(isAdmin ? [{ key: "alltime", label: "All-Time" }] : []),
           ]}
         />
       </div>
+
+      {currentView === "alltime" && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SegmentedRail
+            dense
+            aria-label="All-time board"
+            activeKey={allTimeBoard}
+            onSelect={(key) => setAllTimeBoard(key as typeof allTimeBoard)}
+            segments={[
+              { key: "elo", label: "ELO", hint: "Running rating across every match ever played" },
+              { key: "trueskill", label: "TrueSkill", hint: "Rating with a confidence interval" },
+            ]}
+          />
+          <p className="text-sm italic text-[var(--color-text-dim)]">
+            Every match on record, ignoring the month above.
+          </p>
+        </div>
+      )}
 
       {currentView === "leaderboard" && (
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -960,14 +990,20 @@ export function ReportsTab() {
         </div>
       )}
 
-      {currentView === "leaderboard" && boardView === "elo" ? (
+      {currentView === "alltime" ? (
+        allTimeBoard === "elo" ? (
+          <EloLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="alltime" />
+        ) : (
+          <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="alltime" />
+        )
+      ) : currentView === "leaderboard" && boardView === "elo" ? (
         // ELO is a running, all-time rating — render it regardless of the selected month.
         // The month selector above drives the ELO view's own All-time / Monthly toggle.
-        <EloLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} />
+        <EloLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="month" />
       ) : currentView === "leaderboard" && boardView === "trueskill" ? (
         // TrueSkill is likewise a running rating replayed fresh; the month selector drives
         // its own All-time / Monthly toggle.
-        <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} />
+        <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="month" />
       ) : totalMatches === 0 ? (
         <div className="text-center py-12 text-[var(--color-text-dim)]">
           <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-50" />
