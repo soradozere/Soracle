@@ -15,8 +15,10 @@ import type { StreakRecord } from "@/lib/achievements-server"
 import { ChevronLeft, ChevronRight, BarChart3 } from "lucide-react"
 import { SegmentedRail } from "@/components/segmented-rail"
 import { Emblem } from "@/components/emblem"
+import Link from "next/link"
 import { RankMedal } from "@/components/rank-medal"
 import { WinsLeaderboard, tallyWins } from "@/components/wins-leaderboard"
+import { WrappedView } from "@/components/wrapped-view"
 export { RankMedal }
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import type { Player } from "@/lib/types"
@@ -340,7 +342,7 @@ export function ReportsTab() {
    * unrelated pages when three of them are the same question answered by
    * different maths.
    */
-  const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "alltime">("stats")
+  const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "alltime" | "wrapped">("stats")
   const [boardView, setBoardView] = useState<"normal" | "elo" | "trueskill">("normal")
   // The All-Time tab shows the same two rating boards, so it needs its own
   // selection -- sharing boardView would leave it on "Wins", which has no
@@ -351,6 +353,18 @@ export function ReportsTab() {
   // actually opened -- no reason to pull the whole history for a page most
   // people never see.
   const [allTimeMatches, setAllTimeMatches] = useState<Match[] | null>(null)
+  /*
+   * Wrapped is personal, so the tab needs to know who is reading it. null while
+   * the check is in flight, "" once it comes back logged out -- told apart so a
+   * signed-in player never sees the login prompt flash before their own card.
+   */
+  const [me, setMe] = useState<{ playerId: string; name: string } | null | "">(null)
+  useEffect(() => {
+    fetch("/api/player-auth/me")
+      .then((r) => r.json())
+      .then((d) => setMe(d?.playerId ? { playerId: d.playerId, name: d.name } : ""))
+      .catch(() => setMe(""))
+  }, [])
   const [isAdmin, setIsAdmin] = useState(false)
   // The "Under the hood" band: four working views of the same month, sharing one
   // panel rather than stacking four full-width slabs down the page.
@@ -893,6 +907,10 @@ export function ReportsTab() {
             { key: "stats", label: "Monthly" },
             { key: "leaderboard", label: "Leaderboard" },
             ...(isAdmin ? [{ key: "alltime", label: "All-Time" }] : []),
+            // Always offered, signed in or not: a visitor who cannot see the
+            // card should still find out it exists. The login prompt lives
+            // inside the tab rather than in place of it.
+            { key: "wrapped", label: "Wrapped" },
           ]}
         />
       </div>
@@ -939,7 +957,23 @@ export function ReportsTab() {
         </div>
       )}
 
-      {currentView === "alltime" ? (
+      {currentView === "wrapped" ? (
+        me === "" ? (
+          <div className="glass-panel flex flex-col items-center gap-4 py-14 text-center">
+            <p className="text-[var(--color-text-dim)]">
+              Wrapped is your own month — your record, who you played with, and how it went.
+            </p>
+            <Link
+              href="/login"
+              className="rounded-md bg-[var(--color-primary)] px-5 py-2.5 font-medium text-[var(--color-background)]"
+            >
+              Log in
+            </Link>
+          </div>
+        ) : me === null ? null : (
+          <WrappedView year={selectedYear} month={selectedMonth} selectedName={me.name} onSelectName={() => {}} />
+        )
+      ) : currentView === "alltime" ? (
         allTimeBoard === "wins" ? (
           allTimeMatches === null ? (
             <div className="py-12 text-center text-[var(--color-text-dim)]">Counting every match…</div>
