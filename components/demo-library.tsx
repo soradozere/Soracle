@@ -322,8 +322,12 @@ function UploadDialog({
           "is this the right recording", not a demo page. */}
       <Dialog open={stage === "preview"} onOpenChange={(o) => !o && reset()}>
         <DialogContent className="max-w-5xl">
-          <DialogHeader>
-            <DialogTitle>{chosenFile?.name}</DialogTitle>
+          <DialogHeader className="min-w-0">
+            {/* A .dm_15 name is one long unbreakable token -- underscores are
+                not break opportunities -- so without these it sets a min-content
+                width wider than the dialog, and every w-full sibling (the player
+                included) inflates to match and spills past the border. */}
+            <DialogTitle className="min-w-0 break-words">{chosenFile?.name}</DialogTitle>
             <DialogDescription>
               Playing from your machine. Nothing is uploaded until you publish.
             </DialogDescription>
@@ -331,7 +335,7 @@ function UploadDialog({
           {/* aspect-video, not just a border: the viewer's own root is
               h-full/w-full, so it collapses to a zero-height canvas unless the
               parent states a height. Same wrapper the demo page uses. */}
-          <div className="aspect-video w-full overflow-hidden rounded-md border">
+          <div className="aspect-video w-full min-w-0 overflow-hidden rounded-md border">
             {previewUrl && viewerMounted && (
               <DemoViewer demoUrl={previewUrl} demoFileName={chosenFile?.name} showShare={false} />
             )}
@@ -352,7 +356,7 @@ function UploadDialog({
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Publish demo</DialogTitle>
-          <DialogDescription>
+          <DialogDescription className="min-w-0 break-words">
             {chosenFile?.name} — give it a real title, not the raw filename.
           </DialogDescription>
         </DialogHeader>
