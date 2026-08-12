@@ -177,8 +177,13 @@ export async function renderWrappedCard(d: ShareCardData, o: CardImageOptions): 
   }
 
   // --- Record row ---------------------------------------------------------
-  y = PAD + avatarSize + 92
-  text(ctx, "RECORD", PAD, y - 34, `600 19px ${o.bodyFont}`, dim, "left", "3px")
+  // Measured off whichever is lower, the avatar or the title line, rather than
+  // a fixed offset: with a title present the header grows, and a constant left
+  // the 52px numbers sitting on top of their own labels.
+  const headerBottom = Math.max(PAD + avatarSize, y)
+  const LABEL_GAP = 46
+  y = headerBottom + 78
+  text(ctx, "RECORD", PAD, y - LABEL_GAP, `600 19px ${o.bodyFont}`, dim, "left", "3px")
   ctx.font = `bold 52px ${o.bodyFont}`
   ctx.textAlign = "left"
   ctx.fillStyle = "#27ae60"
@@ -191,11 +196,11 @@ export async function renderWrappedCard(d: ShareCardData, o: CardImageOptions): 
   ctx.fillText(`${d.losses}L`, PAD + wWidth + dashWidth, y)
 
   const midX = W * 0.47
-  text(ctx, "WIN RATE", midX, y - 34, `600 19px ${o.bodyFont}`, dim, "left", "3px")
+  text(ctx, "WIN RATE", midX, y - LABEL_GAP, `600 19px ${o.bodyFont}`, dim, "left", "3px")
   text(ctx, `${d.winPct}%`, midX, y, `bold 52px ${o.bodyFont}`, "#e8ecf2")
 
   if (d.place !== null) {
-    text(ctx, "FINISHED", W - PAD, y - 34, `600 19px ${o.bodyFont}`, dim, "right", "3px")
+    text(ctx, "FINISHED", W - PAD, y - LABEL_GAP, `600 19px ${o.bodyFont}`, dim, "right", "3px")
     ctx.font = `bold 52px ${o.bodyFont}`
     ctx.textAlign = "right"
     const ofText = ` / ${d.of}`
@@ -207,7 +212,7 @@ export async function renderWrappedCard(d: ShareCardData, o: CardImageOptions): 
     ctx.fillStyle = edge
     ctx.fillText(`#${d.place}`, W - PAD - ofW, y)
     // The medal itself, so a podium month is legible without reading the number
-    if (medalImg) drawTinted(ctx, medalImg, MEDALS[d.place - 1].colour, W - PAD - 46, y - 118, 46, 46, 0.95)
+    if (medalImg) drawTinted(ctx, medalImg, MEDALS[d.place - 1].colour, W - PAD - 46, y - 132, 46, 46, 0.95)
   }
 
   // --- Stats grid ---------------------------------------------------------
@@ -299,6 +304,22 @@ export async function renderWrappedCard(d: ShareCardData, o: CardImageOptions): 
   text(ctx, tierLine, W - PAD, ry + 38, `600 19px ${o.bodyFont}`, o.primary, "right", "2.4px")
 
   ctx.restore()
+
+  /*
+   * The frame. Two lines rather than one: a bright outer edge in the card's own
+   * colour, and a hairline inset just in from it. That inset is what reads as a
+   * printed card rather than a screenshot with a border -- a single stroke
+   * looks like a UI element, two look like an object.
+   */
+  ctx.strokeStyle = d.medal ? d.medal.edge : `${o.primary}`
+  ctx.lineWidth = 6
+  roundRect(ctx, 3, 3, W - 6, H - 6, 34)
+  ctx.stroke()
+
+  ctx.strokeStyle = d.medal ? `${d.medal.edge}55` : "rgba(255,255,255,0.10)"
+  ctx.lineWidth = 2
+  roundRect(ctx, 17, 17, W - 34, H - 34, 24)
+  ctx.stroke()
 
   return new Promise((resolve) => canvas.toBlob((b) => resolve(b), "image/png"))
 }
