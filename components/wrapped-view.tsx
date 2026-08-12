@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { Check, ChevronsUpDown, Crosshair, Ghost, Heart, Link2, Skull, Sparkles, Swords, Target, Trophy, type LucideIcon } from "lucide-react"
+import { Check, ChevronsUpDown, Crosshair, Ghost, Heart, Link2, Skull, Sparkles, Swords, Target, type LucideIcon } from "lucide-react"
 import { createClient } from "@/lib/supabase/client"
 import { getAchievementsEarnedInMonth } from "@/app/admin/actions"
 import { Emblem } from "@/components/emblem"
@@ -954,6 +954,34 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
             {/* The stat block lives in the same card as the name and record --
                 two panels left both half-empty, and this is all one player's
                 month. */}
+            {/* Sits under the record rather than at the foot of the card: the
+                left column ran out of content well before the stat grid on the
+                right did, leaving a band of empty panel between the two. */}
+            {card.bestScore && (
+              <div
+                className="mt-5 pt-4 flex items-center gap-3"
+                style={{ borderTop: "1px solid var(--glass-hair)" }}
+              >
+                <Emblem
+                  src="/achievements/rebel-alliance-jedi-order.svg"
+                  color="#ffd700"
+                  className="w-[18px] h-[18px] shrink-0"
+                />
+                <div>
+                  <span className="text-sm font-semibold">Best single-game score: </span>
+                  <b className="text-sm tabular-nums" style={{ color: "#ffd700" }}>
+                    {card.bestScore.value}
+                  </b>
+                  <span className="text-xs ml-2" style={{ color: "var(--color-text-dim)" }}>
+                    {card.bestScore.match.red_score}–{card.bestScore.match.blue_score},{" "}
+                    {new Date(card.bestScore.match.created_at).toLocaleDateString("en-GB", {
+                      day: "numeric",
+                      month: "short",
+                    })}
+                  </span>
+                </div>
+              </div>
+            )}
             </div>
 
             {card.hasStats ? (
@@ -976,9 +1004,16 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
 
             {card.hasStats ? (
               <>
-                <p className="mt-4 text-[11px]" style={{ color: "var(--color-text-dim)" }}>
-                  Scoreboard stats recorded for {card.statsMatches} of {card.played} matches this month.
-                </p>
+                {/* Only when some match is actually missing its scoreboard.
+                    Every match gets one now, so stating "23 of 23" was a line of
+                    noise on every card -- but a silent undercount would make the
+                    totals above simply look wrong, with nothing to explain it. */}
+                {card.statsMatches < card.played && (
+                  <p className="mt-4 text-[11px]" style={{ color: "var(--color-text-dim)" }}>
+                    Scoreboard stats recorded for {card.statsMatches} of {card.played} matches this month — the
+                    totals above cover those {card.statsMatches}.
+                  </p>
+                )}
                 {/* Folded into the same panel as the headline stats rather than
                     given a card of its own: it is the same scoreboard, read a
                     level finer, and a second panel for it left both looking
@@ -1011,24 +1046,6 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
                           </span>
                         </div>
                       ))}
-                    </div>
-                  </div>
-                )}
-                {card.bestScore && (
-                  <div className="mt-4 pt-4 flex items-center gap-3" style={{ borderTop: "1px solid var(--glass-hair)" }}>
-                    <Trophy className="w-4 h-4 shrink-0" style={{ color: "#ffd700" }} />
-                    <div>
-                      <span className="text-sm font-semibold">Best single-game score: </span>
-                      <b className="text-sm tabular-nums" style={{ color: "#ffd700" }}>
-                        {card.bestScore.value}
-                      </b>
-                      <span className="text-xs ml-2" style={{ color: "var(--color-text-dim)" }}>
-                        {card.bestScore.match.red_score}–{card.bestScore.match.blue_score},{" "}
-                        {new Date(card.bestScore.match.created_at).toLocaleDateString("en-GB", {
-                          day: "numeric",
-                          month: "short",
-                        })}
-                      </span>
                     </div>
                   </div>
                 )}
