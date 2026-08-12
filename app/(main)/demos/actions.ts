@@ -10,6 +10,7 @@ import { titleIssue } from "@/lib/demo-title"
 import { normaliseTags } from "@/lib/demo-tags"
 import { maskSlurs } from "@/lib/profanity"
 import { createDemoUploadUrl, deleteDemoFile, headDemoFile } from "@/lib/r2"
+import { isReactionId } from "@/lib/demo-reactions"
 
 const GAMETYPES = ["CTF", "FFA", "TeamFFA"] as const
 
@@ -743,18 +744,39 @@ export async function deleteComment(commentId: string): Promise<ActionResult> {
   return { success: true, id: commentId }
 }
 
-export async function rateDemo(demoId: string, rating: number): Promise<ActionResult> {
+/**
+ * Set, change, or clear this player's reaction to a demo.
+ *
+ * One reaction per player per demo, so changing your mind is an upsert on the
+ * (demo_id, player_id) key rather than a second row. Passing null clears it,
+ * which is what pressing your own reaction again does -- there is no separate
+ * "unreact" action to keep out of sync.
+ */
+export async function reactToDemo(demoId: string, reaction: string | null): Promise<ActionResult> {
   const cookieStore = await cookies()
   const playerId = verifySessionValue(cookieStore.get(PLAYER_SESSION_COOKIE)?.value)
-  if (!playerId) return { success: false, error: "Log in to rate a demo." }
-  if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
-    return { success: false, error: "Rating must be between 1 and 5." }
-  }
+  if (!playerId) return { success: false, error: "Log in to react to a demo." }
 
   const supabase = createServiceClient()
+
+  if (reaction === null) {
+    const { error } = await supabase
+      .from("demo_reactions")
+      .delete()
+      .eq("demo_id", demoId)
+      .eq("player_id", playerId)
+    if (error) return { success: false, error: error.message }
+    return { success: true, id: demoId }
+  }
+
+  // Checked against the catalogue rather than trusted: the column has a CHECK
+  // constraint, but failing here gives a readable message instead of a raw
+  // Postgres violation.
+  if (!isReactionId(reaction)) return { success: false, error: "Unknown reaction." }
+
   const { error } = await supabase
-    .from("demo_ratings")
-    .upsert({ demo_id: demoId, player_id: playerId, rating }, { onConflict: "demo_id,player_id" })
+    .from("demo_reactions")
+    .upsert({ demo_id: demoId, player_id: playerId, reaction }, { onConflict: "demo_id,player_id" })
   if (error) return { success: false, error: error.message }
   return { success: true, id: demoId }
 }

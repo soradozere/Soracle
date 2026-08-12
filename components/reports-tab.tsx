@@ -7,6 +7,7 @@ import {
   getMatchStatsByMonth,
   getReturnerRateByMonth,
   getStreakRecord,
+  getMatches,
 } from "@/app/admin/actions"
 import type { CapConversion } from "@/lib/cap-conversion"
 import type { ReturnerRate } from "@/lib/returner-rate"
@@ -14,6 +15,11 @@ import type { StreakRecord } from "@/lib/achievements-server"
 import { ChevronLeft, ChevronRight, BarChart3 } from "lucide-react"
 import { SegmentedRail } from "@/components/segmented-rail"
 import { Emblem } from "@/components/emblem"
+import Link from "next/link"
+import { RankMedal } from "@/components/rank-medal"
+import { WinsLeaderboard, tallyWins } from "@/components/wins-leaderboard"
+import { WrappedView } from "@/components/wrapped-view"
+export { RankMedal }
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import type { Player } from "@/lib/types"
 import { createClient } from "@/lib/supabase/client"
@@ -311,34 +317,6 @@ function EmptyHood({ children }: { children: React.ReactNode }) {
   )
 }
 
-// The top three used 🥇🥈🥉, which ignore the theme entirely and sit oddly next
-// to the site's own emblems. Same three ranks, drawn with the crests the profile
-// pages already use, tinted gold / silver / bronze.
-const MEDAL_EMBLEMS = [
-  { src: "/badges/champion.svg", color: "#ffd700" },
-  { src: "/badges/star.svg", color: "#c9ced6" },
-  { src: "/badges/top5.svg", color: "#cd7f32" },
-]
-
-export function RankMedal({ index }: { index: number }) {
-  const medal = MEDAL_EMBLEMS[index]
-  if (!medal) return null
-  return (
-    <span
-      className="w-[26px] h-[26px] rounded-full grid place-items-center"
-      style={{
-        color: medal.color,
-        backgroundColor: `color-mix(in srgb, ${medal.color} 14%, transparent)`,
-        boxShadow: `inset 0 0 0 1px color-mix(in srgb, ${medal.color} 45%, transparent)${
-          index === 0 ? `, 0 0 14px -5px ${medal.color}` : ""
-        }`,
-      }}
-    >
-      <Emblem src={medal.src} className="w-[15px] h-[15px]" label={`Rank ${index + 1}`} />
-    </span>
-  )
-}
-
 export function ReportsTab() {
   // "Current month" in UTC, matching the UTC month bucketing used everywhere
   // (badges, boards, server actions) — viewer-local months made viewers in
@@ -357,7 +335,36 @@ export function ReportsTab() {
   const [streakRecord, setStreakRecord] = useState<StreakRecord | null>(null)
   const [players, setPlayers] = useState<Player[]>([])
   const [loading, setLoading] = useState(true)
-  const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "elo" | "trueskill">("stats")
+  /*
+   * Two levels now. The top rail picks the page -- Monthly stats or the
+   * Leaderboard -- and the Leaderboard picks which board it is showing. ELO and
+   * TrueSkill used to sit at the top level beside Monthly, which read as four
+   * unrelated pages when three of them are the same question answered by
+   * different maths.
+   */
+  const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "alltime" | "wrapped">("stats")
+  const [boardView, setBoardView] = useState<"normal" | "elo" | "trueskill">("normal")
+  // The All-Time tab shows the same two rating boards, so it needs its own
+  // selection -- sharing boardView would leave it on "Wins", which has no
+  // all-time form.
+  const [allTimeBoard, setAllTimeBoard] = useState<"wins" | "elo" | "trueskill">("wins")
+  // Every match ever played, for the all-time Wins board. Fetched separately
+  // from the month's matches and only once the admin-only All-Time tab is
+  // actually opened -- no reason to pull the whole history for a page most
+  // people never see.
+  const [allTimeMatches, setAllTimeMatches] = useState<Match[] | null>(null)
+  /*
+   * Wrapped is personal, so the tab needs to know who is reading it. null while
+   * the check is in flight, "" once it comes back logged out -- told apart so a
+   * signed-in player never sees the login prompt flash before their own card.
+   */
+  const [me, setMe] = useState<{ playerId: string; name: string } | null | "">(null)
+  useEffect(() => {
+    fetch("/api/player-auth/me")
+      .then((r) => r.json())
+      .then((d) => setMe(d?.playerId ? { playerId: d.playerId, name: d.name } : ""))
+      .catch(() => setMe(""))
+  }, [])
   const [isAdmin, setIsAdmin] = useState(false)
   // The "Under the hood" band: four working views of the same month, sharing one
   // panel rather than stacking four full-width slabs down the page.
@@ -404,19 +411,44 @@ export function ReportsTab() {
     })
   }, [])
 
-  // Visibility logic for leaderboard
   const isCurrentMonth = selectedYear === now.getUTCFullYear() && selectedMonth === now.getUTCMonth() + 1
-  const showLeaderboard = !isCurrentMonth || isAdmin
 
-  // Force view back to stats if the selected view becomes unavailable to this user.
+  // isAdmin resolves after the first render, so a non-admin could be sitting on
+  // All-Time for a frame. Send them back rather than leave them on a tab that
+  // is about to vanish from the rail.
   useEffect(() => {
-    if (!showLeaderboard && currentView === "leaderboard") {
-      setCurrentView("stats")
-    }
-    if (!isAdmin && (currentView === "elo" || currentView === "trueskill")) {
-      setCurrentView("stats")
-    }
-  }, [showLeaderboard, isAdmin, currentView])
+    if (!isAdmin && currentView === "alltime") setCurrentView("stats")
+  }, [isAdmin, currentView])
+
+  useEffect(() => {
+    if (currentView !== "alltime" || allTimeMatches !== null) return
+    getMatches().then((r) => {
+      // getMatches returns newest-first; getMatchesByMonth returns oldest-first,
+      // and tallyWins reads recent form off the tail. Normalise, or the Form
+      // column would show everyone's first five games instead of their last.
+      if (r.success) setAllTimeMatches([...(r.data as Match[])].reverse())
+      else setAllTimeMatches([])
+    })
+  }, [currentView, allTimeMatches])
+
+  /*
+   * All-time qualifying bar. The month's 30%-of-matches rule does not carry
+   * over: 30% of every match on record is 80-odd games, which only a handful of
+   * people clear. A flat 20 keeps win rate meaningful (five games can read 80%
+   * on a fluke) while leaving a real board -- 39 of 69 players at time of
+   * writing.
+   */
+  const ALL_TIME_MIN_MATCHES = 20
+  const allTimeWins = tallyWins(allTimeMatches ?? [], ALL_TIME_MIN_MATCHES)
+
+  /*
+   * Every board is public. The month's own leaderboard used to be admin-only
+   * until the month closed, and ELO and TrueSkill were admin-only outright --
+   * so the people the ratings are about were the only ones who could not see
+   * them. Nothing here is private; it is all derived from matches everybody
+   * played. No view can now become unavailable mid-session, so the effect that
+   * used to force the selection back to Monthly is gone with it.
+   */
 
   const canGoNext = !(selectedYear === now.getUTCFullYear() && selectedMonth === now.getUTCMonth() + 1)
 
@@ -744,64 +776,10 @@ export function ReportsTab() {
   const manualNailbiters = manualMatches.filter(m => Math.abs(m.red_score - m.blue_score) === 1).length
   const manualBlowouts = manualMatches.filter(m => Math.abs(m.red_score - m.blue_score) > 4).length
 
-  // Leaderboard data
-  const leaderboardStats = new Map<string, { wins: number; losses: number; draws: number; played: number; form: ("W" | "L")[] }>()
-
-  // Reverse matches to track form (most recent first) - matches come sorted ascending from API
-  const reversedMatches = [...matches].reverse()
-
-  for (const match of reversedMatches) {
-    const redWon = match.red_score > match.blue_score
-    const blueWon = match.blue_score > match.red_score
-
-    for (const playerName of match.red_team) {
-      if (!leaderboardStats.has(playerName)) {
-        leaderboardStats.set(playerName, { wins: 0, losses: 0, draws: 0, played: 0, form: [] })
-      }
-      const stats = leaderboardStats.get(playerName)!
-      stats.played++
-      if (redWon) {
-        stats.wins++
-        if (stats.form.length < 5) stats.form.push("W")
-      } else if (blueWon) {
-        stats.losses++
-        if (stats.form.length < 5) stats.form.push("L")
-      }
-    }
-
-    for (const playerName of match.blue_team) {
-      if (!leaderboardStats.has(playerName)) {
-        leaderboardStats.set(playerName, { wins: 0, losses: 0, draws: 0, played: 0, form: [] })
-      }
-      const stats = leaderboardStats.get(playerName)!
-      stats.played++
-      if (blueWon) {
-        stats.wins++
-        if (stats.form.length < 5) stats.form.push("W")
-      } else if (redWon) {
-        stats.losses++
-        if (stats.form.length < 5) stats.form.push("L")
-      }
-    }
-  }
-
+  // Qualifying bar for the month: 30% of the matches actually played that
+  // month, so a quiet month does not demand the same attendance as a busy one.
   const leaderboardMinMatches = Math.ceil(totalMatches * 0.30)
-
-  const leaderboard = Array.from(leaderboardStats.entries())
-    .map(([name, stats]) => ({
-      name,
-      ...stats,
-      winPct: stats.played > 0 ? (stats.wins / stats.played) * 100 : 0
-    }))
-    .filter(p => p.played >= leaderboardMinMatches)
-    .sort((a, b) => {
-      // Primary: win rate
-      if (b.winPct !== a.winPct) return b.winPct - a.winPct
-      // Secondary: total wins
-      if (b.wins !== a.wins) return b.wins - a.wins
-      // Tertiary: matches played
-      return b.played - a.played
-    })
+  const leaderboard = tallyWins(matches, leaderboardMinMatches)
 
   // Leaderboard summary stats
   const totalLeaderboardPlayers = leaderboard.length
@@ -927,28 +905,105 @@ export function ReportsTab() {
           onSelect={(key) => setCurrentView(key as typeof currentView)}
           segments={[
             { key: "stats", label: "Monthly" },
-            ...(showLeaderboard ? [{ key: "leaderboard", label: "Leaderboard" }] : []),
-            ...(isAdmin ? [{ key: "elo", label: "ELO" }] : []),
-            ...(isAdmin ? [{ key: "trueskill", label: "TrueSkill" }] : []),
+            { key: "leaderboard", label: "Leaderboard" },
+            ...(isAdmin ? [{ key: "alltime", label: "All-Time" }] : []),
+            // Always offered, signed in or not: a visitor who cannot see the
+            // card should still find out it exists. The login prompt lives
+            // inside the tab rather than in place of it.
+            { key: "wrapped", label: "Wrapped" },
           ]}
         />
       </div>
 
-      {/* Admin preview notice */}
-      {isAdmin && isCurrentMonth && currentView === "leaderboard" && (
-        <div className="text-center text-sm text-[var(--color-text-dim)] italic">
-          Admin preview — this leaderboard will be published on {MONTH_NAMES[selectedMonth % 12]} 1st
+      {currentView === "alltime" && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <SegmentedRail
+            dense
+            aria-label="All-time board"
+            activeKey={allTimeBoard}
+            onSelect={(key) => setAllTimeBoard(key as typeof allTimeBoard)}
+            segments={[
+              { key: "wins", label: "Wins", hint: "Won and lost across every match on record" },
+              { key: "elo", label: "ELO", hint: "Running rating across every match ever played" },
+              { key: "trueskill", label: "TrueSkill", hint: "Rating with a confidence interval" },
+            ]}
+          />
+          <p className="text-sm italic text-[var(--color-text-dim)]">
+            Every match on record, ignoring the month above.
+          </p>
         </div>
       )}
 
-      {currentView === "elo" ? (
+      {currentView === "leaderboard" && (
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          {/* Which board, not which page. Dense, and left of the frame, so it
+              reads as a setting on the leaderboard rather than a second nav. */}
+          <SegmentedRail
+            dense
+            aria-label="Leaderboard type"
+            activeKey={boardView}
+            onSelect={(key) => setBoardView(key as typeof boardView)}
+            segments={[
+              { key: "normal", label: "Wins", hint: "Won and lost, this month" },
+              { key: "elo", label: "ELO", hint: "Running rating, replayed from every match" },
+              { key: "trueskill", label: "TrueSkill", hint: "Rating with a confidence interval" },
+            ]}
+          />
+          {isCurrentMonth && boardView === "normal" && (
+            <p className="text-sm italic text-[var(--color-text-dim)]">
+              {MONTH_NAMES[selectedMonth - 1]} is still being played — this board moves with it.
+            </p>
+          )}
+        </div>
+      )}
+
+      {currentView === "wrapped" ? (
+        me === "" ? (
+          <div className="glass-panel flex flex-col items-center gap-4 py-14 text-center">
+            <p className="text-[var(--color-text-dim)]">
+              Wrapped is your own month — your record, who you played with, and how it went.
+            </p>
+            <Link
+              href="/login"
+              className="rounded-md bg-[var(--color-primary)] px-5 py-2.5 font-medium text-[var(--color-background)]"
+            >
+              Log in
+            </Link>
+          </div>
+        ) : me === null ? null : isCurrentMonth ? (
+          // A month still being played has nothing to wrap up: the record, the
+          // finish position and the "best of" all move until it closes.
+          <div className="glass-panel py-14 text-center text-[var(--color-text-dim)]">
+            {MONTH_NAMES[selectedMonth - 1]} is still being played. Wrapped opens when the month closes — use the
+            arrows above to look back at a finished one.
+          </div>
+        ) : (
+          <WrappedView year={selectedYear} month={selectedMonth} selectedName={me.name} onSelectName={() => {}} />
+        )
+      ) : currentView === "alltime" ? (
+        allTimeBoard === "wins" ? (
+          allTimeMatches === null ? (
+            <div className="py-12 text-center text-[var(--color-text-dim)]">Counting every match…</div>
+          ) : (
+            <WinsLeaderboard
+              rows={allTimeWins}
+              qualifier={`Players with ${ALL_TIME_MIN_MATCHES}+ matches all time (${allTimeMatches.length} on record)`}
+              emptyLabel={`No players with ${ALL_TIME_MIN_MATCHES}+ matches yet`}
+            />
+          )
+        ) : allTimeBoard === "elo" ? (
+          <EloLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="alltime" />
+        ) : (
+          <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="alltime" />
+        )
+      ) : currentView === "leaderboard" && boardView === "elo" ? (
         // ELO is a running, all-time rating — render it regardless of the selected month.
         // The month selector above drives the ELO view's own All-time / Monthly toggle.
-        <EloLeaderboard year={selectedYear} month={selectedMonth} />
-      ) : currentView === "trueskill" ? (
+        <EloLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="month" />
+      ) : currentView === "leaderboard" && boardView === "trueskill" ? (
         // TrueSkill is likewise a running rating replayed fresh; the month selector drives
         // its own All-time / Monthly toggle.
-        <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} />
+        <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="month" />
       ) : totalMatches === 0 ? (
         <div className="text-center py-12 text-[var(--color-text-dim)]">
           <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-50" />
@@ -1736,91 +1791,17 @@ export function ReportsTab() {
         </>
       ) : (
         <>
-          {/* Leaderboard View */}
-          {/* Wins Leaderboard Table */}
-          <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg overflow-hidden">
-            <div className="p-4 border-b border-[var(--color-border)]">
-              <h3 className="text-lg font-bold text-[var(--color-primary)] flex items-center gap-2">
-                <Emblem src="/badges/champion.svg" className="w-5 h-5" />
-                Wins Leaderboard
-              </h3>
-              <p className="text-xs text-[var(--color-text-dim)] mt-1">Players with {leaderboardMinMatches}+ matches this month (30% of {totalMatches})</p>
-            </div>
-            {leaderboard.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-[var(--color-border)] text-[var(--color-text-dim)] text-xs uppercase">
-                      <th className="px-4 py-3 text-left">#</th>
-                      <th className="px-4 py-3 text-left">Player</th>
-                      <th className="px-4 py-3 text-center">Wins</th>
-                      <th className="px-4 py-3 text-center">Losses</th>
-                      <th className="px-4 py-3 text-center">Played</th>
-                      <th className="px-4 py-3 text-right">Win %</th>
-                      <th className="px-4 py-3 text-center">Form</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {leaderboard.map((player, index) => {
-                      const isTop3 = index < 3
-                      const medalColors = ["#ffd700", "#c0c0c0", "#cd7f32"]
-                      return (
-                        <tr
-                          key={player.name}
-                          className={`border-b border-[var(--color-border)]/50 ${isTop3 ? "bg-[#ffd700]/5" : ""}`}
-                        >
-                          <td className="px-4 py-3">
-                            {isTop3 ? (
-                              <RankMedal index={index} />
-                            ) : (
-                              <span className="text-[var(--color-text-dim)]">{index + 1}</span>
-                            )}
-                          </td>
-                          <td className="px-4 py-3">
-                            <span className={`font-medium ${isTop3 ? "text-[#ffd700]" : "text-[var(--color-text)]"}`}>
-                              {player.name}
-                            </span>
-                          </td>
-                          <td className="px-4 py-3 text-center text-[#27ae60] font-bold">{player.wins}</td>
-                          <td className="px-4 py-3 text-center text-[#ff4757] font-bold">{player.losses}</td>
-                          <td className="px-4 py-3 text-center text-[var(--color-text)]">{player.played}</td>
-                          <td className="px-4 py-3 text-right">
-                            <span className={`font-bold ${
-                              player.winPct >= 60 ? "text-[#27ae60]" :
-                              player.winPct >= 40 ? "text-[var(--color-text)]" :
-                              "text-[#ff4757]"
-                            }`}>
-                              {player.winPct.toFixed(0)}%
-                            </span>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center justify-center gap-1">
-                              {player.form.map((result, i) => (
-                                <span
-                                  key={i}
-                                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                                    result === "W"
-                                      ? "bg-[#27ae60] text-white"
-                                      : "bg-[#ff4757] text-white"
-                                  }`}
-                                >
-                                  {result}
-                                </span>
-                              ))}
-                            </div>
-                          </td>
-                        </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="p-8 text-center text-[var(--color-text-dim)]">
-                <p>No players with {leaderboardMinMatches}+ matches yet</p>
-              </div>
-            )}
-          </div>
+          {/* Leaderboard View. The standing is stated before the table, not
+              after it -- read underneath, it lands once you have already taken
+              the numbers at face value. */}
+          <p className="text-sm text-[var(--color-text-dim)]">
+            This is the true monthly leaderboard. ELO and TrueSkill are for fun reference only.
+          </p>
+          <WinsLeaderboard
+            rows={leaderboard}
+            qualifier={`Players with ${leaderboardMinMatches}+ matches this month (30% of ${totalMatches})`}
+            emptyLabel={`No players with ${leaderboardMinMatches}+ matches yet`}
+          />
 
           {/* Summary Bar */}
           {leaderboard.length > 0 && (
