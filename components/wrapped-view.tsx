@@ -207,6 +207,18 @@ const KILL_STYLES: { key: keyof StatRow; label: string }[] = [
   { key: "idle_kills", label: "Idle" },
 ]
 
+/*
+ * Foil tints for a podium finish, matching the medal colours the boards already
+ * use. A top-three month should be visible before you have read a single
+ * number; everyone else gets the house sheen rather than a dulled-down medal,
+ * because fourth is not a lesser bronze.
+ */
+const MEDAL_FOIL = [
+  { edge: "#ffd700", core: "#fff3b0", glow: "rgba(255, 215, 0, 0.30)" },
+  { edge: "#c9ced6", core: "#f2f5f9", glow: "rgba(201, 206, 214, 0.26)" },
+  { edge: "#cd7f32", core: "#f0c193", glow: "rgba(205, 127, 50, 0.26)" },
+]
+
 /** Duels need more than a couple of recorded games to mean anything. */
 const DUEL_MIN_KILLS = 3
 
@@ -787,6 +799,8 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
     return at === -1 ? { qualified: false as const, min } : { qualified: true as const, place: at + 1, of: board.length }
   }, [selectedName, matches])
 
+  const medal = finish?.qualified && finish.place <= 3 ? MEDAL_FOIL[finish.place - 1] : null
+
   const card = selectedName ? cards.get(selectedName) ?? null : null
   const cardAchievements = selectedName ? achievements.filter((a) => a.playerName === selectedName) : []
 
@@ -823,7 +837,17 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
 
       {card && (
         <>
-          <section className="glass-panel p-6 relative overflow-hidden">
+          <section
+            className="glass-panel p-6 relative overflow-hidden"
+            style={
+              medal
+                ? {
+                    borderColor: `color-mix(in srgb, ${medal.edge} 42%, var(--glass-hair))`,
+                    boxShadow: `0 0 34px -14px ${medal.glow}`,
+                  }
+                : undefined
+            }
+          >
             {/* Foil sheen. A trading card catches the light in a band across
                 its face, so this is one angled sweep rather than an even wash:
                 a cool edge, a bright core, a warm edge, all at low opacity so
@@ -834,13 +858,19 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
               aria-hidden
               className="pointer-events-none absolute inset-0"
               style={{
-                backgroundImage:
-                  "linear-gradient(104deg," +
-                  " transparent 26%," +
-                  " color-mix(in srgb, var(--color-primary) 9%, transparent) 40%," +
-                  " color-mix(in srgb, #ffffff 8%, transparent) 47%," +
-                  " color-mix(in srgb, #b98cff 7%, transparent) 54%," +
-                  " transparent 68%)",
+                backgroundImage: medal
+                  ? "linear-gradient(104deg," +
+                    " transparent 22%," +
+                    ` color-mix(in srgb, ${medal.edge} 16%, transparent) 38%,` +
+                    ` color-mix(in srgb, ${medal.core} 20%, transparent) 47%,` +
+                    ` color-mix(in srgb, ${medal.edge} 16%, transparent) 56%,` +
+                    " transparent 72%)"
+                  : "linear-gradient(104deg," +
+                    " transparent 26%," +
+                    " color-mix(in srgb, var(--color-primary) 9%, transparent) 40%," +
+                    " color-mix(in srgb, #ffffff 8%, transparent) 47%," +
+                    " color-mix(in srgb, #b98cff 7%, transparent) 54%," +
+                    " transparent 68%)",
               }}
             />
             <Emblem
