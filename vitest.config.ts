@@ -23,6 +23,14 @@ export default defineConfig({
   test: {
     environment: "node",
     include: ["**/*.test.ts"],
-    exclude: ["node_modules/**", ".next/**", "jk2mv/**"],
+    // A bare "node_modules" glob only matches the root install, so nested ones were still
+    // walked. That pulled in two unrelated sets of files:
+    //   - package-internal tests shipped inside dependencies. @use-gesture/react ships a
+    //     types.test.ts importing `tsd`, which isn't installed: three hard failures.
+    //   - the git worktrees under .claude/, which are full checkouts of other branches, so
+    //     every project test ran a second time against a stale copy of itself.
+    // The recursive glob below covers nested installs; excluding .claude keeps other
+    // branches' checkouts out of this branch's suite.
+    exclude: ["**/node_modules/**", ".claude/**", ".next/**", "jk2mv/**"],
   },
 })
