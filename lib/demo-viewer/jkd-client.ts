@@ -495,6 +495,41 @@ export class JkdEngine {
     // up rendering into one corner of the element.
     if (canvas.id !== "canvas") canvas.id = "canvas"
 
+    /*
+     * Pin the canvas to a fixed size for the duration of the boot, so the
+     * framebuffer's resolution does not depend on which container the engine
+     * happens to boot in.
+     *
+     * GLimp_SetMode measures the canvas's CSS size exactly once, during
+     * Com_Init, and nothing ever re-measures it -- there is no resize path in
+     * this build, and the engine is a page-scoped singleton. So whatever box
+     * the canvas sits in at boot dictates the resolution of every demo watched
+     * for the rest of the page's life. That was invisible while the only place
+     * an engine could boot was a full-width detail page; the pre-upload preview
+     * dialog broke it, because an engine booted inside the dialog carried the
+     * dialog's resolution to every full-size player after it, stretched and
+     * soft.
+     *
+     * The pinned size is a device-pixel target, not a CSS one: 2560 wide
+     * (capped at the screen's own width, so a laptop never renders more than
+     * its display can show) at 16:9, divided back down by devicePixelRatio
+     * because r_highdpi multiplies it right back up. Every container this
+     * canvas lands in afterwards shows that one buffer through object-contain:
+     * the windowed player downscales it (supersampling, sharper than the old
+     * exact-fit buffer), fullscreen upscales it slightly. The inline style is
+     * removed once boot settles -- the parent's overflow-hidden clips the
+     * oversized canvas in the meantime, behind the boot status overlay.
+     */
+    const dpr = Math.max(1, window.devicePixelRatio || 1)
+    const targetDeviceW = Math.min(2560, Math.round((window.screen.width || 1280) * dpr))
+    const targetDeviceH = Math.round((targetDeviceW * 9) / 16)
+    canvas.style.width = `${targetDeviceW / dpr}px`
+    canvas.style.height = `${targetDeviceH / dpr}px`
+    const unpinCanvas = () => {
+      canvas.style.width = ""
+      canvas.style.height = ""
+    }
+
     // Fetched (or read back from Cache Storage) before the engine script runs,
     // because getPreloadedPackage is consulted synchronously during its boot.
     onStatus?.("Loading game data…")
@@ -658,6 +693,11 @@ export class JkdEngine {
     bootPromise = loadScript(`${baseUrl}/jk2mv_wasm.js`)
       .then(() => Promise.race([readyPromise, abortedPromise]))
       .finally(removeProbe)
+      // Ready or aborted, the canvas goes back to filling whatever holds it --
+      // GLimp has taken its one measurement by now (JKD_ready fires after
+      // Com_Init), and a failed boot must not leave a pinned-size canvas
+      // fighting the layout.
+      .finally(unpinCanvas)
     await bootPromise
   }
 
