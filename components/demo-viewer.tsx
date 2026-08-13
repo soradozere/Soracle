@@ -106,20 +106,21 @@ const readHighDetail = () => localStorage.getItem(DETAIL_KEY) !== "low"
  * band into a visible range recovers real detail, where a linear multiply just
  * washes the whole image out.
  *
- * 1 is the recording exactly as it was rendered -- lower lifts the shadows.
- * Kept at or below 1 because there is no reason to make a demo darker.
+ * 1 is the recording exactly as it was rendered, and the default -- lower
+ * lifts the shadows. Kept at or below 1 because there is no reason to make a
+ * demo darker.
  *
- * The default is 0.6, which the slider reads as "+40%". Untouched JK2 is dark
- * enough on a modern screen that most of a match happens in shadow people
- * cannot make out, and "as recorded" is only the honest default if the person
- * watching has the same monitor the demo was recorded on. A stored preference
- * still wins; this is only where the slider starts.
+ * The default was briefly 0.6 (the preview-upload release), on the theory that
+ * untouched JK2 is too dark for a modern screen. It read as the whole library
+ * suddenly looking washed out -- a +40% lift applied to everyone, silently, is
+ * a quality regression, not a calibration. Brightness is the viewer's call via
+ * the slider; the default's job is to show the recording as it was rendered.
  */
 const GAMMA_FILTER_ID = "soracle-demo-gamma"
 const GAMMA_KEY = "soracle.demo.gamma"
 const GAMMA_MIN = 0.5
 const GAMMA_MAX = 1
-const GAMMA_DEFAULT = 0.6
+const GAMMA_DEFAULT = 1
 const readGamma = () => {
   const stored = Number(localStorage.getItem(GAMMA_KEY))
   if (!Number.isFinite(stored) || stored < GAMMA_MIN || stored > GAMMA_MAX) return GAMMA_DEFAULT

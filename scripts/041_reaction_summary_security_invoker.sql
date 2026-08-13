@@ -1,0 +1,17 @@
+-- Make demo_reaction_summary run as the caller, not its owner.
+--
+-- Postgres views default to SECURITY DEFINER semantics: the view executes with
+-- the privileges of whoever created it (here, the postgres role), so RLS on the
+-- underlying table is evaluated against the OWNER rather than the person
+-- reading. Supabase's security advisor flags every such view, because the usual
+-- consequence is a view quietly handing out rows its reader's own policies would
+-- have withheld.
+--
+-- Nothing was exposed by it here -- demo_reactions has a public SELECT policy
+-- and the view returns counts, not rows -- but "harmless today" is a property of
+-- the current policy, not of the view. If demo_reactions is ever restricted, a
+-- definer view keeps returning the old answers and nothing errors. Fixing it now
+-- means the view can never be the reason a future policy fails to bite.
+--
+-- security_invoker needs Postgres 15+; Supabase is well past that.
+alter view public.demo_reaction_summary set (security_invoker = on);
