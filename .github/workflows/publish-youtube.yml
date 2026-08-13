@@ -26,9 +26,10 @@ on:
         default: "private"
 
 env:
-  # See render-demo.yml: machine-to-machine, so pinned to an alias that cannot
-  # lapse, and a wrong value here fails silently.
-  SORACLE_URL: "https://soracle.vercel.app"
+  # See render-demo.yml: this was pinned to soracle.vercel.app until a permanent
+  # redirect on that host silently broke both workflows. jk2ctf.com is the
+  # primary domain and the callbacks now fail loudly, so the split is gone.
+  SORACLE_URL: "https://jk2ctf.com"
   RENDER_BUCKET: "jk2renders"
 
 jobs:
@@ -131,12 +132,15 @@ jobs:
           JOB_ID: ${{ inputs.job_id }}
           VIDEO_ID: ${{ steps.upload.outputs.VIDEO_ID }}
         run: |
-          curl -fsS -X POST "$SORACLE_URL/api/render/callback" \
+          # -L follows redirects and --fail-with-body fails the step on any
+          # non-2xx, printing the reason. The previous `-fsS ... -o /dev/null`
+          # treated a 3xx as success and discarded the body, so a redirect on
+          # the callback host reported a green run while the row never moved.
+          curl -sSL --fail-with-body -X POST "$SORACLE_URL/api/render/callback" \
             -H "Authorization: Bearer $SECRET" \
             -H "Content-Type: application/json" \
             -d "$(jq -nc --arg j "$JOB_ID" --arg v "$VIDEO_ID" \
-                  '{job_id:$j, status:"published", youtube_video_id:$v}')" \
-            -o /dev/null
+                  '{job_id:$j, status:"published", youtube_video_id:$v}')"
 
       # Back to pending_review rather than failed. The render itself is fine --
       # only the upload broke -- so it should stay approvable once the cause is
@@ -151,9 +155,10 @@ jobs:
           JOB_ID: ${{ inputs.job_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -fsS -X POST "$SORACLE_URL/api/render/callback" \
+          # `|| true` stays: this step already reports a failure and must not
+          # replace the real error with its own.
+          curl -sSL --fail-with-body -X POST "$SORACLE_URL/api/render/callback" \
             -H "Authorization: Bearer $SECRET" \
             -H "Content-Type: application/json" \
             -d "$(jq -nc --arg j "$JOB_ID" --arg e "Upload to YouTube failed. Logs: $RUN_URL" \
-                  '{job_id:$j, status:"pending_review", error:$e}')" \
-            -o /dev/null || true
+                  '{job_id:$j, status:"pending_review", error:$e}')" || true
