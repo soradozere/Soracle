@@ -76,15 +76,19 @@ env:
     zzz_bones.pk3
     zzzTricolor_Sabers_by_Apple.pk3
   R2_PUBLIC: "https://pub-76bff0ef02794a5d95b7e2a8b8660f61.r2.dev"
-  # Where the callbacks below report back to. Deliberately a .vercel.app alias
-  # rather than jk2ctf.com: this is machine-to-machine, nobody ever sees it, and
-  # the alias cannot lapse -- whereas a custom domain that quietly fails to renew
-  # would take the pipeline with it. The failure mode here is the bad one: the
-  # render finishes, the POST goes nowhere, and the job just looks stuck.
+  # Where the callbacks below report back to.
   #
-  # Player-facing URLs are the opposite case and use jk2ctf.com; see
-  # lib/site-url.ts.
-  SORACLE_URL: "https://soracle.vercel.app"
+  # This was soracle.vercel.app until 13 Aug 2026, on the reasoning that a
+  # machine-to-machine URL nobody sees should sit on an alias that cannot lapse,
+  # while a custom domain might quietly fail to renew. The alias didn't lapse --
+  # it got a permanent redirect to jk2ctf.com, which broke the pipeline exactly
+  # as thoroughly and far more quietly (see the curl flags below). "Cannot lapse"
+  # was never the same thing as "cannot change".
+  #
+  # jk2ctf.com is now the site's primary domain, so the callbacks use it too.
+  # The renewal risk that motivated the split is real but no longer silent: a
+  # dead domain now fails the render job loudly instead of stranding it.
+  SORACLE_URL: "https://jk2ctf.com"
   RENDER_BUCKET: "jk2renders"
   # Brightness, applied to the finished video as a gamma curve.
   #
@@ -128,12 +132,20 @@ jobs:
           JOB_ID: ${{ inputs.job_id }}
           RUN_ID: ${{ github.run_id }}
         run: |
-          curl -fsS -X POST "$SORACLE_URL/api/render/callback" \
+          # -L follows a redirect, --fail-with-body fails the step on any non-2xx
+          # AND prints the body so the reason is in the log. The old form was
+          # `-fsS ... -o /dev/null`, which had two holes that combined into a
+          # silent failure: -f only fails on >=400, so a 308 counted as success,
+          # and -o /dev/null threw away the response either way. A permanent
+          # redirect on the callback host therefore reported a green run with a
+          # job stuck at pending_render forever. Note curl drops the auth header
+          # across a host change, so a future cross-host redirect now 401s
+          # loudly rather than passing silently -- which is the point.
+          curl -sSL --fail-with-body -X POST "$SORACLE_URL/api/render/callback" \
             -H "Authorization: Bearer $SECRET" \
             -H "Content-Type: application/json" \
             -d "$(jq -nc --arg j "$JOB_ID" --argjson r "$RUN_ID" \
-                  '{job_id:$j, status:"rendering", github_run_id:$r}')" \
-            -o /dev/null
+                  '{job_id:$j, status:"rendering", github_run_id:$r}')"
 
       - uses: actions/checkout@v4
         with:
@@ -608,12 +620,12 @@ jobs:
           JOB_ID: ${{ inputs.job_id }}
           KEY: ${{ steps.upload.outputs.KEY }}
         run: |
-          curl -fsS -X POST "$SORACLE_URL/api/render/callback" \
+          # See "Report rendering" for why these flags matter.
+          curl -sSL --fail-with-body -X POST "$SORACLE_URL/api/render/callback" \
             -H "Authorization: Bearer $SECRET" \
             -H "Content-Type: application/json" \
             -d "$(jq -nc --arg j "$JOB_ID" --arg k "$KEY" \
-                  '{job_id:$j, status:"pending_review", render_r2_key:$k}')" \
-            -o /dev/null
+                  '{job_id:$j, status:"pending_review", render_r2_key:$k}')"
 
       # Catches every failure above, including the timeout and a cancelled run.
       # Without this the row sits at 'rendering' indefinitely and the only way
@@ -625,9 +637,11 @@ jobs:
           JOB_ID: ${{ inputs.job_id }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          curl -fsS -X POST "$SORACLE_URL/api/render/callback" \
+          # `|| true` stays here and only here: this step is already reporting a
+          # failure, and a callback that cannot land must not mask the original
+          # error with its own. The body still reaches the log.
+          curl -sSL --fail-with-body -X POST "$SORACLE_URL/api/render/callback" \
             -H "Authorization: Bearer $SECRET" \
             -H "Content-Type: application/json" \
             -d "$(jq -nc --arg j "$JOB_ID" --arg e "The render job failed or was cancelled. Logs: $RUN_URL" \
-                  '{job_id:$j, status:"failed", error:$e}')" \
-            -o /dev/null || true
+                  '{job_id:$j, status:"failed", error:$e}')" || true
