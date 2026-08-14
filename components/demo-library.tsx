@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Eye } from "lucide-react"
+import { Eye, ListVideo } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -522,11 +522,14 @@ export function DemoLibrary({
   players,
   canUpload,
   isAdmin,
+  playlistCount,
 }: {
   demos: DemoListItem[]
   players: { id: string; name: string }[]
   canUpload: boolean
   isAdmin: boolean
+  /** Shown on the Playlists link below the filters. */
+  playlistCount: number
 }) {
   const [query, setQuery] = useState("")
   const [month, setMonth] = useState("all")
@@ -657,6 +660,38 @@ export function DemoLibrary({
         </div>
       </div>
 
+      {/*
+        Sits with the cards rather than up by the page title: it is another way
+        into the same library, so it belongs next to what it is an alternative
+        to. Accented to separate it from the filter row above -- everything
+        there narrows the grid, and this leaves it.
+
+        Drawn from --color-primary rather than a fixed blue so it follows
+        whichever theme is on. The default theme's primary happens to be cyan,
+        which is where "blue" came from; Cloud City and the rest each have their
+        own, and a hardcoded blue would be the one control on the page ignoring
+        the theme. color-mix keeps the tint honest against a light ground
+        instead of assuming a dark one.
+      */}
+      <div className="mb-4">
+        <Link
+          href="/demos/playlists"
+          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors"
+          style={{
+            color: "var(--color-primary)",
+            borderColor: "color-mix(in srgb, var(--color-primary) 50%, transparent)",
+            background: "color-mix(in srgb, var(--color-primary) 10%, transparent)",
+          }}
+        >
+          <ListVideo className="h-4 w-4" />
+          Playlists
+          {playlistCount > 0 && (
+            <span style={{ color: "color-mix(in srgb, var(--color-primary) 70%, transparent)" }}>
+              ({playlistCount})
+            </span>
+          )}
+        </Link>
+      </div>
 
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
