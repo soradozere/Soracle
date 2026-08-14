@@ -195,7 +195,7 @@ export function PlaylistDetail({ playlist, demos }: { playlist: DemoPlaylist; de
       ) : (
         <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {demos.map((demo) => (
-            <DemoCard key={demo.id} demo={demo} />
+            <DemoCard key={demo.id} demo={demo} playlistSlug={playlist.slug} />
           ))}
         </div>
       )}

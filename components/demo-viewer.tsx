@@ -235,8 +235,13 @@ interface DemoViewerProps {
    * "next" means nothing on its own and the title is what someone is choosing
    * between.
    */
-  previousDemo?: { id: string; title: string } | null
-  nextDemo?: { id: string; title: string } | null
+  /**
+   * Where the end-of-demo overlay points. `href` lets the caller keep whatever
+   * context the visit has (a playlist, say) without this component needing to
+   * know what that context is; it falls back to the plain demo route.
+   */
+  previousDemo?: { id: string; title: string; href?: string } | null
+  nextDemo?: { id: string; title: string; href?: string } | null
   /** Shown as a lit region on the scrubber while a cut is being framed up. */
   trimRange?: { startMs: number; endMs: number } | null
 }
@@ -1898,7 +1903,7 @@ export function DemoViewer({
             <div className="flex max-w-[min(36rem,90%)] flex-wrap items-center justify-center gap-2">
               {previousDemo && (
                 <Link
-                  href={`/demos/${previousDemo.id}`}
+                  href={previousDemo.href ?? `/demos/${previousDemo.id}`}
                   className="flex max-w-[16rem] items-center gap-1.5 rounded-full bg-white/5 px-3 py-1.5 text-xs text-white/80 ring-1 ring-white/15 transition-colors hover:bg-white/15 hover:text-white"
                 >
                   <ChevronLeft className="h-3.5 w-3.5 shrink-0" />
@@ -1907,7 +1912,7 @@ export function DemoViewer({
               )}
               {nextDemo && (
                 <Link
-                  href={`/demos/${nextDemo.id}`}
+                  href={nextDemo.href ?? `/demos/${nextDemo.id}`}
                   className="flex max-w-[16rem] items-center gap-1.5 rounded-full bg-white/5 px-3 py-1.5 text-xs text-white/80 ring-1 ring-white/15 transition-colors hover:bg-white/15 hover:text-white"
                 >
                   <span className="truncate">{nextDemo.title}</span>

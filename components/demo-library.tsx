@@ -64,7 +64,7 @@ function LeadBadge({ demo }: { demo: DemoListItem }) {
 
 // Exported so playlist pages show demos exactly as the library does -- a card
 // that looked subtly different there would read as a different kind of thing.
-export function DemoCard({ demo }: { demo: DemoListItem }) {
+export function DemoCard({ demo, playlistSlug }: { demo: DemoListItem; playlistSlug?: string }) {
   return (
     // Client-side navigation on purpose: the engine is a page-scoped singleton
     // that survives route changes, and JkdEngine.start() re-attaches to a
@@ -81,7 +81,13 @@ export function DemoCard({ demo }: { demo: DemoListItem }) {
     // 12h -- 40% of the project's Fluid CPU -- against 169 actual visits here.
     // This does NOT make the link a full page load; client-side navigation and
     // the resident engine above are unaffected.
-    <Link href={`/demos/${demo.id}`} prefetch={false}>
+    // playlistSlug rides along when this card is shown as part of a playlist,
+    // so opening it starts a run through that playlist rather than dropping
+    // into the demo with no idea where it came from.
+    <Link
+      href={playlistSlug ? `/demos/${demo.id}?playlist=${encodeURIComponent(playlistSlug)}` : `/demos/${demo.id}`}
+      prefetch={false}
+    >
       <Card className="h-full transition-colors hover:border-foreground/30">
         <CardHeader>
           <div className="flex items-center justify-between gap-2">
