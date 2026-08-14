@@ -35,24 +35,30 @@ export default async function DemosPage() {
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-8">
+      {/*
+        Playlists sits on its own row directly under the masthead, ahead of the
+        title. It used to be right-aligned opposite the heading, which on a wide
+        screen parked it at the far edge of a 6xl container -- a long way from
+        anything it related to, and easy to miss entirely. Leading the page with
+        it reads as what it is: the other way into the library.
+      */}
+      <div className="mb-4">
+        <Link
+          href="/demos/playlists"
+          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
+        >
+          <ListVideo className="h-4 w-4" />
+          Playlists
+          {playlists.length > 0 && <span className="text-muted-foreground">({playlists.length})</span>}
+        </Link>
+      </div>
+
       <header className="mb-6">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-semibold tracking-tight">Demos</h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Watch a recorded match in the browser. Switch between any player&apos;s point of view, or
-              detach the camera and fly around.
-            </p>
-          </div>
-          <Link
-            href="/demos/playlists"
-            className="flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm hover:bg-muted"
-          >
-            <ListVideo className="h-4 w-4" />
-            Playlists
-            {playlists.length > 0 && <span className="text-muted-foreground">({playlists.length})</span>}
-          </Link>
-        </div>
+        <h1 className="text-2xl font-semibold tracking-tight">Demos</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Watch a recorded match in the browser. Switch between any player&apos;s point of view, or
+          detach the camera and fly around.
+        </p>
       </header>
 
       <DemoLibrary demos={demos} players={players} canUpload={canUpload} isAdmin={isAdmin} />
