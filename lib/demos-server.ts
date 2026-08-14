@@ -439,6 +439,59 @@ export interface DemoLink {
 }
 
 /**
+ * Where this demo sits inside a playlist someone is watching through.
+ *
+ * The library's ordering (getPlaylist) has always been correct; what was
+ * missing is that it stopped at the click. `/demos/[id]` takes only an id, so
+ * opening a demo FROM a playlist rebuilt both the sidebar and the end-of-demo
+ * links from the whole library -- which meant the second demo you watched was
+ * a random one, and the playlist effectively ended after a single clip.
+ */
+export interface PlaylistContext {
+  slug: string
+  title: string
+  /** 1-based, for "3 of 12". */
+  position: number
+  total: number
+  /** The whole playlist in curated order -- the sidebar lists it. */
+  demos: DemoListItem[]
+  previous: DemoLink | null
+  next: DemoLink | null
+}
+
+/**
+ * Resolve a demo's position in a playlist, or null if it isn't in one.
+ *
+ * Null covers three cases that all want the same answer -- no slug, a slug
+ * that matches no playlist, and a demo that simply isn't in the playlist named
+ * -- because the query string is user-editable and a wrong one should quietly
+ * fall back to normal library behaviour rather than 404 a page that exists.
+ *
+ * `next` stops at the end rather than looping or falling back to a random
+ * pick. A playlist is a finite curated thing: running off the end into an
+ * unrelated demo is the exact incoherence this exists to remove, and the
+ * overlay already handles a null next by just offering "Watch again".
+ */
+export async function getPlaylistContext(slug: string, demoId: string): Promise<PlaylistContext | null> {
+  const found = await getPlaylist(slug)
+  if (!found) return null
+
+  const index = found.demos.findIndex((d) => d.id === demoId)
+  if (index === -1) return null
+
+  const link = (d: DemoListItem | undefined): DemoLink | null => (d ? { id: d.id, title: d.title } : null)
+  return {
+    slug: found.playlist.slug,
+    title: found.playlist.title,
+    position: index + 1,
+    total: found.demos.length,
+    demos: found.demos,
+    previous: link(found.demos[index - 1]),
+    next: link(found.demos[index + 1]),
+  }
+}
+
+/**
  * What the end-of-demo overlay offers: back to the one just above this in the
  * sidebar, and somewhere new to go.
  *
