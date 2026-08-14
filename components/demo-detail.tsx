@@ -29,6 +29,7 @@ import type {
   DemoMoment,
   DemoPlaylist,
   Gametype,
+  PlaylistContext,
 } from "@/lib/demos-server"
 import { DEMO_TAGS, demoTagClasses, demoTagLabel } from "@/lib/demo-tags"
 import { RenderToYoutubeDialog, type RenderCameraState } from "@/components/render-to-youtube-dialog"
@@ -78,7 +79,16 @@ function GametypeBadge({ gametype }: { gametype: Gametype }) {
   return <Badge className={cn("border", tint)}>{gametype}</Badge>
 }
 
-function OtherDemoRow({ demo }: { demo: DemoListItem }) {
+function OtherDemoRow({
+  demo,
+  playlistSlug,
+  isCurrent,
+}: {
+  demo: DemoListItem
+  /** Carried onto the link so clicking through stays inside the playlist. */
+  playlistSlug?: string
+  isCurrent?: boolean
+}) {
   return (
     // Client-side on purpose: JkdEngine.start() re-attaches to the resident
     // engine, so switching demos this way reuses the loaded 120MB of assets
@@ -89,9 +99,15 @@ function OtherDemoRow({ demo }: { demo: DemoListItem }) {
     // a dozen more, so opening one demo prefetched twelve others, each of which
     // would have done the same again. Client-side navigation is unaffected.
     <Link
-      href={`/demos/${demo.id}`}
+      href={playlistSlug ? `/demos/${demo.id}?playlist=${encodeURIComponent(playlistSlug)}` : `/demos/${demo.id}`}
       prefetch={false}
-      className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-muted"
+      aria-current={isCurrent ? "true" : undefined}
+      className={cn(
+        "flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-muted",
+        // The one you're on stays in the list rather than being filtered out:
+        // a playlist you can only see the rest of is hard to place yourself in.
+        isCurrent && "bg-muted/70 ring-1 ring-border",
+      )}
     >
       <GametypeBadge gametype={demo.gametype} />
       <div className="min-w-0 flex-1">
@@ -851,12 +867,19 @@ export function DemoDetail({
   currentPlayerId,
   playlists,
   inPlaylistIds,
+  playlistContext,
 }: {
   demo: DemoDetailData
   others: DemoListItem[]
-  /** The demos either side of this one, for the end-of-demo overlay. */
+  /**
+   * The demos either side of this one, for the end-of-demo overlay. Inside a
+   * playlist these are its neighbours in curated order; otherwise the newer
+   * demo above this one and a random pick (see getAdjacentDemos).
+   */
   previousDemo: DemoLink | null
   nextDemo: DemoLink | null
+  /** Set when arrived at via ?playlist=; drives the sidebar and every link out. */
+  playlistContext?: PlaylistContext | null
   canReact: boolean
   ownReaction: ReactionId | null
   isAdmin: boolean
@@ -870,6 +893,17 @@ export function DemoDetail({
   // back -- a page-layout concern, not something DemoViewer itself needs to
   // know about (it already just fills whatever box it's given).
   const [theater, setTheater] = useState(false)
+
+  /*
+   * Every link out of this page keeps the playlist, so a run through one
+   * survives clicking around. That includes the share link: copyLink builds
+   * from window.location, so a copied URL carries ?playlist= without anything
+   * extra here -- sharing a set rather than a single clip, which is the more
+   * useful thing to hand someone when you were watching a set.
+   */
+  const demoHref = (id: string) =>
+    playlistContext ? `/demos/${id}?playlist=${encodeURIComponent(playlistContext.slug)}` : `/demos/${id}`
+
   // Read on demand rather than held in state: the position changes 5x a second
   // and only matters at the instant someone marks a moment.
   const playbackMsRef = useRef(0)
@@ -916,8 +950,10 @@ export function DemoDetail({
             }}
             onCameraStateReady={(read) => setReadCamera(() => read)}
             trimRange={trimRange}
-            previousDemo={previousDemo}
-            nextDemo={nextDemo}
+            // href rather than the viewer knowing what a playlist is: it just
+            // links where it's told, and stays a generic player.
+            previousDemo={previousDemo && { ...previousDemo, href: demoHref(previousDemo.id) }}
+            nextDemo={nextDemo && { ...nextDemo, href: demoHref(nextDemo.id) }}
             moments={moments}
             onRemoveMoment={
               canEditMoments
@@ -1066,11 +1102,41 @@ export function DemoDetail({
         />
       </div>
 
+      {/*
+        Inside a playlist the sidebar becomes the playlist, rather than showing
+        it above "More demos". Two lists of somewhere-to-go-next is noise, and
+        the whole point of arriving here from a playlist is that the playlist is
+        the context -- offering the rest of the library alongside it is what
+        made this feel incoherent in the first place.
+      */}
       {!theater && (
         <aside>
-          <h2 className="mb-2 text-sm font-semibold text-muted-foreground">More demos</h2>
+          {playlistContext ? (
+            <div className="mb-2 flex items-baseline justify-between gap-2">
+              <Link
+                href={`/demos/playlists/${playlistContext.slug}`}
+                className="truncate text-sm font-semibold hover:underline"
+              >
+                {playlistContext.title}
+              </Link>
+              <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+                {playlistContext.position} of {playlistContext.total}
+              </span>
+            </div>
+          ) : (
+            <h2 className="mb-2 text-sm font-semibold text-muted-foreground">More demos</h2>
+          )}
           <div className="max-h-[32rem] space-y-1 overflow-y-auto rounded-xl border p-1">
-            {others.length === 0 ? (
+            {playlistContext ? (
+              playlistContext.demos.map((o) => (
+                <OtherDemoRow
+                  key={o.id}
+                  demo={o}
+                  playlistSlug={playlistContext.slug}
+                  isCurrent={o.id === demo.id}
+                />
+              ))
+            ) : others.length === 0 ? (
               <p className="p-3 text-sm text-muted-foreground">No other demos yet.</p>
             ) : (
               others.map((o) => <OtherDemoRow key={o.id} demo={o} />)
