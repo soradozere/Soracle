@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, useTransition } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Eye } from "lucide-react"
+import { Eye, ListVideo } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
@@ -64,7 +64,7 @@ function LeadBadge({ demo }: { demo: DemoListItem }) {
 
 // Exported so playlist pages show demos exactly as the library does -- a card
 // that looked subtly different there would read as a different kind of thing.
-export function DemoCard({ demo }: { demo: DemoListItem }) {
+export function DemoCard({ demo, playlistSlug }: { demo: DemoListItem; playlistSlug?: string }) {
   return (
     // Client-side navigation on purpose: the engine is a page-scoped singleton
     // that survives route changes, and JkdEngine.start() re-attaches to a
@@ -81,7 +81,13 @@ export function DemoCard({ demo }: { demo: DemoListItem }) {
     // 12h -- 40% of the project's Fluid CPU -- against 169 actual visits here.
     // This does NOT make the link a full page load; client-side navigation and
     // the resident engine above are unaffected.
-    <Link href={`/demos/${demo.id}`} prefetch={false}>
+    // playlistSlug rides along when this card is shown as part of a playlist,
+    // so opening it starts a run through that playlist rather than dropping
+    // into the demo with no idea where it came from.
+    <Link
+      href={playlistSlug ? `/demos/${demo.id}?playlist=${encodeURIComponent(playlistSlug)}` : `/demos/${demo.id}`}
+      prefetch={false}
+    >
       <Card className="h-full transition-colors hover:border-foreground/30">
         <CardHeader>
           <div className="flex items-center justify-between gap-2">
@@ -473,19 +479,37 @@ function UploadDialog({
 }
 
 const SORTS = [
+  { id: "played", label: "Date played" },
   { id: "recent", label: "Date uploaded" },
   { id: "reacts", label: "Most reacts" },
   { id: "views", label: "Views" },
 ] as const
 type SortKey = (typeof SORTS)[number]["id"]
 
+/*
+ * When the match happened, as best the library knows.
+ *
+ * recordedAt is the real answer and the upload date is a stand-in for it. They
+ * are usually within a day of each other, and then someone uploads a 2008
+ * tournament demo and they are eighteen years apart -- at which point sorting
+ * by upload date files the oldest game on the site as the newest thing on it.
+ *
+ * The fallback is deliberately NOT "sort undated demos last". An undated demo
+ * is nearly always one uploaded moments ago, so the upload date is a decent
+ * guess; burying them would hide the newest uploads from the person who just
+ * made them. It does mean an undated old demo still sorts as new -- there is
+ * no way around that without the date, and the fix is to fill it in.
+ */
+function matchDateOf(demo: DemoListItem): string {
+  return demo.recordedAt ?? demo.createdAt
+}
 
-// Grouping key for "which month was this actually played" -- recordedAt when
-// it's known, otherwise the upload date is the closest thing to it. Behind a
-// function (not inlined) because both the month-list builder and the filter
-// itself need to agree on exactly the same key.
+// Grouping key for "which month was this actually played". Shares matchDateOf
+// with the sort deliberately: the month filter and the ordering answering the
+// same question differently is the kind of thing nobody notices until a demo
+// sits under July while sorting as if it were August.
 function monthKeyOf(demo: DemoListItem): string {
-  return (demo.recordedAt ?? demo.createdAt).slice(0, 7) // "2026-07"
+  return matchDateOf(demo).slice(0, 7) // "2026-07"
 }
 function monthLabel(key: string): string {
   const [y, m] = key.split("-").map(Number)
@@ -498,15 +522,18 @@ export function DemoLibrary({
   players,
   canUpload,
   isAdmin,
+  playlistCount,
 }: {
   demos: DemoListItem[]
   players: { id: string; name: string }[]
   canUpload: boolean
   isAdmin: boolean
+  /** Shown on the Playlists link below the filters. */
+  playlistCount: number
 }) {
   const [query, setQuery] = useState("")
   const [month, setMonth] = useState("all")
-  const [sort, setSort] = useState<SortKey>("recent")
+  const [sort, setSort] = useState<SortKey>("played")
   const [tag, setTag] = useState("all")
 
   const months = useMemo(() => {
@@ -539,8 +566,17 @@ export function DemoLibrary({
       sorted.sort((a, b) => b.reactionTotal - a.reactionTotal)
     } else if (sort === "views") {
       sorted.sort((a, b) => b.viewCount - a.viewCount)
-    } else {
+    } else if (sort === "recent") {
       sorted.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+    } else {
+      // Upload date breaks the tie: recordedAt is a DATE, so a night's worth of
+      // demos from one match all carry the same value and would otherwise come
+      // back in whatever order the table felt like.
+      sorted.sort(
+        (a, b) =>
+          Date.parse(matchDateOf(b)) - Date.parse(matchDateOf(a)) ||
+          Date.parse(b.createdAt) - Date.parse(a.createdAt),
+      )
     }
 
     /*
@@ -624,6 +660,38 @@ export function DemoLibrary({
         </div>
       </div>
 
+      {/*
+        Sits with the cards rather than up by the page title: it is another way
+        into the same library, so it belongs next to what it is an alternative
+        to. Accented to separate it from the filter row above -- everything
+        there narrows the grid, and this leaves it.
+
+        Drawn from --color-primary rather than a fixed blue so it follows
+        whichever theme is on. The default theme's primary happens to be cyan,
+        which is where "blue" came from; Cloud City and the rest each have their
+        own, and a hardcoded blue would be the one control on the page ignoring
+        the theme. color-mix keeps the tint honest against a light ground
+        instead of assuming a dark one.
+      */}
+      <div className="mb-4">
+        <Link
+          href="/demos/playlists"
+          className="inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm transition-colors"
+          style={{
+            color: "var(--color-primary)",
+            borderColor: "color-mix(in srgb, var(--color-primary) 50%, transparent)",
+            background: "color-mix(in srgb, var(--color-primary) 10%, transparent)",
+          }}
+        >
+          <ListVideo className="h-4 w-4" />
+          Playlists
+          {playlistCount > 0 && (
+            <span style={{ color: "color-mix(in srgb, var(--color-primary) 70%, transparent)" }}>
+              ({playlistCount})
+            </span>
+          )}
+        </Link>
+      </div>
 
       {filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed p-10 text-center text-sm text-muted-foreground">
