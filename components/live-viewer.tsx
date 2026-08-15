@@ -868,7 +868,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
             {feedLines.length > 0 && (
               <div className="pointer-events-none absolute left-2 top-2 space-y-0.5">
                 {feedLines.map((l) => (
-                  <div key={l.id} className="text-xs text-white/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.9)]">
+                  <div key={l.id} className="text-sm text-white/90 [text-shadow:0_1px_2px_rgba(0,0,0,0.9)]">
                     {l.text}
                   </div>
                 ))}
