@@ -103,10 +103,9 @@ function gammaFilterFor(gamma: number): string {
 
 /**
  * How long each overlay keeps a line on the game before letting it fade.
- * Chat lingers longest -- it is conversation; the feed is a ticker; a centre
- * print is a moment.
+ * The feed is a ticker; a centre print is a moment. (Chat is the engine's own
+ * chatbox now, not an overlay here.)
  */
-const CHAT_OVERLAY_MS = 10000
 const FEED_OVERLAY_MS = 6000
 const ANNOUNCE_MS = 3000
 
@@ -189,7 +188,6 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
   // feed ticks in the top corner, and centre prints ("You killed ...") land
   // where the game would put them. All drawn here because the engine's own
   // 2D text is unreadable in this build.
-  const [chatLines, setChatLines] = useState<StampedLine[]>([])
   const [feedLines, setFeedLines] = useState<StampedLine[]>([])
   const [announce, setAnnounce] = useState<StampedLine | null>(null)
   const [following, setFollowing] = useState<string | null>(null)
@@ -303,10 +301,9 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
       // Each line goes two places: the scrollback panel below the game, and
       // the matching on-stage overlay. The overlays are the watching
       // experience; the panel is the record.
-      onChat: (text) => {
-        pushLog("chat", text)
-        setChatLines((prev) => [...prev.slice(-4), { id: Date.now() + Math.random(), text, at: Date.now() }])
-      },
+      // Chat is drawn by the engine itself now (its own chatbox, in the
+      // game's font, real colour codes) -- the page only keeps the record.
+      onChat: (text) => pushLog("chat", text),
       onFeed: (text) => {
         pushLog("feed", text)
         setFeedLines((prev) => [...prev.slice(-4), { id: Date.now() + Math.random(), text, at: Date.now() }])
@@ -314,6 +311,22 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
       onAnnouncement: (text) => {
         pushLog("feed", text)
         setAnnounce({ id: Date.now(), text, at: Date.now() })
+      },
+      // Same decision the demo viewer makes: the kill only becomes "You
+      // killed" or "Killed by" relative to whoever the camera is on. The
+      // exports this reads answered nothing on live connections until engine
+      // 20260815-1940, which is why this arrived with that build.
+      onKill: ({ target, attacker, viewed }) => {
+        if (viewed < 0) return
+        const byPlayer = attacker >= 0 && attacker < 32 && attacker !== target
+        if (!byPlayer) return
+        const e = engineRef.current
+        if (!e) return
+        if (attacker === viewed) {
+          setAnnounce({ id: Date.now(), text: `You killed ${e.getPlayerName(target)}`, at: Date.now() })
+        } else if (target === viewed) {
+          setAnnounce({ id: Date.now(), text: `Killed by ${e.getPlayerName(attacker)}`, at: Date.now() })
+        }
       },
     })
     try {
@@ -402,6 +415,10 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
             // already right and this changes nothing.
             const name = nameRef.current
             if (name) engineRef.current?.setPlayerName(name)
+            // Display defaults again too: the lagometer has been seen staying
+            // off despite the pre-connect set, and every command here is
+            // idempotent -- re-asserting costs nothing when it was applied.
+            engineRef.current?.applyLiveDefaults()
           }
           return "active"
         }
@@ -538,7 +555,6 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
     if (phase !== "active") return
     const id = setInterval(() => {
       const now = Date.now()
-      setChatLines((prev) => (prev.length && now - prev[0].at > CHAT_OVERLAY_MS ? prev.filter((l) => now - l.at <= CHAT_OVERLAY_MS) : prev))
       setFeedLines((prev) => (prev.length && now - prev[0].at > FEED_OVERLAY_MS ? prev.filter((l) => now - l.at <= FEED_OVERLAY_MS) : prev))
       setAnnounce((prev) => (prev && now - prev.at > ANNOUNCE_MS ? null : prev))
 
@@ -843,7 +859,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
             {following && (
               <div className="pointer-events-none absolute inset-x-0 top-2 flex justify-center">
                 <span className="rounded bg-black/60 px-3 py-1 text-sm text-white">
-                  Following <span className="font-medium">{following}</span>
+                  Spectating <span className="font-medium">{following}</span>
                 </span>
               </div>
             )}
@@ -853,21 +869,6 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
               <div className="pointer-events-none absolute left-2 top-2 space-y-0.5">
                 {feedLines.map((l) => (
                   <div key={l.id} className="text-xs text-white/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.9)]">
-                    {l.text}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {/* Chat, low on the picture where Eternal puts it, clear of the
-                chat input line that opens along the very bottom. */}
-            {chatLines.length > 0 && (
-              <div className="pointer-events-none absolute bottom-14 left-2 max-w-[70%] space-y-0.5">
-                {chatLines.map((l) => (
-                  <div
-                    key={l.id}
-                    className="w-fit rounded bg-black/45 px-1.5 py-0.5 text-sm text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.9)]"
-                  >
                     {l.text}
                   </div>
                 ))}
