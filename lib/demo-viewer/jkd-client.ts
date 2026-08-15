@@ -1128,6 +1128,14 @@ export class JkdEngine {
     this.command("cg_lagometer 1")
     this.command("com_maxfps 0")
 
+    // The engine's own notify text -- the console lines it echoes across the
+    // top of the screen -- is switched off, because the page draws all of it
+    // better: kill feed top-left, chat low on the picture, centre prints in
+    // the middle. Leaving notify on showed every chat line twice, once styled
+    // and once in the engine's own text at the top mixed into the kill feed.
+    // The console (~) is unaffected; this is only the ambient echo.
+    this.command("con_notifytime 0")
+
     // cg_smoothClients is deliberately left at its default of 0, and the name
     // is why this needs saying. It reads like "smooth out other clients"; it
     // does the opposite:
