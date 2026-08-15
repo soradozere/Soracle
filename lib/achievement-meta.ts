@@ -1119,6 +1119,12 @@ export interface ClaimContext {
   lost: boolean
   myScore: number
   oppScore: number
+  // The most kills this player landed on any single opponent who never killed
+  // them back in that match. Read from the kill matrix (match_kills), which
+  // only exists for JSON-scoreboard matches -- 9 Aug 2026 onward -- so earlier
+  // matches carry 0 here and can never claim crests built on it. That is a
+  // property of the data, not a from-gate.
+  maxUnansweredKills?: number
 }
 
 export interface SecretDef {
@@ -1209,6 +1215,19 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
     icon: "sith-era", // shares DOOM's crest — it's a doom feat
     condition: "3+ dooms, 15+ DBS kills and a cap in one match",
     claim: (s) => s.doom_kills >= 3 && s.dbs_kills >= 15 && s.captures >= 1,
+  },
+  {
+    // Calibrated 15 Aug 2026 against every kill-matrix pair on record: the
+    // all-time best unanswered count is 9, so 30 is deep one-of-one territory
+    // and nobody claims it silently on deploy -- no from-gate needed. Only
+    // JSON-era matches (9 Aug 2026 onward) have the matrix at all; CSV-era
+    // matches read 0 and can never qualify, which needs no gate either.
+    id: "bully",
+    title: "Bully",
+    category: "match",
+    icon: "galactic-empire", // domination
+    condition: "Kill the same enemy 30+ times in one match without dying to them once",
+    claim: (_s, m) => (m.maxUnansweredKills ?? 0) >= 30,
   },
 ]
 
