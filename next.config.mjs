@@ -51,7 +51,17 @@ const nextConfig = {
  * missing or experimental value.
  */
 function assertEngineVersion() {
-  const url = process.env.NEXT_PUBLIC_DEMO_ENGINE_URL
+  const raw = process.env.NEXT_PUBLIC_DEMO_ENGINE_URL
+  // Trim, and push the trimmed value back into the environment BEFORE Next
+  // inlines it. A pasted value with a trailing newline otherwise fails the
+  // version compare with two visually identical strings -- the error message
+  // literally printed the closing quote on the next line before anyone saw
+  // it -- and even with the compare fixed, the newline would reach the
+  // browser as %0A in every engine fetch URL. Happened for real, 15 Aug 2026.
+  const url = raw?.trim()
+  if (url && url !== raw) {
+    process.env.NEXT_PUBLIC_DEMO_ENGINE_URL = url
+  }
   const fix = [
     "",
     "  Set it in the Vercel project settings, then redeploy WITHOUT the build cache",
@@ -80,3 +90,4 @@ export default function config(phase) {
   if (phase === PHASE_PRODUCTION_BUILD) assertEngineVersion()
   return nextConfig
 }
+
