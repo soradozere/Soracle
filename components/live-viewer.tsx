@@ -441,10 +441,28 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
   const [consoleOpen, setConsoleOpen] = useState(false)
   const chatRef = useRef<HTMLInputElement | null>(null)
 
+  const closeChat = useCallback(() => {
+    setChatOpen(false)
+    setChat("")
+    // Hand the keyboard back to the game.
+    canvasRef.current?.focus()
+  }, [])
+
   useEffect(() => {
     if (phase !== "active") return
     const onKey = (e: KeyboardEvent) => {
-      if (chatOpen) return
+      if (chatOpen) {
+        // Escape cancels from wherever focus happens to be. Handled here as
+        // well as on the input because focus is easy to lose -- clicking the
+        // game to look around takes it, and then the input's own handler
+        // never runs and the line sits there stuck, holding what was typed.
+        if (e.key === "Escape") {
+          e.preventDefault()
+          e.stopPropagation()
+          closeChat()
+        }
+        return
+      }
 
       // The engine's own console, on the key JK2 has always used for it.
       // Matched by physical position (`e.code`) rather than by character:
@@ -479,14 +497,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
     // keypress first and feed it to the game.
     window.addEventListener("keydown", onKey, true)
     return () => window.removeEventListener("keydown", onKey, true)
-  }, [phase, chatOpen, consoleOpen])
-
-  const closeChat = () => {
-    setChatOpen(false)
-    setChat("")
-    // Hand the keyboard back to the game.
-    canvasRef.current?.focus()
-  }
+  }, [phase, chatOpen, consoleOpen, closeChat])
 
   const sendChat = (e: React.FormEvent) => {
     e.preventDefault()
