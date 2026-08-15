@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import { Zap, BarChart3, Server } from "lucide-react"
+import { Zap, BarChart3 } from "lucide-react"
 import { computeAchievementLedger, computePlayersDirectory, computeHomeSummary } from "@/lib/achievements-server"
 import { resolveEquippedTitles } from "@/lib/titles-server"
 import { listFeedDemoUploads } from "@/lib/demos-server"
@@ -14,7 +14,6 @@ import { HomeProfileButton } from "@/components/home-profile-button"
 import { HomeGreetingName } from "@/components/home-greeting-name"
 import { Emblem } from "@/components/emblem"
 
-const SERVERS_URL = "https://jk2t.ddns.net/servers/?game=jk2"
 
 export const metadata: Metadata = {
   title: "JK2 Capture the Flag — Soracle",
@@ -178,22 +177,31 @@ export default async function HomePage() {
               on grey they were the easiest things to miss. Same size as before —
               the lift comes from a glass fill, a primary-tinted edge and an
               accent icon, so they still read below the two solid CTAs. */}
-          <a
-            href={SERVERS_URL}
-            target="_blank"
-            rel="noopener noreferrer"
+          {/* Replaces the old "Browse Servers" link out to jk2t.ddns.net. That
+              sent people off-site to find a server they then had to have the
+              game installed to join; this watches one here, in the browser.
+              Red rather than the primary teal, and the only red on the page --
+              it is the one thing that is only true sometimes. */}
+          <Link
+            href="/live"
             className="px-4 py-2 rounded-md text-[13px] font-semibold transition-all inline-flex items-center gap-2 hover-glow"
             style={{
               color: "var(--color-text-bright)",
-              border: "1px solid color-mix(in srgb, var(--color-primary) 40%, transparent)",
+              border: "1px solid color-mix(in srgb, #E24B4A 45%, transparent)",
               background:
                 "linear-gradient(180deg, color-mix(in srgb, var(--color-surface-elevated) 75%, transparent), color-mix(in srgb, var(--color-surface) 55%, transparent))",
               boxShadow: "inset 0 1px 0 var(--glass-spec)",
             }}
           >
-            <Server className="w-4 h-4" style={{ color: "var(--color-primary)" }} />
-            Browse Servers
-          </a>
+            {/* animate-pulse is a fade, not a glow: a halo on something this
+                small reads as a smudge rather than a light. */}
+            <span
+              aria-hidden
+              className="w-2 h-2 rounded-full animate-pulse"
+              style={{ backgroundColor: "#E24B4A" }}
+            />
+            Watch Live
+          </Link>
           <HomeProfileButton />
         </div>
       </section>

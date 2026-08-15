@@ -16,4 +16,4 @@
  * disagrees with it. Bumping the engine is now two deliberate edits that have
  * to match, rather than one silent one that might not.
  */
-export const EXPECTED_ENGINE_VERSION = "20260805-0954"
+export const EXPECTED_ENGINE_VERSION = "20260815-1712"
