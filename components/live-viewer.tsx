@@ -71,6 +71,52 @@ const RECONNECT_DELAYS_MS = [4000, 6000, 10000, 15000, 20000, 30000, 30000, 3000
 const IDLE_LIMIT_MS = 30 * 60 * 1000
 
 /**
+ * Brightness, shared with the demo viewer -- same storage key on purpose, so
+ * the slider someone set over there is the brightness they get here. The
+ * engine's r_gamma does nothing in this build (no post-processing, no display
+ * ramp a web page could touch), so it is a CSS gamma curve over the canvas.
+ *
+ * The helpers are duplicated from demo-viewer.tsx rather than imported: that
+ * file does not export them, and threading exports through the site's most
+ * used component for a three-function saving is the wrong trade. If a third
+ * page ever needs them, lift all three copies into lib/.
+ */
+const GAMMA_KEY = "soracle.demo.gamma"
+const GAMMA_FILTER_ID = "soracle-live-gamma"
+const readGamma = () => {
+  if (typeof localStorage === "undefined") return 1
+  const stored = Number(localStorage.getItem(GAMMA_KEY))
+  if (!Number.isFinite(stored) || stored < 0.5 || stored > 1) return 1
+  return stored
+}
+/** Safari accepts filter:url() on a composited canvas and silently ignores it. */
+function prefersShorthandFilter(): boolean {
+  if (typeof navigator === "undefined") return false
+  return /^((?!chrome|chromium|crios|android|firefox|fxios|edg).)*safari/i.test(navigator.userAgent)
+}
+function gammaFilterFor(gamma: number): string {
+  if (gamma === 1) return ""
+  if (!prefersShorthandFilter()) return `url(#${GAMMA_FILTER_ID})`
+  const lift = 1 - gamma
+  return `brightness(${(1 + lift * 0.9).toFixed(3)}) contrast(${(1 - lift * 0.35).toFixed(3)})`
+}
+
+/**
+ * How long each overlay keeps a line on the game before letting it fade.
+ * Chat lingers longest -- it is conversation; the feed is a ticker; a centre
+ * print is a moment.
+ */
+const CHAT_OVERLAY_MS = 10000
+const FEED_OVERLAY_MS = 6000
+const ANNOUNCE_MS = 3000
+
+interface StampedLine {
+  id: number
+  text: string
+  at: number
+}
+
+/**
  * "Is anything on?", for every server, without downloading a 125MB engine.
  *
  * Polled straight from each bridge rather than through a Soracle API route.
@@ -138,6 +184,16 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
   const logScrollRef = useRef<HTMLDivElement | null>(null)
   const [panelChat, setPanelChat] = useState("")
   const [panelTeam, setPanelTeam] = useState(false)
+
+  // On-stage overlays, Eternal-style: chat sits low on the picture, the kill
+  // feed ticks in the top corner, and centre prints ("You killed ...") land
+  // where the game would put them. All drawn here because the engine's own
+  // 2D text is unreadable in this build.
+  const [chatLines, setChatLines] = useState<StampedLine[]>([])
+  const [feedLines, setFeedLines] = useState<StampedLine[]>([])
+  const [announce, setAnnounce] = useState<StampedLine | null>(null)
+  const [following, setFollowing] = useState<string | null>(null)
+  const [gamma] = useState(readGamma)
 
   // Capped: a long match would otherwise grow this without limit, and nobody
   // scrolls back past a couple of hundred lines.
@@ -244,9 +300,21 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
       // missed wants one thing in order, not two half-stories -- and it is the
       // only scrollback there is, since the engine's own console cannot draw
       // text in this build.
-      onChat: (text) => pushLog("chat", text),
-      onFeed: (text) => pushLog("feed", text),
-      onAnnouncement: (text) => pushLog("feed", text),
+      // Each line goes two places: the scrollback panel below the game, and
+      // the matching on-stage overlay. The overlays are the watching
+      // experience; the panel is the record.
+      onChat: (text) => {
+        pushLog("chat", text)
+        setChatLines((prev) => [...prev.slice(-4), { id: Date.now() + Math.random(), text, at: Date.now() }])
+      },
+      onFeed: (text) => {
+        pushLog("feed", text)
+        setFeedLines((prev) => [...prev.slice(-4), { id: Date.now() + Math.random(), text, at: Date.now() }])
+      },
+      onAnnouncement: (text) => {
+        pushLog("feed", text)
+        setAnnounce({ id: Date.now(), text, at: Date.now() })
+      },
     })
     try {
       await engine.start()
@@ -462,6 +530,29 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
       clearInterval(id)
     }
   }, [phase, serverIndex])
+
+  // Let overlay lines expire, and keep the "Following" pill honest. One slow
+  // timer for both: neither needs better than one-second resolution, and the
+  // pruning only does work when something is actually due to fade.
+  useEffect(() => {
+    if (phase !== "active") return
+    const id = setInterval(() => {
+      const now = Date.now()
+      setChatLines((prev) => (prev.length && now - prev[0].at > CHAT_OVERLAY_MS ? prev.filter((l) => now - l.at <= CHAT_OVERLAY_MS) : prev))
+      setFeedLines((prev) => (prev.length && now - prev[0].at > FEED_OVERLAY_MS ? prev.filter((l) => now - l.at <= FEED_OVERLAY_MS) : prev))
+      setAnnounce((prev) => (prev && now - prev.at > ANNOUNCE_MS ? null : prev))
+
+      // Demo-gated engine exports return 0/-1 on today's live build, so this
+      // stays null until the engine that un-gates them ships -- the pill
+      // simply not appearing is the correct degraded behaviour.
+      const e = engineRef.current
+      if (e) {
+        const n = e.isFollowing() ? e.getViewClientNum() : -1
+        setFollowing(n >= 0 ? e.getPlayerName(n) : null)
+      }
+    }, 1000)
+    return () => clearInterval(id)
+  }, [phase])
 
   // Hand the slot back if nobody is really there.
   useEffect(() => {
@@ -730,7 +821,70 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
           id="canvas"
           ref={canvasRef}
           className={`w-full bg-black object-contain ${filling ? "h-screen" : "rounded"}`}
+          style={{ filter: gammaFilterFor(gamma) }}
         />
+
+        {/* The gamma curve the canvas filter references. A definition, not a
+            picture -- zero-sized, and set from state like anything else. */}
+        <svg aria-hidden className="pointer-events-none absolute h-0 w-0" focusable="false">
+          <filter id={GAMMA_FILTER_ID} colorInterpolationFilters="sRGB">
+            <feComponentTransfer>
+              <feFuncR type="gamma" exponent={gamma} />
+              <feFuncG type="gamma" exponent={gamma} />
+              <feFuncB type="gamma" exponent={gamma} />
+            </feComponentTransfer>
+          </filter>
+        </svg>
+
+        {phase === "active" && (
+          <>
+            {/* Who the camera is on. Engine-fed, so it appears only once the
+                deployed engine reports it. */}
+            {following && (
+              <div className="pointer-events-none absolute inset-x-0 top-2 flex justify-center">
+                <span className="rounded bg-black/60 px-3 py-1 text-sm text-white">
+                  Following <span className="font-medium">{following}</span>
+                </span>
+              </div>
+            )}
+
+            {/* Kill feed, top left -- a ticker, not a conversation. */}
+            {feedLines.length > 0 && (
+              <div className="pointer-events-none absolute left-2 top-2 space-y-0.5">
+                {feedLines.map((l) => (
+                  <div key={l.id} className="text-xs text-white/85 [text-shadow:0_1px_2px_rgba(0,0,0,0.9)]">
+                    {l.text}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Chat, low on the picture where Eternal puts it, clear of the
+                chat input line that opens along the very bottom. */}
+            {chatLines.length > 0 && (
+              <div className="pointer-events-none absolute bottom-14 left-2 max-w-[70%] space-y-0.5">
+                {chatLines.map((l) => (
+                  <div
+                    key={l.id}
+                    className="w-fit rounded bg-black/45 px-1.5 py-0.5 text-sm text-white [text-shadow:0_1px_2px_rgba(0,0,0,0.9)]"
+                  >
+                    {l.text}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Centre prints -- "You killed ..." and friends -- where the game
+                itself would draw them. */}
+            {announce && (
+              <div className="pointer-events-none absolute inset-x-0 top-[22%] text-center">
+                <span className="text-lg font-medium text-white [text-shadow:0_1px_3px_rgba(0,0,0,0.9)]">
+                  {announce.text}
+                </span>
+              </div>
+            )}
+          </>
+        )}
 
         {/* Everything that starts or resumes watching, centred on the stage.
             The stage holds a minimum height so this has somewhere to sit before
