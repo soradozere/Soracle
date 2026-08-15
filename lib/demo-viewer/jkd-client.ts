@@ -1127,6 +1127,25 @@ export class JkdEngine {
   applyLiveDefaults() {
     this.command("cg_lagometer 1")
     this.command("com_maxfps 0")
+
+    // Why spectated players look jittery while the same movement is smooth in
+    // game, and neither is the network.
+    //
+    // cg_smoothClients interpolates *other* players between snapshots. It is
+    // off in base JK2, which is what people mean by "the basejk camera looks
+    // laggy" -- a player sees their own movement predicted and smooth, and
+    // everyone else stepping between updates. A spectator is watching nothing
+    // but other players, so it is the whole picture rather than a detail.
+    //
+    // snaps asks for updates per second. It defaults to 30 while this server
+    // runs sv_fps 100 and clamps the request to its own maximum, so we were
+    // taking a third of what was on offer. The extra costs a few KB/s against
+    // a stream already measured at 2.5-4.3.
+    //
+    // Both are userinfo, so they are set here -- before connecting -- to ride
+    // in the handshake rather than needing a later update.
+    this.command("cg_smoothClients 1")
+    this.command("snaps 40")
   }
 
   /**
