@@ -221,6 +221,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
       // is the name the server just confirmed against the players table --
       // whoever appears in game is who the bridge authenticated.
       if (name) engine.setPlayerName(name)
+      engine.releaseChatKeys()
 
       if (!engine.connectLive(serverIndex, token)) {
         throw new Error("That server is not available.")
@@ -462,11 +463,13 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
       // its own chat line.
       if (consoleOpen) return
 
-      // Enter for all, T for team -- what JK2 binds by default.
-      if (e.key === "Enter" || e.key === "t" || e.key === "T") {
+      // JK2's own layout: y says, t says to the team. Enter is kept as a
+      // synonym for y because it is what everyone tries first in a browser.
+      const key = e.key.toLowerCase()
+      if (key === "enter" || key === "y" || key === "t") {
         e.preventDefault()
         e.stopPropagation()
-        setChatTeam(e.key !== "Enter")
+        setChatTeam(key === "t")
         setChatOpen(true)
         // After paint, or the input does not exist yet to focus.
         requestAnimationFrame(() => chatRef.current?.focus())
@@ -619,7 +622,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
         <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
           {!chatOpen && (
             <span>
-              <kbd className="rounded border px-1">Enter</kbd> chat ·{" "}
+              <kbd className="rounded border px-1">Y</kbd> chat ·{" "}
               <kbd className="rounded border px-1">T</kbd> team ·{" "}
               <kbd className="rounded border px-1">~</kbd> console ·{" "}
               <kbd className="rounded border px-1">Esc</kbd> cancel

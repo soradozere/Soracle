@@ -1110,6 +1110,25 @@ export class JkdEngine {
   }
 
   /**
+   * Take the chat keys off the engine so the page owns chat outright.
+   *
+   * JK2 binds y=say, t=team, u and i to the other two message modes. Left
+   * alone, pressing one opens the engine's messagemode *as well as* the page's
+   * chat line -- two prompts, two Enters, and the engine's drawn in the bitmap
+   * charset that renders as grey blobs in this build.
+   *
+   * Unbinding rather than trying to swallow the keys, because the engine's
+   * handler and the page's both sit on the same events and the ordering is not
+   * ours to rely on. With no bind there is nothing to race.
+   *
+   * Live only. The demo viewer never calls this, and would not care if it did:
+   * it has no chat.
+   */
+  releaseChatKeys() {
+    this.command("unbind y; unbind t; unbind u; unbind i")
+  }
+
+  /**
    * Open or close the engine's own console.
    *
    * `toggleconsole` is registered unconditionally in this build, so this needs
