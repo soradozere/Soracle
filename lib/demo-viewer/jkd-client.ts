@@ -1152,6 +1152,26 @@ export class JkdEngine {
     // in the handshake rather than needing a later update.
     this.command("cg_smoothClients 1")
     this.command("snaps 100")
+
+    // Render 30ms in the past, so a late snapshot is still an early one.
+    //
+    // The lagometer's yellow spikes are extrapolation: the client caught up to
+    // the newest snapshot it had and invented motion until the next arrived.
+    // That is what causes the jitter, and it is not packet loss -- ping is
+    // steady. Snapshots simply arrive *irregularly*, because they cross a
+    // WebSocket, and TCP delivers a stream of small messages in clumps where
+    // UDP would hand them over as they come.
+    //
+    //     cl.serverTime = cls.realtime + cl.serverTimeDelta - tn
+    //
+    // so a positive nudge holds the picture back and gives late arrivals time
+    // to land. It trades latency for smoothness, which is the right way round
+    // here and only here: a spectator sends no input and is aiming at nothing,
+    // so being a frame or two behind live costs them nothing they can feel.
+    // The same setting would be a bad trade for someone playing.
+    //
+    // 30 is the ceiling -- the engine clamps to ±30 outside DEBUG builds.
+    this.command("cl_timeNudge 30")
   }
 
   /**
