@@ -130,14 +130,28 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const engineRef = useRef<JkdEngine | null>(null)
   const [log, setLog] = useState<Array<{ id: number; kind: "chat" | "feed"; text: string }>>([])
-  const [logOpen, setLogOpen] = useState(false)
+  // Open by default. It is the only readable record of what has been said --
+  // the engine's own notify text is unreadable in this build -- so hiding it
+  // behind a click meant most viewers never knew chat existed at all.
+  const [logOpen, setLogOpen] = useState(true)
   const logIdRef = useRef(0)
+  const logScrollRef = useRef<HTMLDivElement | null>(null)
+  const [panelChat, setPanelChat] = useState("")
+  const [panelTeam, setPanelTeam] = useState(false)
 
   // Capped: a long match would otherwise grow this without limit, and nobody
   // scrolls back past a couple of hundred lines.
   const pushLog = useCallback((kind: "chat" | "feed", text: string) => {
     setLog((prev) => [...prev.slice(-199), { id: logIdRef.current++, kind, text }])
   }, [])
+
+  // Follow the newest line. The panel is open from the start now, so it fills
+  // on its own, and a log that quietly scrolls away from what just happened is
+  // worse than one you had to open yourself.
+  useEffect(() => {
+    const el = logScrollRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [log])
   const [phase, setPhase] = useState<Phase>("idle")
   const [status, setStatus] = useState("")
   const [error, setError] = useState<string | null>(null)
@@ -763,17 +777,60 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
         </div>
       )}
 
-      {/* Scrollback. The engine's console cannot draw text in this build, so
-          this is the only way to read back what was said or what happened
-          while you were looking elsewhere. */}
-      {logOpen && (
-        <div className="mt-2 max-h-56 overflow-y-auto rounded border bg-muted/30 p-2 text-sm">
-          {log.length === 0 && <p className="text-muted-foreground">Nothing yet.</p>}
-          {log.map((l) => (
-            <div key={l.id} className={l.kind === "chat" ? "" : "text-muted-foreground"}>
-              {l.text}
-            </div>
-          ))}
+      {/* Scrollback, plus a way to talk that needs no keyboard.
+          The keyboard route (y/t over the game) is the one a JK2 player will
+          reach for, but it does not exist on a phone -- there is no y key and
+          no way to summon one over a canvas. This box is the same chat by
+          other means, and it doubles as somewhere to type when the overlay is
+          not cooperating. */}
+      {logOpen && phase === "active" && (
+        <div className="mt-2 rounded border bg-muted/30">
+          <div ref={logScrollRef} className="max-h-56 overflow-y-auto p-2 text-sm">
+            {log.length === 0 && <p className="text-muted-foreground">Nothing yet.</p>}
+            {log.map((l) => (
+              <div key={l.id} className={l.kind === "chat" ? "" : "text-muted-foreground"}>
+                {l.text}
+              </div>
+            ))}
+          </div>
+          <form
+            onSubmit={(e) => {
+              e.preventDefault()
+              const text = panelChat.trim()
+              if (!text) return
+              engineRef.current?.sendChat(text, panelTeam)
+              setPanelChat("")
+            }}
+            className="flex items-center gap-2 border-t p-2"
+          >
+            <button
+              type="button"
+              onClick={() => setPanelTeam((v) => !v)}
+              aria-pressed={panelTeam}
+              className={`shrink-0 rounded border px-2 py-1 text-xs ${
+                panelTeam ? "border-amber-500/50 bg-amber-500/15 text-amber-300" : ""
+              }`}
+            >
+              {panelTeam ? "Team" : "All"}
+            </button>
+            <input
+              value={panelChat}
+              onChange={(e) => setPanelChat(e.target.value)}
+              // The engine sits behind this input and reads document-level key
+              // events; without this, typing here would also drive the game.
+              onKeyDown={(e) => e.stopPropagation()}
+              placeholder={panelTeam ? "Message your team…" : "Message everyone…"}
+              maxLength={140}
+              className="min-w-0 flex-1 rounded border bg-background px-2 py-1 text-sm"
+            />
+            <button
+              type="submit"
+              disabled={!panelChat.trim()}
+              className="shrink-0 rounded bg-primary px-3 py-1 text-sm text-primary-foreground disabled:opacity-50"
+            >
+              Send
+            </button>
+          </form>
         </div>
       )}
     </main>
