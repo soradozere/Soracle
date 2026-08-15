@@ -7,6 +7,8 @@ import {
   unlockEventsFor,
   type AchievementView,
   type SecretCandidate,
+  type KillPairRow,
+  unansweredKillsByMatchPlayer,
   type SecretHolder,
   type UnlockEvent,
 } from "@/lib/achievements"
@@ -104,6 +106,7 @@ interface RawHistory {
   matches: ServerMatch[]
   stats: ServerStat[]
   players: RawPlayerRow[]
+  killPairs: KillPairRow[]
 }
 
 /*
@@ -148,9 +151,12 @@ async function fetchHistoryRowsUncached(): Promise<RawHistory> {
   // and identical for all callers, and reading cookies would force the pages that
   // depend on this to re-render per request instead of honouring `revalidate`.
   const supabase = createAnonClient()
-  const [matches, stats, players] = await Promise.all([
+  const [matches, stats, killPairs, players] = await Promise.all([
     fetchAll<ServerMatch>(supabase, "matches", "id, red_team, blue_team, red_score, blue_score, created_at"),
     fetchAll<ServerStat>(supabase, "match_stats", STAT_COLUMNS),
+    // The kill matrix, for crests about who beat whom rather than raw totals
+    // (Bully). Small on purpose: it only exists for JSON-era matches.
+    fetchAll<KillPairRow>(supabase, "match_kills", "match_id, killer_player_id, victim_player_id, kills"),
     // tier_value / avatar_url / manually_inactive ride along for the /players
     // board: same row, same round-trip, and the achievement passes ignore them.
     fetchAll<RawPlayerRow>(
@@ -159,11 +165,11 @@ async function fetchHistoryRowsUncached(): Promise<RawHistory> {
       "id, name, created_at, tier_value, avatar_url, manually_inactive",
     ),
   ])
-  return { matches, stats, players }
+  return { matches, stats, players, killPairs }
 }
 
 async function buildHistoryIndex(): Promise<HistoryIndex> {
-  const { matches, stats, players } = await fetchHistoryRows()
+  const { matches, stats, players, killPairs } = await fetchHistoryRows()
 
   const idByName = new Map(players.map((p) => [p.name, p.id]))
   const nameById = new Map(players.map((p) => [p.id, p.name]))
@@ -231,6 +237,7 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
   // sequence can answer.
   const seqByPlayer = new Map<string, AchMatch[]>()
   const candidates: SecretCandidate[] = []
+  const unanswered = unansweredKillsByMatchPlayer(killPairs)
   for (const m of matches) {
     if (!m.red_team?.length || !m.blue_team?.length) continue
     for (const [team, other, myScore, oppScore] of [
@@ -270,7 +277,7 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
             playerId: pid,
             matchId: m.id,
             date: m.created_at,
-            ctx: { won, lost, myScore, oppScore },
+            ctx: { won, lost, myScore, oppScore, maxUnansweredKills: unanswered.get(`${m.id}:${pid}`) ?? 0 },
             stat,
           })
         }
