@@ -90,6 +90,14 @@ export interface JkdEngineOptions {
    * feeds this from the obituary and CTF printers, not from the console.
    */
   onFeed?: (text: string) => void
+  /**
+   * One line of chat from the server, colour codes already stripped.
+   *
+   * Live only. Demo playback never delivers these: the engine drops chat
+   * before cgame sees it, which is the demo viewer's deliberate no-chat
+   * policy and is unaffected by this.
+   */
+  onChat?: (text: string) => void
   onPlaybackEnded?: (realDurationMs: number) => void
 }
 
@@ -124,6 +132,7 @@ declare global {
     JKD_onKill?: (target: number, attacker: number, mod: number, viewed: number) => void
     JKD_onCenterPrint?: (text: string) => void
     JKD_onFeed?: (text: string) => void
+    JKD_onChat?: (text: string) => void
     JKD_playbackStopped?: (realDuration: number) => void
     JKD_seekDone?: () => void
   }
@@ -432,6 +441,109 @@ async function loadEngineData(url: string, onStatus?: (s: string) => void): Prom
  * One per page: the engine is a singleton inside the wasm module, and loading
  * its script twice would fight over `window.Module`.
  */
+/**
+ * Recover the close code of the bridge socket, which the engine cannot see.
+ *
+ * Emscripten's socket layer throws the CloseEvent away -- its handler is
+ * literally `peer.socket.onclose = () => SOCKFS.emit("close", fd)`, passing the
+ * file descriptor and nothing else. So no engine export can ever report *why* a
+ * live connection ended, only that it did. Wrapping the constructor is the one
+ * remaining place the code is visible.
+ *
+ * Scoped to the live socket by URL. This replaces the page's global WebSocket,
+ * so without that check it would also capture Next's hot-reload socket and any
+ * analytics transport, and report their closures as the game's.
+ */
+let lastObservedCloseCode = 0
+let liveSocketUrl: string | null = null
+let liveToken: string | null = null
+let closeProbeInstalled = false
+
+/**
+ * Which attempt a socket belongs to.
+ *
+ * Sockets overlap: a connection reliably opens a second one about 440ms after
+ * the first, and the bridge's one-session-per-account rule closes the older
+ * with 4409. Without this the page reads that closure as its own, and reports
+ * "you are watching somewhere else" over a canvas that is streaming happily
+ * from the newer socket. Only the newest dial is allowed to set the code.
+ */
+let liveDialGeneration = 0
+
+/**
+ * Whether any live socket is currently open, and since when it has not been.
+ *
+ * The engine is not a useful source for this. `cls.state` stays CA_ACTIVE
+ * until its own ~70 second connection timeout expires, so a page watching the
+ * engine believes all is well for over a minute after the bridge has gone --
+ * during which it does not refresh the token, while the engine's socket layer
+ * re-dials twice a second with the stale one and is refused every time. The
+ * socket itself knows within milliseconds.
+ *
+ * Counted rather than timestamped from a single socket, because sockets
+ * overlap: dials come in pairs, and the engine adds its own. A previous
+ * version set a "down since" stamp on every construction and cleared it only
+ * on the newest generation's open -- so one dial that never opened marked the
+ * connection down permanently, while an older socket carried traffic happily.
+ * The page then re-dialled every 40 seconds against a working connection.
+ * "How many are open" cannot drift like that.
+ */
+let liveOpenSockets = 0
+let liveSocketDownSince: number | null = null
+
+function installCloseCodeProbe() {
+  if (closeProbeInstalled || typeof window === "undefined") return
+  closeProbeInstalled = true
+
+  const NativeWebSocket = window.WebSocket
+  class ProbedWebSocket extends NativeWebSocket {
+    constructor(url: string | URL, protocols?: string | string[]) {
+      const dialled = String(url)
+      const isLive = !!liveSocketUrl && dialled.startsWith(liveSocketUrl)
+      // Substitute the freshest token we hold.
+      //
+      // The engine re-dials this socket by itself when it drops -- roughly
+      // twice a second -- and it reuses the arguments captured the first time
+      // round. Tokens last 60 seconds, so every one of those dials is rejected
+      // once the original lapses, forever, no matter how many fresh tokens the
+      // page fetches: the page can set `Module.websocket.subprotocol` all it
+      // likes and the dial still carries the old one. Measured: a bridge that
+      // came back after 34s was met with ~90 rejected dials reading "token
+      // expired 258s ago". Here is the one point where every dial passes,
+      // whoever started it.
+      const generation = ++liveDialGeneration
+      super(url, isLive && liveToken ? liveToken : protocols)
+      if (isLive) {
+        let opened = false
+        this.addEventListener("open", () => {
+          opened = true
+          liveOpenSockets++
+          liveSocketDownSince = null
+        })
+        this.addEventListener("close", (event) => {
+          // The close *code* still belongs to the newest dial only: an older
+          // socket being superseded says nothing about the live connection,
+          // and reporting its 4409 would tell the viewer they are watching
+          // somewhere else while the picture is still moving.
+          if (generation === liveDialGeneration) {
+            lastObservedCloseCode = (event as CloseEvent).code
+          }
+          // The open/closed *count*, by contrast, includes every socket --
+          // whichever one is carrying traffic keeps the connection up.
+          if (opened) {
+            opened = false
+            liveOpenSockets = Math.max(0, liveOpenSockets - 1)
+          }
+          if (liveOpenSockets === 0 && liveSocketDownSince === null) {
+            liveSocketDownSince = Date.now()
+          }
+        })
+      }
+    }
+  }
+  window.WebSocket = ProbedWebSocket as unknown as typeof WebSocket
+}
+
 export class JkdEngine {
   private opts: JkdEngineOptions
   private exec!: (cmd: string) => void
@@ -455,6 +567,23 @@ export class JkdEngine {
   private fnTrimRevision!: (() => number) | null
   private fnViewClient!: () => number
   private fnIsFollowing!: () => number
+
+  /*
+   * Live spectate, all optional.
+   *
+   * These exist only in a build made with -DJKD_LIVE_CONNECT=ON. The normal
+   * viewer engine is built with it OFF, so on that engine every one of these
+   * is null and `liveAvailable` is false -- which is the honest answer for a
+   * page that cannot do live rather than a crash. Same reasoning as
+   * fnTrimDemo above: page and engine ship separately, so a browser can be
+   * running today's page against last week's engine.
+   */
+  private fnConnectLive!: ((serverIndex: number) => number) | null
+  private fnLiveDisconnect!: (() => void) | null
+  private fnConnState!: (() => number) | null
+  private fnServerCount!: (() => number) | null
+  private fnServerName!: ((i: number) => string) | null
+  private fnServerUrl!: ((i: number) => string) | null
 
   /** Set while a seek is in flight, so callers can coalesce rather than stack. */
   private seeking = false
@@ -558,6 +687,14 @@ export class JkdEngine {
 
     window.Module = {
       canvas,
+      /*
+       * Present at boot even though only live spectating uses it: Emscripten's
+       * socket layer captures this object BY REFERENCE during runtime init, so
+       * a later connectLive() can fill in url/subprotocol and be seen. Created
+       * afterwards, it would be a different object and the settings would be
+       * silently ignored. Inert for demo playback, which opens no sockets.
+       */
+      websocket: {},
       /*
        * Called by the engine on any fatal error, instantiation included.
        *
@@ -720,6 +857,10 @@ export class JkdEngine {
       const clean = stripColourCodes(text || "").replace(/\s+/g, " ").trim()
       if (clean) this.opts.onFeed?.(clean)
     }
+    window.JKD_onChat = (text: string) => {
+      const clean = stripColourCodes(text || "").replace(/\s+/g, " ").trim()
+      if (clean) this.opts.onChat?.(clean)
+    }
     window.JKD_playbackStopped = (realDuration: number) => {
       this.opts.onPlaybackEnded?.(realDuration)
     }
@@ -786,10 +927,182 @@ export class JkdEngine {
         : null
     this.fnViewClient = M.cwrap("JKD_GetViewClientNum", "number", []) as unknown as () => number
     this.fnIsFollowing = M.cwrap("JKD_IsFollowing", "number", []) as unknown as () => number
+
+    /*
+     * Live spectate exports, bound only if this engine has them.
+     *
+     * cwrap binds lazily and does NOT throw on a missing export -- calling
+     * the result is what fails -- so presence is checked on the exports table
+     * directly, the same way fnTrimDemo does above.
+     */
+    const hasLive = typeof exports._JKD_ConnectSpectate === "function"
+    if (hasLive) {
+      this.fnConnectLive = M.cwrap("JKD_ConnectSpectate", "number", ["number"]) as unknown as (
+        i: number,
+      ) => number
+      this.fnLiveDisconnect = M.cwrap("JKD_Disconnect", null, []) as unknown as () => void
+      this.fnConnState = M.cwrap("JKD_GetConnectionState", "number", []) as unknown as () => number
+      this.fnServerCount = M.cwrap("JKD_GetServerCount", "number", []) as unknown as () => number
+      this.fnServerName = M.cwrap("JKD_GetServerName", "string", ["number"]) as unknown as (
+        i: number,
+      ) => string
+      this.fnServerUrl = M.cwrap("JKD_GetServerUrl", "string", ["number"]) as unknown as (
+        i: number,
+      ) => string
+    } else {
+      this.fnConnectLive = null
+      this.fnLiveDisconnect = null
+      this.fnConnState = null
+      this.fnServerCount = null
+      this.fnServerName = null
+      this.fnServerUrl = null
+    }
   }
 
   get isReady() {
     return this.ready
+  }
+
+  /**
+   * Whether this engine build can spectate a live server at all.
+   *
+   * False on the normal viewer engine, which is built with JKD_LIVE_CONNECT
+   * off. The /live page checks this and says so, rather than offering a
+   * button that cannot work -- the page and the engine ship separately, so
+   * this pairing really does occur in the wild.
+   */
+  get liveAvailable() {
+    return this.fnConnectLive !== null
+  }
+
+  /** The servers this engine will connect to, in allowlist order. */
+  getLiveServers(): Array<{ index: number; name: string }> {
+    if (!this.fnServerCount || !this.fnServerName) return []
+    const out: Array<{ index: number; name: string }> = []
+    for (let i = 0; i < this.fnServerCount(); i++) {
+      out.push({ index: i, name: this.fnServerName(i) })
+    }
+    return out
+  }
+
+  /**
+   * Connect to an allowlisted server as a spectator. The sibling of loadDemo:
+   * the same engine, a different source of frames.
+   *
+   * `token` comes from /api/live/token and is presented to the bridge in the
+   * WebSocket subprotocol -- the only header a browser lets a page set on a
+   * socket. Both it and the bridge URL must be in place before the engine
+   * opens the socket, because Emscripten reads them at creation time.
+   *
+   * Returns false if the index is not in the engine's own allowlist. Note the
+   * bridge checks this again independently: the engine's copy is convenience,
+   * and only the bridge's is a boundary.
+   */
+  connectLive(serverIndex: number, token: string): boolean {
+    if (!this.fnConnectLive || !this.fnServerUrl) return false
+    installCloseCodeProbe()
+    lastObservedCloseCode = 0
+    liveSocketUrl = this.fnServerUrl(serverIndex)
+    liveToken = token
+    // Down until something opens. Set here rather than per-socket so that a
+    // dial which never opens cannot mark an already-working connection down.
+    if (liveOpenSockets === 0) liveSocketDownSince = Date.now()
+    const M = window.Module as unknown as {
+      websocket?: { url?: string; subprotocol?: string }
+    }
+    if (!M.websocket) M.websocket = {}
+    // A COMPLETE url: given a bare "wss://" prefix Emscripten appends the
+    // address the engine dialled, which is a private 172.29.x.x placeholder
+    // from its faked DNS and resolves to nothing.
+    M.websocket.url = this.fnServerUrl(serverIndex)
+    M.websocket.subprotocol = token
+    return this.fnConnectLive(serverIndex) === 1
+  }
+
+  /**
+   * Leave a live session, freeing the slot immediately.
+   *
+   * The engine sends a disconnect command rather than letting the server time
+   * the client out ~70s later, which matters on a 32-slot server where a
+   * closed tab would otherwise hold a place nobody is using.
+   */
+  disconnectLive() {
+    this.fnLiveDisconnect?.()
+  }
+
+  /**
+   * Why the last live connection ended, as a WebSocket close code.
+   *
+   * 0 when it has not closed, or closed without a code. The one that matters
+   * is 4409: the bridge sends it when a newer session for the same account
+   * takes over, and a page that reconnects on it starts a fight with the tab
+   * that just replaced it -- each booting the other every few seconds, for as
+   * long as both stay open.
+   */
+  get lastCloseCode(): number {
+    return lastObservedCloseCode
+  }
+
+  /**
+   * Hand the engine a newer token to dial with.
+   *
+   * Needed because the engine re-dials on its own schedule, not the page's,
+   * and cannot ask for a token itself. While a connection is down the page
+   * keeps one warm here so that whichever attempt gets through -- the
+   * engine's or the page's -- is carrying something the bridge will accept.
+   */
+  refreshLiveToken(token: string) {
+    liveToken = token
+  }
+
+  /**
+   * How long the live socket has been down, in ms; 0 while it is up.
+   *
+   * The honest answer to "are we still connected", available immediately
+   * rather than after the engine's own timeout. Use this to decide when to
+   * start recovering -- `getConnectionState()` is far too slow to notice.
+   */
+  get liveSocketDownMs(): number {
+    return liveSocketDownSince === null ? 0 : Date.now() - liveSocketDownSince
+  }
+
+  /** 0 disconnected, 1 connecting, 2 active. */
+  getConnectionState(): 0 | 1 | 2 {
+    if (!this.fnConnState) return 0
+    const s = this.fnConnState()
+    return s === 2 ? 2 : s === 1 ? 1 : 0
+  }
+
+  /**
+   * Say something in the game, as a spectator.
+   *
+   * Routed through the console, so the text is an argument to a command and
+   * has to survive the tokeniser: quotes would end the argument early, and a
+   * newline would end the command and run the rest as another one -- which is
+   * exactly the bug that corrupted the netchan cipher when NWH's multi-line
+   * welcome banner went the other way through this same mechanism. Stripped,
+   * not escaped, because there is no escape for a newline in a console line.
+   */
+  sendChat(text: string, teamOnly = false) {
+    const safe = text.replace(/["\r\n]/g, " ").trim().slice(0, 140)
+    if (!safe) return
+    this.exec(`${teamOnly ? "say_team" : "say"} "${safe}"`)
+  }
+
+  /**
+   * Open or close the engine's own console.
+   *
+   * `toggleconsole` is registered unconditionally in this build, so this needs
+   * no engine change -- it goes down the `JKD_Exec` path that already exists.
+   *
+   * Offered as a method rather than wired up here on purpose: only the live
+   * page binds a key to it. The demo viewer deliberately has no console. It is
+   * a player, and a Quake console over it is a way to break playback, not a
+   * feature. A spectator watching a live match wants the opposite -- the
+   * scrollback the game itself is already keeping.
+   */
+  toggleConsole() {
+    this.command("toggleconsole")
   }
 
   /**
