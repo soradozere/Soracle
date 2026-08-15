@@ -1139,13 +1139,19 @@ export class JkdEngine {
     //
     // snaps asks for updates per second. It defaults to 30 while this server
     // runs sv_fps 100 and clamps the request to its own maximum, so we were
-    // taking a third of what was on offer. The extra costs a few KB/s against
-    // a stream already measured at 2.5-4.3.
+    // taking less than a third of what was on offer. Asking for 100 gets
+    // whatever the server will actually give -- the clamp means a quieter
+    // server simply hands over less rather than this being wrong there.
+    //
+    // 40 was tried first out of caution about TCP: every snapshot is a
+    // WebSocket message, and more small messages means more exposure to
+    // head-of-line stalls. It helped but did not settle it. The bandwidth is
+    // not the worry -- the stream measured 2.5-4.3 KB/s at 30.
     //
     // Both are userinfo, so they are set here -- before connecting -- to ride
     // in the handshake rather than needing a later update.
     this.command("cg_smoothClients 1")
-    this.command("snaps 40")
+    this.command("snaps 100")
   }
 
   /**
