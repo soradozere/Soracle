@@ -161,6 +161,9 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
   const statuses = useLiveStatuses(phase === "active" || phase === "connecting")
   const stageRef = useRef<HTMLDivElement | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
+  // The CSS stand-in for fullscreen, used where the real API is unavailable.
+  const [expanded, setExpanded] = useState(false)
+  const filling = fullscreen || expanded
 
   const server = LIVE_SERVERS.find((s) => s.index === serverIndex) ?? LIVE_SERVERS[0]
   const liveStatus = statuses[serverIndex] ?? null
@@ -168,18 +171,42 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
   // Fullscreen the stage, not the canvas: the chat line and the hint row are
   // absolutely positioned against it, and fullscreening the canvas alone would
   // leave them behind on the page where nobody can see them.
+  //
+  // Two mechanisms, because one is not available everywhere. iOS Safari
+  // implements requestFullscreen on <video> and nothing else, so on a phone --
+  // where filling the screen matters most, and where the browser chrome eats
+  // the most of it -- the real API simply refuses. The fallback pins the stage
+  // over the viewport with CSS, which needs no permission and works anywhere.
   const toggleFullscreen = useCallback(() => {
     const el = stageRef.current
     if (!el) return
+
     if (document.fullscreenElement) {
       void document.exitFullscreen()
-    } else {
-      void el.requestFullscreen?.().catch(() => {
-        // Refused (iOS Safari does not implement it on arbitrary elements).
-        // Nothing to recover -- the page is perfectly usable without it.
-      })
+      return
     }
-  }, [])
+    if (expanded) {
+      setExpanded(false)
+      return
+    }
+    if (typeof el.requestFullscreen === "function") {
+      el.requestFullscreen().catch(() => setExpanded(true))
+      return
+    }
+    setExpanded(true)
+  }, [expanded])
+
+  // Escape leaves the CSS version too. The real API gets this from the
+  // browser; the fallback would otherwise be a room with no door on a device
+  // that has a keyboard attached.
+  useEffect(() => {
+    if (!expanded) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setExpanded(false)
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [expanded])
 
   // Track the real state rather than assuming our own toggle won: Escape and
   // the browser's own chrome both exit fullscreen without telling us.
@@ -584,7 +611,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
   const showPicker = LIVE_SERVERS.length > 1 && (phase === "idle" || phase === "error")
 
   return (
-    <main className={fullscreen ? "" : "mx-auto max-w-6xl px-4 py-6"}>
+    <main className={filling ? "" : "mx-auto max-w-6xl px-4 py-6"}>
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <h1 className="flex items-center gap-2 text-xl font-semibold">
           {/* Red only while something is genuinely live, so it means what it
@@ -611,8 +638,8 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
             onClick={toggleFullscreen}
             className="inline-flex items-center gap-1.5 rounded border border-primary/40 bg-primary/10 px-3 py-1 text-sm text-primary hover:bg-primary/20"
           >
-            {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
-            {fullscreen ? "Exit full screen" : "Full screen"}
+            {filling ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            {filling ? "Exit full screen" : "Full screen"}
           </button>
         )}
         <span className="text-sm text-muted-foreground">
@@ -688,7 +715,13 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
           not change shape the moment someone presses Watch. */}
       <div
         ref={stageRef}
-        className={`relative bg-black ${fullscreen ? "" : "min-h-[380px] rounded"}`}
+        className={`bg-black ${
+          expanded
+            ? "fixed inset-0 z-50"
+            : fullscreen
+              ? "relative"
+              : "relative min-h-[380px] rounded"
+        }`}
       >
         {/* id="canvas" is required: the engine sizes its framebuffer through a
             hard-coded "#canvas" selector, not through Module.canvas. Its
@@ -696,7 +729,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
         <canvas
           id="canvas"
           ref={canvasRef}
-          className={`w-full bg-black object-contain ${fullscreen ? "h-screen" : "rounded"}`}
+          className={`w-full bg-black object-contain ${filling ? "h-screen" : "rounded"}`}
         />
 
         {/* Everything that starts or resumes watching, centred on the stage.
