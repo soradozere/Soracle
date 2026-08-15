@@ -335,6 +335,37 @@ function compareViews(a: AchievementView, b: AchievementView): number {
 // Both callers already hold every match and every stat row, so building these
 // costs no extra queries: lib/player-profile.ts for the browser,
 // lib/achievements-server.ts for the Discord bot.
+// One (killer, victim) row of a match's kill matrix, as stored in match_kills.
+export interface KillPairRow {
+  match_id: string
+  killer_player_id: string
+  victim_player_id: string
+  kills: number
+}
+
+/**
+ * For every (match, player): the most kills they landed on a single opponent
+ * who never killed them back in that match. Keyed "matchId:playerId".
+ *
+ * "Never killed back" is an absent reverse row or one with zero kills -- the
+ * table stores only killed[] (killedBy[] is the same data mirrored), so a
+ * player who was never killed by their victim simply has no reverse row.
+ */
+export function unansweredKillsByMatchPlayer(rows: KillPairRow[]): Map<string, number> {
+  const pair = new Map<string, number>()
+  for (const r of rows) {
+    pair.set(`${r.match_id}:${r.killer_player_id}:${r.victim_player_id}`, r.kills)
+  }
+  const best = new Map<string, number>()
+  for (const r of rows) {
+    if (r.kills <= 0) continue
+    if ((pair.get(`${r.match_id}:${r.victim_player_id}:${r.killer_player_id}`) ?? 0) > 0) continue
+    const key = `${r.match_id}:${r.killer_player_id}`
+    if (r.kills > (best.get(key) ?? 0)) best.set(key, r.kills)
+  }
+  return best
+}
+
 export interface SecretCandidate {
   playerId: string
   matchId: string

@@ -5,7 +5,9 @@ import {
   computeAchievements,
   resolveSecretHolders,
   secretViewsFor,
+  unansweredKillsByMatchPlayer,
   type AchievementView,
+  type KillPairRow,
   type SecretCandidate,
 } from "@/lib/achievements"
 import type { AchMatch, AchStat } from "@/lib/achievement-meta"
@@ -231,9 +233,9 @@ async function fetchAllRows<T>(table: string, columns: string): Promise<T[]> {
 // game-night flows fresh (log match → check stats) while de-duping the
 // navigation-heavy paths; a hard reload always refetches.
 const MATCH_DATA_TTL_MS = 60_000
-let matchDataCache: { at: number; promise: Promise<{ matches: ProfileMatch[]; stats: StatRow[] }> } | null = null
+let matchDataCache: { at: number; promise: Promise<{ matches: ProfileMatch[]; stats: StatRow[]; killPairs: KillPairRow[] }> } | null = null
 
-function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[] }> {
+function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[]; killPairs: KillPairRow[] }> {
   if (matchDataCache && Date.now() - matchDataCache.at < MATCH_DATA_TTL_MS) {
     return matchDataCache.promise
   }
@@ -242,11 +244,15 @@ function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[] }
       "matches",
       "id, red_team, blue_team, red_tiers, blue_tiers, red_score, blue_score, match_type, created_at",
     ),
+    fetchAllRows<KillPairRow>(
+      "match_kills",
+      "match_id, killer_player_id, victim_player_id, kills",
+    ),
     fetchAllRows<StatRow>(
       "match_stats",
       "match_id, player_id, captures, returns, assists, base_cleaner, flag_grabs, flag_hold_ms, kills, deaths, score, dbs_returns, red_returns, yellow_returns, dfa_returns, yellow_kills, turret_kills, mine_returns, mine_kills, blue_returns, blubs_returns, blubs_kills, upcut_kills, bs_kills, dbs_kills, red_kills, blue_kills, ydfa_kills, doom_kills, tele_kills, mine_grabs_red, mine_grabs_blue, dfa_kills, dfa_attempts, blocks_enemy, time_played, ping_mean",
     ),
-  ]).then(([matches, stats]) => ({ matches, stats }))
+  ]).then(([matches, killPairs, stats]) => ({ matches, stats, killPairs }))
   matchDataCache = { at: Date.now(), promise }
   // A failed fetch shouldn't poison the cache for the whole TTL.
   promise.catch(() => {
@@ -323,6 +329,7 @@ function secretCandidates(
   matches: ProfileMatch[],
   stats: StatRow[],
   nameById: Map<string, string>,
+  unanswered: Map<string, number>,
 ): SecretCandidate[] {
   const matchById = new Map(matches.map((m) => [m.id, m]))
   const candidates: SecretCandidate[] = []
@@ -339,7 +346,13 @@ function secretCandidates(
       playerId: row.player_id,
       matchId: match.id,
       date: match.created_at,
-      ctx: { won: myScore > oppScore, lost: oppScore > myScore, myScore, oppScore },
+      ctx: {
+        won: myScore > oppScore,
+        lost: oppScore > myScore,
+        myScore,
+        oppScore,
+        maxUnansweredKills: unanswered.get(`${match.id}:${row.player_id}`) ?? 0,
+      },
       stat: toAchStat(row),
     })
   }
@@ -710,7 +723,7 @@ async function fetchRecordedTitlesFor(playerId: string): Promise<RecordedTitle[]
 }
 
 export async function loadPlayerProfile(player: Player, allPlayers: Player[]): Promise<PlayerProfileData> {
-  const [{ matches, stats }, recordedTitles] = await Promise.all([
+  const [{ matches, stats, killPairs }, recordedTitles] = await Promise.all([
     fetchMatchData(),
     fetchRecordedTitlesFor(player.id),
   ])
@@ -904,7 +917,9 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
   }
   // Secret crests are resolved globally, then only the holder is handed a view — so
   // for everyone else they don't exist, and can't leak through the earned/total count.
-  const secretHolders = resolveSecretHolders(secretCandidates(playable, stats, nameById))
+  const secretHolders = resolveSecretHolders(
+    secretCandidates(playable, stats, nameById, unansweredKillsByMatchPlayer(killPairs)),
+  )
   const achievements = computeAchievements(achSeq, secretViewsFor(player.id, secretHolders))
 
   const honours = computeMonthlyHonours(playable, stats, nameById, tierByName)
