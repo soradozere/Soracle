@@ -83,10 +83,16 @@ const IDLE_LIMIT_MS = 30 * 60 * 1000
  */
 const GAMMA_KEY = "soracle.demo.gamma"
 const GAMMA_FILTER_ID = "soracle-live-gamma"
+// Live defaults brighter than the demo viewer's neutral 1. The demo default
+// deliberately shows the recording as rendered and leaves brightness to the
+// viewer's slider -- but /live has no slider yet, and JK2 maps are dark
+// enough that "as rendered" reads as murky on a first visit. Anyone with a
+// stored demo-viewer preference gets that instead, same key, same meaning.
+const GAMMA_LIVE_DEFAULT = 0.8
 const readGamma = () => {
-  if (typeof localStorage === "undefined") return 1
+  if (typeof localStorage === "undefined") return GAMMA_LIVE_DEFAULT
   const stored = Number(localStorage.getItem(GAMMA_KEY))
-  if (!Number.isFinite(stored) || stored < 0.5 || stored > 1) return 1
+  if (!Number.isFinite(stored) || stored < 0.5 || stored > 1) return GAMMA_LIVE_DEFAULT
   return stored
 }
 /** Safari accepts filter:url() on a composited canvas and silently ignores it. */

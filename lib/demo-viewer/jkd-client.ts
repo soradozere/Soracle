@@ -1136,6 +1136,11 @@ export class JkdEngine {
     // The console (~) is unaffected; this is only the ambient echo.
     this.command("con_notifytime 0")
 
+    // Half-transparent console, so checking the score or typing a command
+    // does not mean losing sight of the match behind it. The cvar ships in
+    // jk2mv; only the default is ours.
+    this.command("con_opacity 0.5")
+
     // cg_smoothClients is deliberately left at its default of 0, and the name
     // is why this needs saying. It reads like "smooth out other clients"; it
     // does the opposite:
