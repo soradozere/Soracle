@@ -1110,6 +1110,26 @@ export class JkdEngine {
   }
 
   /**
+   * Display defaults for watching a live match.
+   *
+   * `cg_lagometer 1` because a spectator's picture is only as good as the
+   * stream feeding it, and this is the one readout that says whether a stutter
+   * is the match or the connection. It ships off by default, which suits a
+   * player who would rather not know; a viewer is in the opposite position.
+   *
+   * `com_maxfps 0` lifts the engine's own frame cap. Nothing runs away as a
+   * result -- the browser still paces frames to the display's refresh -- it
+   * just stops the engine limiting itself below that.
+   *
+   * Live only. The demo viewer keeps its own settings, which people have
+   * adjusted to taste.
+   */
+  applyLiveDefaults() {
+    this.command("cg_lagometer 1")
+    this.command("com_maxfps 0")
+  }
+
+  /**
    * Take the chat keys off the engine so the page owns chat outright.
    *
    * JK2 binds y=say, t=team, u and i to the other two message modes. Left

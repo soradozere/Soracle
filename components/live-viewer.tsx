@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
+import { Maximize2, Minimize2 } from "lucide-react"
 import { JkdEngine } from "@/lib/demo-viewer/jkd-client"
+import { LIVE_SERVERS, describeLiveStatus, type LiveStatus } from "@/lib/live-servers"
 
 /**
  * Watch a live match.
@@ -68,46 +70,44 @@ const RECONNECT_DELAYS_MS = [4000, 6000, 10000, 15000, 20000, 30000, 30000, 3000
  */
 const IDLE_LIMIT_MS = 30 * 60 * 1000
 
-interface LiveStatus {
-  online: boolean
-  viewers: number
-  players: number
-  map: string | null
-  hostname: string | null
-}
-
 /**
- * "Is anything on?", answered without downloading a 125MB engine.
+ * "Is anything on?", for every server, without downloading a 125MB engine.
  *
- * Polled straight from the bridge rather than through a Soracle API route.
- * The bridge already serves it unauthenticated with CORS open, and routing it
- * through Vercel would put a function invocation behind every tab that happens
- * to be sitting on this page -- the same shape of cost as the prefetch cascade
- * that ran the bill up in August.
+ * Polled straight from each bridge rather than through a Soracle API route.
+ * The bridges serve this unauthenticated with CORS open, and routing it through
+ * Vercel would put a function invocation behind every tab that happens to be
+ * sitting on this page -- the same shape of cost as the prefetch cascade that
+ * ran the bill up in August.
  *
- * Polling stops while a viewer is actually watching: they can see for
- * themselves, and the engine already holds a live connection to the same box.
+ * Keyed by server index rather than an array so a slow or dead bridge only
+ * leaves its own entry missing instead of holding up the rest.
  */
-function useLiveStatus(active: boolean) {
-  const [status, setStatus] = useState<LiveStatus | null>(null)
-  const url = process.env.NEXT_PUBLIC_LIVE_STATUS_URL
+function useLiveStatuses(active: boolean) {
+  const [statuses, setStatuses] = useState<Record<number, LiveStatus | null>>({})
 
   useEffect(() => {
-    if (!url || active) return
+    // Stops while watching: the viewer can see for themselves, and the engine
+    // already holds a live connection to the same box.
+    if (active) return
     let cancelled = false
 
     const poll = async () => {
-      try {
-        const res = await fetch(url, { cache: "no-store" })
-        if (!res.ok) throw new Error(String(res.status))
-        const data = (await res.json()) as LiveStatus
-        if (!cancelled) setStatus(data)
-      } catch {
-        // A bridge that is down is itself "nothing to watch" -- report that
-        // rather than an error, which is what it means to someone here to
-        // see whether a match is on.
-        if (!cancelled) setStatus(null)
-      }
+      await Promise.all(
+        LIVE_SERVERS.map(async (server) => {
+          let next: LiveStatus | null = null
+          try {
+            const res = await fetch(server.statusUrl, { cache: "no-store" })
+            if (res.ok) next = (await res.json()) as LiveStatus
+          } catch {
+            // A bridge that is down is itself "nothing to watch". Reported as
+            // such rather than as an error, because that is what it means to
+            // someone deciding whether to watch.
+          }
+          if (!cancelled) {
+            setStatuses((prev) => ({ ...prev, [server.index]: next }))
+          }
+        })
+      )
     }
 
     void poll()
@@ -116,9 +116,9 @@ function useLiveStatus(active: boolean) {
       cancelled = true
       clearInterval(id)
     }
-  }, [url, active])
+  }, [active])
 
-  return status
+  return statuses
 }
 
 interface LiveViewerProps {
@@ -141,11 +141,39 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
   const [phase, setPhase] = useState<Phase>("idle")
   const [status, setStatus] = useState("")
   const [error, setError] = useState<string | null>(null)
-  const [servers, setServers] = useState<Array<{ index: number; name: string }>>([])
   const [serverIndex, setServerIndex] = useState(0)
   const [chat, setChat] = useState("")
   const [booting, setBooting] = useState(false)
-  const liveStatus = useLiveStatus(phase === "active" || phase === "connecting")
+  const statuses = useLiveStatuses(phase === "active" || phase === "connecting")
+  const stageRef = useRef<HTMLDivElement | null>(null)
+  const [fullscreen, setFullscreen] = useState(false)
+
+  const server = LIVE_SERVERS.find((s) => s.index === serverIndex) ?? LIVE_SERVERS[0]
+  const liveStatus = statuses[serverIndex] ?? null
+
+  // Fullscreen the stage, not the canvas: the chat line and the hint row are
+  // absolutely positioned against it, and fullscreening the canvas alone would
+  // leave them behind on the page where nobody can see them.
+  const toggleFullscreen = useCallback(() => {
+    const el = stageRef.current
+    if (!el) return
+    if (document.fullscreenElement) {
+      void document.exitFullscreen()
+    } else {
+      void el.requestFullscreen?.().catch(() => {
+        // Refused (iOS Safari does not implement it on arbitrary elements).
+        // Nothing to recover -- the page is perfectly usable without it.
+      })
+    }
+  }, [])
+
+  // Track the real state rather than assuming our own toggle won: Escape and
+  // the browser's own chrome both exit fullscreen without telling us.
+  useEffect(() => {
+    const sync = () => setFullscreen(!!document.fullscreenElement)
+    document.addEventListener("fullscreenchange", sync)
+    return () => document.removeEventListener("fullscreenchange", sync)
+  }, [])
 
   // Whether the last disconnect was ours. Without this the page cannot tell
   // "the viewer pressed Leave" from "the server went away", and would either
@@ -156,6 +184,9 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
   // Whether this viewer ever got in at all, so "could not connect" and "lost
   // the connection" are not reported as the same thing.
   const everActiveRef = useRef(false)
+  // The name the server confirmed, kept so it can be re-asserted once the
+  // connection is up (see the state mirror below).
+  const nameRef = useRef<string | null>(null)
 
   // Boot the engine on demand rather than on mount: it is a ~125MB download,
   // and someone opening /live to see whether anything is on should not pay for
@@ -201,8 +232,6 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
         setPhase("unsupported")
         return
       }
-      setServers(engine.getLiveServers())
-
       const res = await fetch("/api/live/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -220,8 +249,10 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
       // userinfo. Taken from the token response rather than the prop, so it
       // is the name the server just confirmed against the players table --
       // whoever appears in game is who the bridge authenticated.
+      nameRef.current = name ?? null
       if (name) engine.setPlayerName(name)
       engine.releaseChatKeys()
+      engine.applyLiveDefaults()
 
       if (!engine.connectLive(serverIndex, token)) {
         throw new Error("That server is not available.")
@@ -252,7 +283,17 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
           // backoff starts from scratch next time rather than carrying a
           // penalty from an outage that is over.
           attemptRef.current = 0
-          everActiveRef.current = true
+          if (!everActiveRef.current) {
+            everActiveRef.current = true
+            // Say the name again now the connection exists. It is set before
+            // connecting, where it rides in the handshake's userinfo -- but a
+            // reload has been seen to arrive as "Padawan" anyway, and nothing
+            // corrected it afterwards. Re-asserting is a userinfo update the
+            // server applies immediately, so the worst case is that it was
+            // already right and this changes nothing.
+            const name = nameRef.current
+            if (name) engineRef.current?.setPlayerName(name)
+          }
           return "active"
         }
         // Refs are read here rather than state because this closure is
@@ -523,56 +564,49 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
     )
   }
 
+  // The picker only earns its place once there is something to pick between.
+  // With a single server it is a list of one and a click nobody wants to make,
+  // so idle goes straight to the Watch button instead.
+  const showPicker = LIVE_SERVERS.length > 1 && (phase === "idle" || phase === "error")
+
   return (
-    <main className="mx-auto max-w-6xl px-4 py-6">
+    <main className={fullscreen ? "" : "mx-auto max-w-6xl px-4 py-6"}>
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <h1 className="text-xl font-semibold">Live</h1>
-        {servers.length > 1 && (
-          <select
-            className="rounded border bg-background px-2 py-1 text-sm"
-            value={serverIndex}
-            onChange={(e) => setServerIndex(Number(e.target.value))}
-            disabled={phase === "active" || phase === "connecting"}
-          >
-            {servers.map((s) => (
-              <option key={s.index} value={s.index}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+        <h1 className="flex items-center gap-2 text-xl font-semibold">
+          {/* Red only while something is genuinely live, so it means what it
+              looks like. A permanently-lit recording dot is decoration. */}
+          {liveStatus?.online && (
+            <span aria-hidden className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+          )}
+          Live
+        </h1>
+        {(phase === "active" || phase === "connecting" || phase === "dropped") && (
+          <span className="text-sm font-medium">{server?.name}</span>
         )}
-        {(phase === "idle" || phase === "error") && (
-          <button onClick={connect} className="rounded bg-primary px-3 py-1 text-sm text-primary-foreground">
-            {booting ? "Starting…" : phase === "error" ? "Try again" : "Watch"}
-          </button>
-        )}
-        {(phase === "timedout" || phase === "superseded") && (
-          <button onClick={connect} className="rounded bg-primary px-3 py-1 text-sm text-primary-foreground">
-            {phase === "superseded" ? "Watch here instead" : "Resume"}
-          </button>
-        )}
-        {/* Leave stays offered while reconnecting: someone who has decided
-            they are done should not have to wait out the backoff first. */}
+        {/* Starting and leaving live in different places on purpose. Watch sits
+            over the black stage below, where the thing you are about to start
+            actually appears; Leave belongs up here, out of the picture, so it
+            is not hovering over the match you are trying to watch. */}
         {(phase === "active" || phase === "connecting" || phase === "dropped") && (
           <button onClick={disconnect} className="rounded border px-3 py-1 text-sm">
             Leave
+          </button>
+        )}
+        {phase === "active" && (
+          <button
+            onClick={toggleFullscreen}
+            className="inline-flex items-center gap-1.5 rounded border border-primary/40 bg-primary/10 px-3 py-1 text-sm text-primary hover:bg-primary/20"
+          >
+            {fullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            {fullscreen ? "Exit full screen" : "Full screen"}
           </button>
         )}
         <span className="text-sm text-muted-foreground">
           {phase === "connecting" && (status || "Connecting…")}
           {phase === "active" && `Watching as ${playerName ?? "you"}`}
           {phase === "dropped" && "Connection lost — trying to get back in…"}
-          {phase === "idle" && liveStatus !== null && (
-            liveStatus.online
-              ? [
-                  liveStatus.map ?? "a map",
-                  `${liveStatus.players} playing`,
-                  liveStatus.viewers > 0 && `${liveStatus.viewers} watching`,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")
-              : "Nothing live right now."
-          )}
+          {/* What is on is shown on the stage while idle, next to the button
+              that acts on it, rather than repeated up here. */}
         </span>
       </div>
 
@@ -596,11 +630,94 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
       )}
       {error && <p className="mb-4 rounded border border-red-500/40 bg-red-500/10 p-3 text-sm">{error}</p>}
 
-      <div className="relative">
+      {showPicker && (
+        <div className="mb-4 grid gap-2">
+          {LIVE_SERVERS.map((s) => {
+            const st = statuses[s.index] ?? null
+            return (
+              <div
+                key={s.index}
+                className={`flex items-center gap-3 rounded border p-3 ${st?.online ? "" : "opacity-60"}`}
+              >
+                <span
+                  aria-hidden
+                  className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                    st?.online ? "animate-pulse bg-red-500" : "bg-muted-foreground/40"
+                  }`}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-sm font-medium">{s.name}</span>
+                  <span className="block text-sm text-muted-foreground">
+                    {describeLiveStatus(st)}
+                  </span>
+                </span>
+                {/* Offered even when nothing is on: a server can fill up between
+                    two polls, and refusing the click would be wrong more often
+                    than it would be right. */}
+                <button
+                  onClick={() => {
+                    setServerIndex(s.index)
+                    void connect()
+                  }}
+                  className="rounded border px-3 py-1 text-sm"
+                >
+                  Watch
+                </button>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* The stage is what goes fullscreen, so everything drawn over the game
+          travels with it. Black while idle rather than hidden: the page should
+          not change shape the moment someone presses Watch. */}
+      <div
+        ref={stageRef}
+        className={`relative bg-black ${fullscreen ? "" : "min-h-[380px] rounded"}`}
+      >
         {/* id="canvas" is required: the engine sizes its framebuffer through a
             hard-coded "#canvas" selector, not through Module.canvas. Its
             width/height are the engine's to set -- CSS scales the result. */}
-        <canvas id="canvas" ref={canvasRef} className="w-full rounded bg-black object-contain" />
+        <canvas
+          id="canvas"
+          ref={canvasRef}
+          className={`w-full bg-black object-contain ${fullscreen ? "h-screen" : "rounded"}`}
+        />
+
+        {/* Everything that starts or resumes watching, centred on the stage.
+            The stage holds a minimum height so this has somewhere to sit before
+            the engine has sized the canvas -- otherwise the page would jump the
+            moment it loads. */}
+        {!(phase === "active" || phase === "connecting" || phase === "dropped") && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
+            {phase !== "unsupported" && (
+              <button
+                onClick={connect}
+                disabled={booting}
+                className="rounded bg-primary px-6 py-2.5 text-base font-medium text-primary-foreground disabled:opacity-70"
+              >
+                {booting
+                  ? "Starting…"
+                  : phase === "superseded"
+                    ? "Watch here instead"
+                    : phase === "timedout"
+                      ? "Resume"
+                      : phase === "error"
+                        ? "Try again"
+                        : "Watch"}
+              </button>
+            )}
+            {phase === "idle" && !showPicker && (
+              <span className="text-sm text-white/70">{describeLiveStatus(liveStatus)}</span>
+            )}
+            {booting && (
+              <span className="text-sm text-white/70">
+                First load downloads the game — about 125MB.
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Over the game, where the game would draw it. */}
         {chatOpen && (
@@ -635,6 +752,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
             <span>
               <kbd className="rounded border px-1">Y</kbd> chat ·{" "}
               <kbd className="rounded border px-1">T</kbd> team ·{" "}
+              <kbd className="rounded border px-1">Tab</kbd> scores ·{" "}
               <kbd className="rounded border px-1">~</kbd> console ·{" "}
               <kbd className="rounded border px-1">Esc</kbd> cancel
             </span>
