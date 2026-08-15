@@ -1184,8 +1184,10 @@ export class JkdEngine {
     // so being a frame or two behind live costs them nothing they can feel.
     // The same setting would be a bad trade for someone playing.
     //
-    // 30 is the ceiling -- the engine clamps to ±30 outside DEBUG builds.
-    this.command("cl_timeNudge 30")
+    // Engine 20260815-1940 raised the live-path ceiling to 200 (stock clamps
+    // at 30, tuned for players who feel latency; a spectator does not). 60
+    // covers the clump sizes seen so far; tune from the console if not.
+    this.command("cl_timeNudge 60")
   }
 
   /**
