@@ -1090,6 +1090,26 @@ export class JkdEngine {
   }
 
   /**
+   * Connect under the viewer's Soracle name rather than as another Padawan.
+   *
+   * Must be called before `connectLive`: the name is part of the userinfo
+   * sent during the handshake, so setting it afterwards would not take effect
+   * until something else caused userinfo to be resent.
+   *
+   * Sanitised hard, because this string ends up in a console command and then
+   * in a userinfo string, and each has a character that ends it early:
+   * quotes and newlines terminate the command, semicolons start another one,
+   * and a backslash separates userinfo keys -- a name containing one could
+   * inject a key of its own. Stripped rather than escaped, since none of them
+   * belong in a player name anyway. 31 characters is what JK2 keeps.
+   */
+  setPlayerName(name: string) {
+    const safe = name.replace(/["\\;\r\n]/g, "").trim().slice(0, 31)
+    if (!safe) return
+    this.command(`name "${safe}"`)
+  }
+
+  /**
    * Open or close the engine's own console.
    *
    * `toggleconsole` is registered unconditionally in this build, so this needs

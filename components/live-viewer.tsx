@@ -214,7 +214,13 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
         return
       }
       if (!res.ok) throw new Error("Could not get a viewing pass.")
-      const { token } = await res.json()
+      const { token, name } = await res.json()
+
+      // Before connecting, not after: the name travels in the handshake's
+      // userinfo. Taken from the token response rather than the prop, so it
+      // is the name the server just confirmed against the players table --
+      // whoever appears in game is who the bridge authenticated.
+      if (name) engine.setPlayerName(name)
 
       if (!engine.connectLive(serverIndex, token)) {
         throw new Error("That server is not available.")
