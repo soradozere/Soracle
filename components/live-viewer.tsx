@@ -1,0 +1,643 @@
+"use client"
+
+import { useCallback, useEffect, useRef, useState } from "react"
+import Link from "next/link"
+import { JkdEngine } from "@/lib/demo-viewer/jkd-client"
+
+/**
+ * Watch a live match.
+ *
+ * Deliberately a thin page rather than a mode inside `demo-viewer.tsx`. That
+ * component is ~2,500 lines and 120 hooks of demo-shaped state, and it drives
+ * the site's most-used feature; adding a live branch through it was the larger
+ * risk. The engine is shared either way -- `JkdEngine` is a page-scoped
+ * singleton and live is simply another source of frames, which is the part of
+ * "one player, two inputs" that actually matters.
+ *
+ * The intent is to lift the genuinely shared pieces (POV picker, camera
+ * controls, kill feed) into components both pages use, once live has proven
+ * what it really needs. Until then this keeps its own chrome minimal so that
+ * convergence stays cheap.
+ */
+
+type Phase =
+  | "idle"
+  | "connecting"
+  | "active"
+  | "dropped"
+  | "timedout"
+  | "superseded"
+  | "error"
+  | "unsupported"
+
+/**
+ * Close code the bridge sends when a newer session for the same account takes
+ * over. Reconnecting on it would start a fight with the tab that just replaced
+ * this one -- each booting the other every few seconds, indefinitely, since a
+ * connection that succeeds resets the backoff.
+ */
+const CLOSE_SUPERSEDED = 4409
+
+/**
+ * Backoff for an unexpected drop.
+ *
+ * Starts above three seconds because that is `sv_reconnectlimit`: the server
+ * ignores a connect message arriving sooner than that after the last one, so
+ * an earlier retry is not merely rude, it is thrown away and wasted.
+ *
+ * Capped at 30s rather than doubling away to a minute-plus. Doubling is the
+ * right shape when each attempt is expensive, and these are not: a dial at a
+ * dead bridge now fails in about a second (see the close-code check in the
+ * state mirror), so the cost of an extra attempt is a WebSocket that refuses
+ * immediately. Measured against the alternative -- the first version of this
+ * took 2m45s to notice a bridge that had been back for 39 seconds, and used
+ * every attempt it had doing so. A flatter tail covers roughly the same total
+ * outage while recovering within 30s of the server returning.
+ *
+ * Finite on purpose. Silently retrying forever is how a page ends up holding a
+ * connection nobody is watching.
+ */
+const RECONNECT_DELAYS_MS = [4000, 6000, 10000, 15000, 20000, 30000, 30000, 30000]
+
+/**
+ * How long a viewer can do nothing before we hand their slot back.
+ *
+ * The server has 32 of them and a spectator holds a real one. Long enough that
+ * nobody watching a match ever sees this, short enough that a tab left open
+ * overnight is not still occupying a slot at the next game.
+ */
+const IDLE_LIMIT_MS = 30 * 60 * 1000
+
+interface LiveStatus {
+  online: boolean
+  viewers: number
+  players: number
+  map: string | null
+  hostname: string | null
+}
+
+/**
+ * "Is anything on?", answered without downloading a 125MB engine.
+ *
+ * Polled straight from the bridge rather than through a Soracle API route.
+ * The bridge already serves it unauthenticated with CORS open, and routing it
+ * through Vercel would put a function invocation behind every tab that happens
+ * to be sitting on this page -- the same shape of cost as the prefetch cascade
+ * that ran the bill up in August.
+ *
+ * Polling stops while a viewer is actually watching: they can see for
+ * themselves, and the engine already holds a live connection to the same box.
+ */
+function useLiveStatus(active: boolean) {
+  const [status, setStatus] = useState<LiveStatus | null>(null)
+  const url = process.env.NEXT_PUBLIC_LIVE_STATUS_URL
+
+  useEffect(() => {
+    if (!url || active) return
+    let cancelled = false
+
+    const poll = async () => {
+      try {
+        const res = await fetch(url, { cache: "no-store" })
+        if (!res.ok) throw new Error(String(res.status))
+        const data = (await res.json()) as LiveStatus
+        if (!cancelled) setStatus(data)
+      } catch {
+        // A bridge that is down is itself "nothing to watch" -- report that
+        // rather than an error, which is what it means to someone here to
+        // see whether a match is on.
+        if (!cancelled) setStatus(null)
+      }
+    }
+
+    void poll()
+    const id = setInterval(poll, 15000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [url, active])
+
+  return status
+}
+
+interface LiveViewerProps {
+  signedIn: boolean
+  playerName: string | null
+}
+
+export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const engineRef = useRef<JkdEngine | null>(null)
+  const [log, setLog] = useState<Array<{ id: number; kind: "chat" | "feed"; text: string }>>([])
+  const [logOpen, setLogOpen] = useState(false)
+  const logIdRef = useRef(0)
+
+  // Capped: a long match would otherwise grow this without limit, and nobody
+  // scrolls back past a couple of hundred lines.
+  const pushLog = useCallback((kind: "chat" | "feed", text: string) => {
+    setLog((prev) => [...prev.slice(-199), { id: logIdRef.current++, kind, text }])
+  }, [])
+  const [phase, setPhase] = useState<Phase>("idle")
+  const [status, setStatus] = useState("")
+  const [error, setError] = useState<string | null>(null)
+  const [servers, setServers] = useState<Array<{ index: number; name: string }>>([])
+  const [serverIndex, setServerIndex] = useState(0)
+  const [chat, setChat] = useState("")
+  const [booting, setBooting] = useState(false)
+  const liveStatus = useLiveStatus(phase === "active" || phase === "connecting")
+
+  // Whether the last disconnect was ours. Without this the page cannot tell
+  // "the viewer pressed Leave" from "the server went away", and would either
+  // reconnect people who chose to stop or strand people who did not.
+  const intentionalRef = useRef(false)
+  const attemptRef = useRef(0)
+  const lastActivityRef = useRef(Date.now())
+  // Whether this viewer ever got in at all, so "could not connect" and "lost
+  // the connection" are not reported as the same thing.
+  const everActiveRef = useRef(false)
+
+  // Boot the engine on demand rather than on mount: it is a ~125MB download,
+  // and someone opening /live to see whether anything is on should not pay for
+  // it before they have chosen to watch.
+  const boot = useCallback(async () => {
+    if (engineRef.current || !canvasRef.current) return engineRef.current
+    setBooting(true)
+    const engine = new JkdEngine({
+      baseUrl: process.env.NEXT_PUBLIC_DEMO_ENGINE_URL ?? "http://127.0.0.1:8090",
+      canvas: canvasRef.current,
+      onStatus: (s) => setStatus(s),
+      // Chat and the kill/flag ticker share one log. In game these are
+      // separate places on screen, but a spectator reading back over what they
+      // missed wants one thing in order, not two half-stories -- and it is the
+      // only scrollback there is, since the engine's own console cannot draw
+      // text in this build.
+      onChat: (text) => pushLog("chat", text),
+      onFeed: (text) => pushLog("feed", text),
+      onAnnouncement: (text) => pushLog("feed", text),
+    })
+    try {
+      await engine.start()
+      engineRef.current = engine
+      return engine
+    } finally {
+      setBooting(false)
+    }
+  }, [])
+
+  const connect = useCallback(async () => {
+    setError(null)
+    intentionalRef.current = false
+    lastActivityRef.current = Date.now()
+    setPhase("connecting")
+    try {
+      const engine = await boot()
+      if (!engine) throw new Error("The viewer could not start.")
+
+      // The engine that serves the demo library is built without the live
+      // connect path, so a page newer than the deployed engine lands here.
+      // Say so plainly rather than offering a button that cannot work.
+      if (!engine.liveAvailable) {
+        setPhase("unsupported")
+        return
+      }
+      setServers(engine.getLiveServers())
+
+      const res = await fetch("/api/live/token", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverIndex }),
+      })
+      if (res.status === 401) {
+        setError("Sign in to watch live.")
+        setPhase("error")
+        return
+      }
+      if (!res.ok) throw new Error("Could not get a viewing pass.")
+      const { token } = await res.json()
+
+      if (!engine.connectLive(serverIndex, token)) {
+        throw new Error("That server is not available.")
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+      setPhase("error")
+    }
+  }, [boot, serverIndex])
+
+  const disconnect = useCallback(() => {
+    intentionalRef.current = true
+    attemptRef.current = 0
+    engineRef.current?.disconnectLive()
+    setPhase("idle")
+  }, [])
+
+  // Mirror the engine's own connection state rather than tracking a parallel
+  // copy: it owns the truth, and a UI that guesses drifts from what is on
+  // screen.
+  useEffect(() => {
+    if (phase !== "connecting" && phase !== "active") return
+    const id = setInterval(() => {
+      const s = engineRef.current?.getConnectionState() ?? 0
+      setPhase((prev) => {
+        if (s === 2) {
+          // A connection that lasted is proof the trouble has passed, so the
+          // backoff starts from scratch next time rather than carrying a
+          // penalty from an outage that is over.
+          attemptRef.current = 0
+          everActiveRef.current = true
+          return "active"
+        }
+        // Refs are read here rather than state because this closure is
+        // recreated only when `phase` changes, and the decision needs the
+        // value as it is now.
+        const closeCode = engineRef.current?.lastCloseCode ?? 0
+
+        if (s === 0 && prev === "active") {
+          if (intentionalRef.current) return "idle"
+          // Being replaced by another tab is a decision, not a fault. Retrying
+          // would just take the session back off whoever is now using it.
+          if (closeCode === CLOSE_SUPERSEDED) return "superseded"
+          return "dropped"
+        }
+
+        // A dial that has already closed has failed -- there is nothing left
+        // to wait for. Measured cost of not checking: a bridge that came back
+        // after 39s took 2m45s to be noticed, because each dead attempt sat
+        // out the full connecting timeout before the next was even scheduled.
+        // `connectLive` zeroes this per attempt, so a code here is this
+        // attempt's.
+        if (prev === "connecting" && closeCode !== 0) {
+          if (closeCode === CLOSE_SUPERSEDED) return "superseded"
+          return "dropped"
+        }
+        return prev
+      })
+    }, 500)
+    return () => clearInterval(id)
+  }, [phase])
+
+  // Backstop for a handshake that neither completes nor closes.
+  //
+  // The common failure -- nothing listening -- is caught in about a second by
+  // the close-code check above. This covers the other shape: the WebSocket
+  // opens, so nothing closes, but the game server behind it never answers
+  // (mid map-change, or wedged). The engine sits in state 1 and the page would
+  // otherwise read "Connecting…" forever.
+  useEffect(() => {
+    if (phase !== "connecting") return
+    const id = setTimeout(() => setPhase("dropped"), 20000)
+    return () => clearTimeout(id)
+  }, [phase])
+
+  // Get back in after an unexpected drop -- a map change, a server restart, a
+  // laptop lid. The viewer did not ask to stop watching, so we do the retrying
+  // instead of leaving them at a dead canvas wondering.
+  useEffect(() => {
+    if (phase !== "dropped") return
+
+    const attempt = attemptRef.current
+    if (attempt >= RECONNECT_DELAYS_MS.length) {
+      // Stop the engine's own re-dial loop too. It retries about twice a
+      // second independently of this component, so without this the page
+      // reports "gave up" while still quietly hammering the bridge.
+      engineRef.current?.disconnectLive()
+      setError(
+        everActiveRef.current
+          ? "Lost the connection, and could not get back in."
+          : "Could not reach the server. It may be down or between maps."
+      )
+      setPhase("error")
+      return
+    }
+    attemptRef.current = attempt + 1
+
+    const id = setTimeout(() => {
+      // A fresh token every time: they last 60 seconds, so the one used for
+      // the original connection is long dead by the later retries.
+      void connect()
+    }, RECONNECT_DELAYS_MS[attempt])
+    return () => clearTimeout(id)
+  }, [phase, connect])
+
+  // Watch the socket, not the engine.
+  //
+  // Two jobs, both driven by the same fact -- how long the WebSocket has been
+  // down -- because that is known immediately while the engine's own state
+  // lags by its ~70s timeout:
+  //
+  //  1. Keep a live token in the engine's hands. The engine re-dials roughly
+  //     twice a second on its own, and those dials are the fastest route back:
+  //     a bridge restart was recovered in 660ms that way, invisibly, purely
+  //     because the token happened to still be valid. Refreshing while down
+  //     makes that the normal case rather than luck.
+  //  2. Tell the page it has dropped, so the backoff can start now rather
+  //     than in a minute.
+  //
+  // Only fetches while actually down, so watching costs no API calls.
+  useEffect(() => {
+    if (phase !== "active" && phase !== "connecting" && phase !== "dropped") return
+    let cancelled = false
+    let lastFetch = 0
+
+    const tick = async () => {
+      const down = engineRef.current?.liveSocketDownMs ?? 0
+      if (!down) return
+
+      // Three seconds of silence is a drop, not a hiccup -- long enough to
+      // ride out the re-dial that usually succeeds, short enough that the
+      // viewer is not staring at a frozen frame.
+      if (down > 3000) setPhase((p) => (p === "active" ? "dropped" : p))
+
+      // 20s against a 60s TTL: frequent enough that whichever dial gets
+      // through is carrying something valid, cheap enough to be free.
+      if (Date.now() - lastFetch < 20000) return
+      lastFetch = Date.now()
+      try {
+        const res = await fetch("/api/live/token", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ serverIndex }),
+        })
+        if (!res.ok) return
+        const { token } = await res.json()
+        if (!cancelled && token) engineRef.current?.refreshLiveToken(token)
+      } catch {
+        // Offline, or the site is down. Not itself a reason to stop trying.
+      }
+    }
+
+    const id = setInterval(() => void tick(), 1000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [phase, serverIndex])
+
+  // Hand the slot back if nobody is really there.
+  useEffect(() => {
+    if (phase !== "active") return
+
+    const bump = () => {
+      lastActivityRef.current = Date.now()
+    }
+    const events = ["mousemove", "mousedown", "keydown", "wheel", "touchstart"]
+    for (const type of events) {
+      window.addEventListener(type, bump, { passive: true })
+    }
+
+    // Checked on a slow timer rather than a single long setTimeout, because a
+    // backgrounded tab's timers are throttled and a machine that sleeps stops
+    // them entirely -- comparing timestamps survives both.
+    const id = setInterval(() => {
+      if (Date.now() - lastActivityRef.current < IDLE_LIMIT_MS) return
+      intentionalRef.current = true
+      engineRef.current?.disconnectLive()
+      setPhase("timedout")
+    }, 30000)
+
+    return () => {
+      for (const type of events) window.removeEventListener(type, bump)
+      clearInterval(id)
+    }
+  }, [phase])
+
+  // A closed tab must not hold a slot on a 32-player server. The engine sends
+  // a real disconnect, which frees it immediately instead of waiting out the
+  // ~70s timeout.
+  useEffect(() => {
+    const leave = () => engineRef.current?.disconnectLive()
+    window.addEventListener("pagehide", leave)
+    return () => {
+      window.removeEventListener("pagehide", leave)
+      leave()
+    }
+  }, [])
+
+  /*
+   * Chat the way the game does it: a key opens a line, you type, Enter sends,
+   * Escape cancels.
+   *
+   * This is UX parity, not a workaround -- jkd-client already installs a
+   * keyboard guard that hands typing to any focused input instead of the
+   * engine, so a plain box would receive characters fine. It is done this way
+   * because it is what a JK2 player's hands already know, and because a
+   * permanent box implies chat is the point of the page when watching is.
+   *
+   * The engine has its own messagemode, but it draws the prompt with the same
+   * 2D text that renders as blank boxes in this build -- which is why chat
+   * looked broken from inside the game too. Drawing it here is the same
+   * approach the kill feed and centre prints already take.
+   */
+  const [chatOpen, setChatOpen] = useState(false)
+  const [chatTeam, setChatTeam] = useState(false)
+  const [consoleOpen, setConsoleOpen] = useState(false)
+  const chatRef = useRef<HTMLInputElement | null>(null)
+
+  useEffect(() => {
+    if (phase !== "active") return
+    const onKey = (e: KeyboardEvent) => {
+      if (chatOpen) return
+
+      // The engine's own console, on the key JK2 has always used for it.
+      // Matched by physical position (`e.code`) rather than by character:
+      // the glyph on that key moves between keyboard layouts, its place
+      // under the hand does not, and that is what players reach for.
+      if (e.code === "Backquote") {
+        e.preventDefault()
+        e.stopPropagation()
+        engineRef.current?.toggleConsole()
+        setConsoleOpen((v) => !v)
+        return
+      }
+
+      // With the console up the engine owns the keyboard -- Enter submits the
+      // command being typed into it, so the page must not steal that key for
+      // its own chat line.
+      if (consoleOpen) return
+
+      // Enter for all, T for team -- what JK2 binds by default.
+      if (e.key === "Enter" || e.key === "t" || e.key === "T") {
+        e.preventDefault()
+        e.stopPropagation()
+        setChatTeam(e.key !== "Enter")
+        setChatOpen(true)
+        // After paint, or the input does not exist yet to focus.
+        requestAnimationFrame(() => chatRef.current?.focus())
+      }
+    }
+    // Capture phase: SDL's document-level listener would otherwise see the
+    // keypress first and feed it to the game.
+    window.addEventListener("keydown", onKey, true)
+    return () => window.removeEventListener("keydown", onKey, true)
+  }, [phase, chatOpen, consoleOpen])
+
+  const closeChat = () => {
+    setChatOpen(false)
+    setChat("")
+    // Hand the keyboard back to the game.
+    canvasRef.current?.focus()
+  }
+
+  const sendChat = (e: React.FormEvent) => {
+    e.preventDefault()
+    const text = chat.trim()
+    if (text) engineRef.current?.sendChat(text, chatTeam)
+    closeChat()
+  }
+
+  if (!signedIn) {
+    return (
+      <main className="mx-auto max-w-2xl px-4 py-16 text-center">
+        <h1 className="text-2xl font-semibold">Watch live</h1>
+        <p className="mt-3 text-muted-foreground">
+          Watching live needs a player account, so the server knows who is connecting.
+        </p>
+        <Link href="/player-login" className="mt-6 inline-block underline">
+          Sign in
+        </Link>
+        <p className="mt-8 text-sm text-muted-foreground">
+          No password yet? Ask an admin — they can generate one for you.
+        </p>
+      </main>
+    )
+  }
+
+  return (
+    <main className="mx-auto max-w-6xl px-4 py-6">
+      <div className="mb-4 flex flex-wrap items-center gap-3">
+        <h1 className="text-xl font-semibold">Live</h1>
+        {servers.length > 1 && (
+          <select
+            className="rounded border bg-background px-2 py-1 text-sm"
+            value={serverIndex}
+            onChange={(e) => setServerIndex(Number(e.target.value))}
+            disabled={phase === "active" || phase === "connecting"}
+          >
+            {servers.map((s) => (
+              <option key={s.index} value={s.index}>
+                {s.name}
+              </option>
+            ))}
+          </select>
+        )}
+        {(phase === "idle" || phase === "error") && (
+          <button onClick={connect} className="rounded bg-primary px-3 py-1 text-sm text-primary-foreground">
+            {booting ? "Starting…" : phase === "error" ? "Try again" : "Watch"}
+          </button>
+        )}
+        {(phase === "timedout" || phase === "superseded") && (
+          <button onClick={connect} className="rounded bg-primary px-3 py-1 text-sm text-primary-foreground">
+            {phase === "superseded" ? "Watch here instead" : "Resume"}
+          </button>
+        )}
+        {/* Leave stays offered while reconnecting: someone who has decided
+            they are done should not have to wait out the backoff first. */}
+        {(phase === "active" || phase === "connecting" || phase === "dropped") && (
+          <button onClick={disconnect} className="rounded border px-3 py-1 text-sm">
+            Leave
+          </button>
+        )}
+        <span className="text-sm text-muted-foreground">
+          {phase === "connecting" && (status || "Connecting…")}
+          {phase === "active" && `Watching as ${playerName ?? "you"}`}
+          {phase === "dropped" && "Connection lost — trying to get back in…"}
+          {phase === "idle" && liveStatus !== null && (
+            liveStatus.online
+              ? [
+                  liveStatus.map ?? "a map",
+                  `${liveStatus.players} playing`,
+                  liveStatus.viewers > 0 && `${liveStatus.viewers} watching`,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
+              : "Nothing live right now."
+          )}
+        </span>
+      </div>
+
+      {phase === "superseded" && (
+        <p className="mb-4 rounded border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          You started watching in another tab or on another device, so this one
+          stopped. One session per account keeps a single viewer from taking
+          several spectator slots.
+        </p>
+      )}
+      {phase === "timedout" && (
+        <p className="mb-4 rounded border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          Still watching? You were idle for a while, so we gave your spectator slot
+          back to the server. Press Resume to pick the match back up.
+        </p>
+      )}
+      {phase === "unsupported" && (
+        <p className="mb-4 rounded border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+          The deployed viewer engine does not support live spectating yet.
+        </p>
+      )}
+      {error && <p className="mb-4 rounded border border-red-500/40 bg-red-500/10 p-3 text-sm">{error}</p>}
+
+      <div className="relative">
+        {/* id="canvas" is required: the engine sizes its framebuffer through a
+            hard-coded "#canvas" selector, not through Module.canvas. Its
+            width/height are the engine's to set -- CSS scales the result. */}
+        <canvas id="canvas" ref={canvasRef} className="w-full rounded bg-black object-contain" />
+
+        {/* Over the game, where the game would draw it. */}
+        {chatOpen && (
+          <form
+            onSubmit={sendChat}
+            className="absolute inset-x-0 bottom-0 flex items-center gap-2 bg-black/70 px-3 py-2"
+          >
+            <span className="shrink-0 text-sm text-amber-300">{chatTeam ? "Team:" : "Say:"}</span>
+            <input
+              ref={chatRef}
+              value={chat}
+              onChange={(e) => setChat(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Escape") {
+                  e.preventDefault()
+                  closeChat()
+                }
+                // Keep every other key here rather than letting it reach the
+                // game underneath.
+                e.stopPropagation()
+              }}
+              maxLength={140}
+              className="flex-1 bg-transparent text-sm text-white outline-none"
+            />
+          </form>
+        )}
+      </div>
+
+      {phase === "active" && (
+        <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
+          {!chatOpen && (
+            <span>
+              <kbd className="rounded border px-1">Enter</kbd> chat ·{" "}
+              <kbd className="rounded border px-1">T</kbd> team ·{" "}
+              <kbd className="rounded border px-1">~</kbd> console ·{" "}
+              <kbd className="rounded border px-1">Esc</kbd> cancel
+            </span>
+          )}
+          <button onClick={() => setLogOpen((v) => !v)} className="ml-auto underline">
+            {logOpen ? "Hide" : "Show"} chat &amp; feed{log.length ? ` (${log.length})` : ""}
+          </button>
+        </div>
+      )}
+
+      {/* Scrollback. The engine's console cannot draw text in this build, so
+          this is the only way to read back what was said or what happened
+          while you were looking elsewhere. */}
+      {logOpen && (
+        <div className="mt-2 max-h-56 overflow-y-auto rounded border bg-muted/30 p-2 text-sm">
+          {log.length === 0 && <p className="text-muted-foreground">Nothing yet.</p>}
+          {log.map((l) => (
+            <div key={l.id} className={l.kind === "chat" ? "" : "text-muted-foreground"}>
+              {l.text}
+            </div>
+          ))}
+        </div>
+      )}
+    </main>
+  )
+}
