@@ -1128,14 +1128,20 @@ export class JkdEngine {
     this.command("cg_lagometer 1")
     this.command("com_maxfps 0")
 
-    // Why spectated players look jittery while the same movement is smooth in
-    // game, and neither is the network.
+    // cg_smoothClients is deliberately left at its default of 0, and the name
+    // is why this needs saying. It reads like "smooth out other clients"; it
+    // does the opposite:
     //
-    // cg_smoothClients interpolates *other* players between snapshots. It is
-    // off in base JK2, which is what people mean by "the basejk camera looks
-    // laggy" -- a player sees their own movement predicted and smooth, and
-    // everyone else stepping between updates. A spectator is watching nothing
-    // but other players, so it is the whole picture rather than a detail.
+    //     // if this player does not want to see extrapolated players
+    //     if ( !cg_smoothClients.integer ) {
+    //         cent->currentState.pos.trType = TR_INTERPOLATE;
+    //
+    // 1 *permits extrapolation* -- a player slides along their last known
+    // trajectory when a snapshot is late and snaps back when the real one
+    // lands. 0 forces interpolation between two snapshots we actually have.
+    // On a stream that arrives irregularly, which is what a WebSocket gives
+    // us, 1 is exactly the wrong choice. It was set to 1 here on the strength
+    // of the name and made the jitter worse rather than better.
     //
     // snaps asks for updates per second. It defaults to 30 while this server
     // runs sv_fps 100 and clamps the request to its own maximum, so we were
@@ -1150,7 +1156,7 @@ export class JkdEngine {
     //
     // Both are userinfo, so they are set here -- before connecting -- to ride
     // in the handshake rather than needing a later update.
-    this.command("cg_smoothClients 1")
+    this.command("cg_smoothClients 0")
     this.command("snaps 100")
 
     // Render 30ms in the past, so a late snapshot is still an early one.
