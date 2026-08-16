@@ -28,7 +28,7 @@ export const LIVE_SERVERS: LiveServer[] = [
     index: 0,
     name: "NA East",
     statusUrl:
-      process.env.NEXT_PUBLIC_LIVE_STATUS_URL ?? "https://34-150-239-4.sslip.io/status",
+      process.env.NEXT_PUBLIC_LIVE_STATUS_URL ?? "https://34-182-186-217.sslip.io/status",
   },
 ]
 
