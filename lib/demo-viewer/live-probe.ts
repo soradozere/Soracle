@@ -59,6 +59,25 @@ export interface LiveProbeReport {
    * it usually means the tab was backgrounded.
    */
   gaps: number
+  /**
+   * Whether the window has rolled past the connect.
+   *
+   * **This is not a nicety -- reading the probe early gives a confidently
+   * wrong answer.** Measured on the first real run: while the engine is still
+   * connecting and loading the map, its main thread blocks for long stretches,
+   * so messages queue in the browser and are handed over in huge batches the
+   * moment it yields. That produces p50=0.4ms against a 9.8ms mean, bursts of
+   * 34 packets, and 67% of frames starved -- textbook "the browser is
+   * delivering in bursts", and entirely an artefact of loading. The same
+   * connection measured over a clean window read p50=10.0ms and 0.8% starved.
+   *
+   * The ring buffer scrubs itself once it laps (~20s of a 100Hz stream), so
+   * the only real hazard is reporting a partly-filled one. Callers should
+   * treat an unsettled report as "still collecting", not as data.
+   */
+  settled: boolean
+  /** Samples collected so far, against the window this needs to be trusted. */
+  progress: { have: number; want: number }
 }
 
 /**
@@ -233,11 +252,14 @@ class LiveProbe {
   }
 
   report(): LiveProbeReport {
+    const arrivalSamples = this.arrivals.values()
     return {
-      arrivals: summarise(this.arrivals.values()),
+      arrivals: summarise(arrivalSamples),
       frames: summarise(this.frames.values()),
       perFrame: summarisePerFrame(this.perFrame.values()),
       gaps: this.gaps,
+      settled: arrivalSamples.length >= CAPACITY,
+      progress: { have: arrivalSamples.length, want: CAPACITY },
     }
   }
 }
@@ -259,6 +281,12 @@ export function formatStats(label: string, s: ProbeStats | null): string {
 }
 
 export function formatReport(r: LiveProbeReport): string {
+  if (!r.settled) {
+    return (
+      `settling ${r.progress.have}/${r.progress.want} -- these numbers still ` +
+      `include connecting and map load, which look exactly like bursty delivery`
+    )
+  }
   const lines = [
     formatStats("arrivals", r.arrivals),
     formatStats("frames  ", r.frames),
