@@ -1,5 +1,35 @@
 import { describe, expect, it } from "vitest"
-import { summarise, summarisePerFrame } from "./live-probe"
+import { formatReport, summarise, summarisePerFrame, type LiveProbeReport } from "./live-probe"
+
+describe("formatReport", () => {
+  const settledish = {
+    arrivals: summarise([10, 10, 10]),
+    frames: summarise([10, 10, 10]),
+    perFrame: summarisePerFrame([1, 1, 1]),
+    gaps: 0,
+  }
+
+  /**
+   * The trap this guards, hit on the probe's first real run: read while the
+   * engine is still loading the map, the numbers say "bursty delivery, 67% of
+   * frames starved" -- which is a real-looking diagnosis of a problem that
+   * isn't there. A partly-filled window must never render as findings.
+   */
+  it("refuses to present an unsettled window as findings", () => {
+    const r: LiveProbeReport = { ...settledish, settled: false, progress: { have: 300, want: 2048 } }
+    const out = formatReport(r)
+    expect(out).toContain("settling 300/2048")
+    expect(out).not.toContain("p50")
+  })
+
+  it("presents the stats once settled", () => {
+    const r: LiveProbeReport = { ...settledish, settled: true, progress: { have: 2048, want: 2048 } }
+    const out = formatReport(r)
+    expect(out).toContain("arrivals:")
+    expect(out).toContain("p50")
+    expect(out).toContain("starved")
+  })
+})
 
 describe("summarise", () => {
   it("returns null rather than NaN for an empty sample", () => {
