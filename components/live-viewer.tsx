@@ -1072,14 +1072,20 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
               Reset
             </button>
           </div>
-          <pre className="overflow-x-auto whitespace-pre text-[11px] leading-relaxed">
+          <pre
+            className={`overflow-x-auto whitespace-pre-wrap text-[11px] leading-relaxed ${
+              probeReport.settled ? "" : "text-muted-foreground"
+            }`}
+          >
             {formatReport(probeReport)}
           </pre>
-          <p className="mt-1 text-[11px] text-muted-foreground">
-            Arrivals p50 far below its mean means the browser is delivering snapshots in
-            bursts. A high <code>starved</code> percentage means frames are rendering with
-            nothing new to show.
-          </p>
+          {probeReport.settled && (
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Arrivals p50 far below its mean means the browser is delivering snapshots in
+              bursts. A high <code>starved</code> percentage means frames are rendering with
+              nothing new to show.
+            </p>
+          )}
         </div>
       )}
     </main>
