@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Maximize2, Minimize2 } from "lucide-react"
 import { JkdEngine } from "@/lib/demo-viewer/jkd-client"
+import { formatReport, liveProbe, type LiveProbeReport } from "@/lib/demo-viewer/live-probe"
 import { LIVE_SERVERS, describeLiveStatus, type LiveStatus } from "@/lib/live-servers"
 
 /**
@@ -219,6 +220,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
   const [chat, setChat] = useState("")
   const [booting, setBooting] = useState(false)
   const statuses = useLiveStatuses(phase === "active" || phase === "connecting")
+  const [probeReport, setProbeReport] = useState<LiveProbeReport | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
   // The CSS stand-in for fullscreen, used where the real API is unavailable.
@@ -601,6 +603,31 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
     return () => {
       for (const type of events) window.removeEventListener(type, bump)
       clearInterval(id)
+    }
+  }, [phase])
+
+  /**
+   * The jitter probe, on `/live?probe=1` only.
+   *
+   * Opt-in by URL rather than a visible control: it answers a question we are
+   * actively chasing, not one a viewer has, and the readout is a wall of
+   * percentiles. Read from `window.location` rather than `useSearchParams`,
+   * which forces the whole page under a Suspense boundary to build.
+   *
+   * The report is recomputed on a timer instead of on every sample -- at 100
+   * snapshots a second, re-rendering per message would itself cost the frames
+   * being measured.
+   */
+  useEffect(() => {
+    if (phase !== "active") return
+    if (!new URLSearchParams(window.location.search).has("probe")) return
+
+    liveProbe.start()
+    const id = setInterval(() => setProbeReport(liveProbe.report()), 500)
+    return () => {
+      clearInterval(id)
+      liveProbe.stop()
+      setProbeReport(null)
     }
   }, [phase])
 
@@ -1025,6 +1052,34 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
               Send
             </button>
           </form>
+        </div>
+      )}
+
+      {/* Jitter probe readout (`?probe=1`). Copy rather than screenshot: the
+          numbers are the point, and a screenshot of them cannot be diffed
+          against the bridge's own reporter. */}
+      {probeReport && (
+        <div className="mt-2 rounded border border-amber-500/40 bg-amber-500/5 p-2">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-xs font-medium text-amber-300">Jitter probe</span>
+            <button
+              onClick={() => navigator.clipboard?.writeText(formatReport(probeReport))}
+              className="ml-auto text-xs underline"
+            >
+              Copy
+            </button>
+            <button onClick={() => liveProbe.reset()} className="text-xs underline">
+              Reset
+            </button>
+          </div>
+          <pre className="overflow-x-auto whitespace-pre text-[11px] leading-relaxed">
+            {formatReport(probeReport)}
+          </pre>
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            Arrivals p50 far below its mean means the browser is delivering snapshots in
+            bursts. A high <code>starved</code> percentage means frames are rendering with
+            nothing new to show.
+          </p>
         </div>
       )}
     </main>
