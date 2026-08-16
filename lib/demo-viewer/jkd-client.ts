@@ -11,6 +11,7 @@
  */
 
 import { describeBootFailure, installWasmProbe, noteEngineLine, sawInstantiateFailure } from "./diagnostics"
+import { liveProbe } from "./live-probe"
 
 export type CameraMode = "follow" | "free"
 
@@ -515,6 +516,11 @@ function installCloseCodeProbe() {
       super(url, isLive && liveToken ? liveToken : protocols)
       if (isLive) {
         let opened = false
+        // Timestamp every snapshot as the page receives it. `liveProbe` is
+        // inert until switched on, so this costs one call and one boolean per
+        // message while off; see live-probe.ts for why it is wired here rather
+        // than attached and detached as the probe is toggled.
+        this.addEventListener("message", () => liveProbe.noteArrival())
         this.addEventListener("open", () => {
           opened = true
           liveOpenSockets++
