@@ -587,6 +587,14 @@ export class JkdEngine {
   private fnConnectLive!: ((serverIndex: number) => number) | null
   private fnLiveDisconnect!: (() => void) | null
   private fnConnState!: (() => number) | null
+  /**
+   * The client's time base, present only on engines built after the stutter
+   * hunt. Optional for the same reason the live exports are: a page can be
+   * deployed against an older engine, and cwrap fails at call time rather
+   * than bind time.
+   */
+  private fnServerTime: (() => number) | null = null
+  private fnSnapServerTime: (() => number) | null = null
   private fnServerCount!: (() => number) | null
   private fnServerName!: ((i: number) => string) | null
   private fnServerUrl!: ((i: number) => string) | null
@@ -933,6 +941,15 @@ export class JkdEngine {
         : null
     this.fnViewClient = M.cwrap("JKD_GetViewClientNum", "number", []) as unknown as () => number
     this.fnIsFollowing = M.cwrap("JKD_IsFollowing", "number", []) as unknown as () => number
+
+    if (typeof exports._JKD_GetServerTime === "function") {
+      this.fnServerTime = M.cwrap("JKD_GetServerTime", "number", []) as unknown as () => number
+      this.fnSnapServerTime = M.cwrap(
+        "JKD_GetSnapServerTime",
+        "number",
+        [],
+      ) as unknown as () => number
+    }
 
     /*
      * Live spectate exports, bound only if this engine has them.
@@ -1689,6 +1706,24 @@ export class JkdEngine {
   /** Whoever the recording client is watching, or -1 if there is no demo yet. */
   getViewClientNum(): number {
     return this.ready ? this.fnViewClient() : -1
+  }
+
+  /**
+   * What the engine is rendering versus what it has received, in server
+   * milliseconds. `null` on an engine built before these exports, or before
+   * the first snapshot.
+   *
+   * `snap - render` is the buffer actually in hand. It should sit near
+   * `cl_timeNudge` (60 on live) and stay there; sagging toward zero means the
+   * client has caught up with its own data and is extrapolating rather than
+   * interpolating, which is what stutter looks like from the inside.
+   */
+  getTimeBase(): { render: number; snap: number } | null {
+    if (!this.ready || !this.fnServerTime || !this.fnSnapServerTime) return null
+    const render = this.fnServerTime()
+    const snap = this.fnSnapServerTime()
+    if (render < 0 || snap < 0) return null
+    return { render, snap }
   }
 
   /** True when the recorder was spectating someone rather than playing. */
