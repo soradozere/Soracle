@@ -49,6 +49,26 @@ export interface PerFrameStats {
   starvedPct: number
 }
 
+/**
+ * The buffer the client actually has in hand, in server milliseconds.
+ *
+ * Summarised from the LOW end, unlike everything else here. A buffer is a
+ * floor, not a ceiling: what matters is the worst moment, when the client has
+ * caught up with its own data and has nothing left to interpolate through.
+ * A healthy live connection should sit near `cl_timeNudge` (60) and stay
+ * there; `min` and `p5` are where a wobbling clock shows up first, and a mean
+ * on its own would hide it completely.
+ */
+export interface DepthStats {
+  mean: number
+  min: number
+  p5: number
+  p50: number
+  max: number
+  /** Percentage of samples with no buffer left at all -- extrapolating. */
+  emptyPct: number
+}
+
 export interface LiveProbeReport {
   arrivals: ProbeStats | null
   frames: ProbeStats | null
@@ -78,6 +98,13 @@ export interface LiveProbeReport {
   settled: boolean
   /** Samples collected so far, against the window this needs to be trusted. */
   progress: { have: number; want: number }
+  /**
+   * The engine's own clock. `null` on an engine built before the time-base
+   * exports, which is why the rest of the report must stand without it.
+   */
+  depth: DepthStats | null
+  /** How far server time advances per rendered frame; wobble shows as spread. */
+  advance: ProbeStats | null
 }
 
 /**
@@ -152,6 +179,26 @@ export function summarise(xs: number[]): ProbeStats | null {
   }
 }
 
+export function summariseDepth(xs: number[]): DepthStats | null {
+  if (xs.length === 0) return null
+  const sorted = [...xs].sort((a, b) => a - b)
+  const at = (q: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * q))]
+  let total = 0
+  let empty = 0
+  for (const x of sorted) {
+    total += x
+    if (x <= 0) empty++
+  }
+  return {
+    mean: total / sorted.length,
+    min: sorted[0],
+    p5: at(0.05),
+    p50: at(0.5),
+    max: sorted[sorted.length - 1],
+    emptyPct: (empty / sorted.length) * 100,
+  }
+}
+
 export function summarisePerFrame(counts: number[]): PerFrameStats | null {
   if (counts.length === 0) return null
   let total = 0
@@ -174,11 +221,25 @@ class LiveProbe {
   private arrivals = new Ring(CAPACITY)
   private frames = new Ring(CAPACITY)
   private perFrame = new Ring(CAPACITY)
+  private depth = new Ring(CAPACITY)
+  private advance = new Ring(CAPACITY)
   private lastArrival: number | null = null
   private lastFrame: number | null = null
+  private lastRender: number | null = null
   private sinceFrame = 0
   private gaps = 0
   private rafId = 0
+  private timeBaseSource: (() => { render: number; snap: number } | null) | null = null
+
+  /**
+   * Where to read the engine's clock each frame. Injected rather than imported
+   * so this module stays free of the engine wrapper -- it is a measuring
+   * instrument, and one that could not be unit-tested if it reached into a
+   * WASM singleton.
+   */
+  setTimeBaseSource(fn: (() => { render: number; snap: number } | null) | null) {
+    this.timeBaseSource = fn
+  }
 
   get isRunning() {
     return this.running
@@ -205,8 +266,11 @@ class LiveProbe {
     this.arrivals.clear()
     this.frames.clear()
     this.perFrame.clear()
+    this.depth.clear()
+    this.advance.clear()
     this.lastArrival = null
     this.lastFrame = null
+    this.lastRender = null
     this.sinceFrame = 0
     this.gaps = 0
   }
@@ -248,6 +312,20 @@ class LiveProbe {
     }
     this.lastFrame = now
     this.sinceFrame = 0
+
+    const tb = this.timeBaseSource?.() ?? null
+    if (tb) {
+      this.depth.push(tb.snap - tb.render)
+      if (this.lastRender !== null) {
+        const advanced = tb.render - this.lastRender
+        // A map change restarts server time, and a paused clock repeats it.
+        // Neither is the millisecond-scale wobble being measured, and either
+        // would swamp the variance it is looking for.
+        if (advanced >= 0 && advanced <= MAX_PLAUSIBLE_INTERVAL_MS) this.advance.push(advanced)
+      }
+      this.lastRender = tb.render
+    }
+
     this.rafId = requestAnimationFrame(this.tick)
   }
 
@@ -260,6 +338,8 @@ class LiveProbe {
       gaps: this.gaps,
       settled: arrivalSamples.length >= CAPACITY,
       progress: { have: arrivalSamples.length, want: CAPACITY },
+      depth: summariseDepth(this.depth.values()),
+      advance: summarise(this.advance.values()),
     }
   }
 }
@@ -295,6 +375,22 @@ export function formatReport(r: LiveProbeReport): string {
         `starved=${r.perFrame.starvedPct.toFixed(1)}%`
       : "per-frame: (no samples yet)",
   ]
+  if (r.depth) {
+    lines.push(
+      `buffer:    mean=${r.depth.mean.toFixed(1)}ms min=${r.depth.min.toFixed(1)} ` +
+        `p5=${r.depth.p5.toFixed(1)} p50=${r.depth.p50.toFixed(1)} ` +
+        `max=${r.depth.max.toFixed(1)} empty=${r.depth.emptyPct.toFixed(1)}%`,
+    )
+  } else {
+    lines.push("buffer:    (engine has no time-base exports)")
+  }
+  if (r.advance) {
+    lines.push(
+      `advance:   mean=${r.advance.mean.toFixed(1)}ms p50=${r.advance.p50.toFixed(1)} ` +
+        `p95=${r.advance.p95.toFixed(1)} p99=${r.advance.p99.toFixed(1)} ` +
+        `max=${r.advance.max.toFixed(1)}`,
+    )
+  }
   if (r.gaps > 0) lines.push(`gaps discarded: ${r.gaps}`)
   return lines.join("\n")
 }

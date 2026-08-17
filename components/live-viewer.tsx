@@ -622,11 +622,13 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
     if (phase !== "active") return
     if (!new URLSearchParams(window.location.search).has("probe")) return
 
+    liveProbe.setTimeBaseSource(() => engineRef.current?.getTimeBase() ?? null)
     liveProbe.start()
     const id = setInterval(() => setProbeReport(liveProbe.report()), 500)
     return () => {
       clearInterval(id)
       liveProbe.stop()
+      liveProbe.setTimeBaseSource(null)
       setProbeReport(null)
     }
   }, [phase])
