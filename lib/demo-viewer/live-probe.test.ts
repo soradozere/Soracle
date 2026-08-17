@@ -1,5 +1,45 @@
 import { describe, expect, it } from "vitest"
-import { formatReport, summarise, summarisePerFrame, type LiveProbeReport } from "./live-probe"
+import {
+  formatReport,
+  summarise,
+  summariseDepth,
+  summarisePerFrame,
+  type LiveProbeReport,
+} from "./live-probe"
+
+describe("summariseDepth", () => {
+  it("returns null rather than NaN for an empty sample", () => {
+    expect(summariseDepth([])).toBeNull()
+  })
+
+  it("reports a buffer holding steady at the configured nudge", () => {
+    const s = summariseDepth(Array.from({ length: 200 }, () => 60))!
+    expect(s.mean).toBeCloseTo(60)
+    expect(s.min).toBe(60)
+    expect(s.emptyPct).toBe(0)
+  })
+
+  /**
+   * The measurement this exists for. A buffer that spends most of its time
+   * healthy but periodically hits zero is a client that has caught up with its
+   * own data and is extrapolating -- and the mean alone calls that fine, which
+   * is why the low end is summarised instead.
+   */
+  it("catches a buffer that periodically empties, which the mean hides", () => {
+    const xs = [...Array.from({ length: 90 }, () => 60), ...Array.from({ length: 10 }, () => 0)]
+    const s = summariseDepth(xs)!
+    expect(s.mean).toBeCloseTo(54)
+    expect(s.min).toBe(0)
+    expect(s.p5).toBe(0)
+    expect(s.emptyPct).toBeCloseTo(10)
+  })
+
+  it("counts a negative buffer as empty, not as a small one", () => {
+    const s = summariseDepth([-5, -1, 60, 60])!
+    expect(s.emptyPct).toBe(50)
+    expect(s.min).toBe(-5)
+  })
+})
 
 describe("formatReport", () => {
   const settledish = {
@@ -7,6 +47,8 @@ describe("formatReport", () => {
     frames: summarise([10, 10, 10]),
     perFrame: summarisePerFrame([1, 1, 1]),
     gaps: 0,
+    depth: summariseDepth([60, 60, 60]),
+    advance: summarise([10, 10, 10]),
   }
 
   /**
