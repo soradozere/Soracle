@@ -48,7 +48,7 @@ describe("formatReport", () => {
     perFrame: summarisePerFrame([1, 1, 1]),
     gaps: 0,
     depth: summariseDepth([60, 60, 60]),
-    advance: summarise([10, 10, 10]),
+    advance: summariseDepth([10, 10, 10]),
   }
 
   /**

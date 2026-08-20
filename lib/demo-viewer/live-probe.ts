@@ -103,8 +103,19 @@ export interface LiveProbeReport {
    * exports, which is why the rest of the report must stand without it.
    */
   depth: DepthStats | null
-  /** How far server time advances per rendered frame; wobble shows as spread. */
-  advance: ProbeStats | null
+  /**
+   * How far server time advances per rendered frame.
+   *
+   * Summarised from the low end like the buffer, and for a sharper reason:
+   * this probe samples the engine's clock from its OWN rAF callback, which is
+   * not the engine's. If the two interleave, some samples straddle an engine
+   * frame and others straddle none -- producing near-zero advances paired with
+   * near-double ones, which reads as a wobbling clock but is only a sampling
+   * artefact. A real drift correction moves the clock by a millisecond or two;
+   * the artefact parks samples at exactly zero. `zeroPct` is what tells them
+   * apart, and without it this line cannot be trusted either way.
+   */
+  advance: DepthStats | null
 }
 
 /**
@@ -339,7 +350,7 @@ class LiveProbe {
       settled: arrivalSamples.length >= CAPACITY,
       progress: { have: arrivalSamples.length, want: CAPACITY },
       depth: summariseDepth(this.depth.values()),
-      advance: summarise(this.advance.values()),
+      advance: summariseDepth(this.advance.values()),
     }
   }
 }
@@ -386,9 +397,9 @@ export function formatReport(r: LiveProbeReport): string {
   }
   if (r.advance) {
     lines.push(
-      `advance:   mean=${r.advance.mean.toFixed(1)}ms p50=${r.advance.p50.toFixed(1)} ` +
-        `p95=${r.advance.p95.toFixed(1)} p99=${r.advance.p99.toFixed(1)} ` +
-        `max=${r.advance.max.toFixed(1)}`,
+      `advance:   mean=${r.advance.mean.toFixed(1)}ms min=${r.advance.min.toFixed(1)} ` +
+        `p5=${r.advance.p5.toFixed(1)} p50=${r.advance.p50.toFixed(1)} ` +
+        `max=${r.advance.max.toFixed(1)} zero=${r.advance.emptyPct.toFixed(1)}%`,
     )
   }
   if (r.gaps > 0) lines.push(`gaps discarded: ${r.gaps}`)

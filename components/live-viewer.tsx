@@ -221,6 +221,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
   const [booting, setBooting] = useState(false)
   const statuses = useLiveStatuses(phase === "active" || phase === "connecting")
   const [probeReport, setProbeReport] = useState<LiveProbeReport | null>(null)
+  const [probeCvars, setProbeCvars] = useState<string | null>(null)
   const stageRef = useRef<HTMLDivElement | null>(null)
   const [fullscreen, setFullscreen] = useState(false)
   // The CSS stand-in for fullscreen, used where the real API is unavailable.
@@ -624,12 +625,29 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
 
     liveProbe.setTimeBaseSource(() => engineRef.current?.getTimeBase() ?? null)
     liveProbe.start()
-    const id = setInterval(() => setProbeReport(liveProbe.report()), 500)
+    const id = setInterval(() => {
+      setProbeReport(liveProbe.report())
+      // What the client is ACTUALLY running, read from the engine rather than
+      // from what applyLiveDefaults believes it set. These are the cvars the
+      // timing behaviour depends on, and a stale archived value silently
+      // overriding one of them would look exactly like an engine bug --
+      // com_slowDriftAdjustMaxFPS in particular decides whether the drift
+      // correction fires 25 times a second or on every single snapshot.
+      const e = engineRef.current
+      setProbeCvars(
+        e
+          ? ["com_slowDriftAdjustMaxFPS", "cl_timeNudge", "snaps", "com_maxfps", "cg_smoothClients"]
+              .map((n) => `${n}=${e.getCvarNumber(n)}`)
+              .join(" ")
+          : null,
+      )
+    }, 500)
     return () => {
       clearInterval(id)
       liveProbe.stop()
       liveProbe.setTimeBaseSource(null)
       setProbeReport(null)
+      setProbeCvars(null)
     }
   }, [phase])
 
@@ -1080,6 +1098,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
             }`}
           >
             {formatReport(probeReport)}
+            {probeCvars ? `\ncvars:     ${probeCvars}` : ""}
           </pre>
           {probeReport.settled && (
             <p className="mt-1 text-[11px] text-muted-foreground">
