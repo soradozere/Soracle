@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { checkCanLogMatches, checkIsAdmin } from "@/lib/is-admin"
 import { playerSlug } from "@/lib/player-profile"
+import { RENDER_QUEUE_CHANGED } from "@/lib/render-queue-events"
 
 // The masthead's account control: one profile bubble that replaces the old
 // PlayerNavButton + AdminNavButton pair. Admin is a mode rather than a page, so
@@ -66,12 +67,20 @@ export function AccountMenu() {
   useEffect(() => {
     if (!isAdmin) return
     let active = true
-    fetch("/api/render/waiting")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => active && data && setWaiting(data.waiting ?? 0))
-      .catch(() => {})
+    const load = () =>
+      fetch("/api/render/waiting")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => active && data && setWaiting(data.waiting ?? 0))
+        .catch(() => {})
+
+    void load()
+    // Still not polling -- this only fires when an admin has just changed the
+    // queue in this tab, so the badge stops advertising work that has already
+    // been dealt with.
+    window.addEventListener(RENDER_QUEUE_CHANGED, load)
     return () => {
       active = false
+      window.removeEventListener(RENDER_QUEUE_CHANGED, load)
     }
   }, [isAdmin])
 
@@ -104,7 +113,12 @@ export function AccountMenu() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="relative w-9 h-9 rounded-full grid place-items-center font-bold text-[13px] transition-all overflow-hidden"
+        // No `overflow-hidden` here, however much the avatar wants it: the
+        // badge is deliberately positioned outside this circle (-top-1
+        // -right-1), so clipping the trigger clips the notification down to a
+        // sliver against the rim -- present, unreadable, and easy to mistake
+        // for a rendering glitch. The avatar rounds itself instead.
+        className="relative w-9 h-9 rounded-full grid place-items-center font-bold text-[13px] transition-all"
         style={{
           fontFamily: "var(--font-mono)",
           color: "var(--color-text-bright)",
@@ -119,7 +133,7 @@ export function AccountMenu() {
       >
         {player.avatarUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
-          <img src={player.avatarUrl} alt="" className="w-full h-full object-cover" />
+          <img src={player.avatarUrl} alt="" className="w-full h-full rounded-full object-cover" />
         ) : (
           initials
         )}
