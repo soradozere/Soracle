@@ -66,7 +66,7 @@ import {
 
 // The player profile body, rendered by the /player/[slug] page (right-click →
 // Show Profile navigates to it in the same tab). Design is deliberately freeform for now —
-// Sam wants to nail visuals later with custom images, so badges etc. are simple
+// Sora wants to nail visuals later with custom images, so badges etc. are simple
 // styled chips.
 
 interface PlayerProfileProps {
@@ -457,7 +457,7 @@ function EditProfileDialog({
   // these, so an admin can't equip something unearned by accident.
   titleOptions: EarnedTitle[]
   themeOptions: ThemeId[]
-  // Only a full admin can set the slogan — it's Sam's signature line, not a
+  // Only a full admin can set the slogan — it's Sora's signature line, not a
   // self-service field. A player editing their own profile never sees it.
   canEditTooltip: boolean
   // Password changes are for the logged-in player themselves. Admins reset

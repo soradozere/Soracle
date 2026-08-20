@@ -46,7 +46,7 @@ const BIN_CHUNK = 0x004e4942
  * `KHR_materials_emissive_strength` — glTF's base `emissiveFactor` is capped
  * at 1.0 per channel, which reads as a faint tint rather than something that
  * glows. Picked by eye against a real gameplay screenshot of Andromeda's arm
- * (Sam: "the glowing, translucent arm is really the sell for this skin").
+ * (Sora: "the glowing, translucent arm is really the sell for this skin").
  */
 const EMISSIVE_STRENGTH = 4
 
