@@ -33,6 +33,16 @@ export interface TitleLadder {
   metric: "achievement_score" | "month_score" | "cap_conversion" | "ret_rate" | "cheese_dfa"
   tiers: TitleTier[]
   /**
+   * Settle only once the month is over, instead of live on each match save.
+   *
+   * Required for any metric that can go DOWN. month_score only ever climbs, so
+   * banking it live is safe: crossing a threshold is permanent. A rate or a
+   * ratio is not — a player five games into a month can sit at 0.55/min and
+   * finish at 0.30 — and banked rows are never removed, so live-banking would
+   * freeze a partial month as a permanent title.
+   */
+  settleAtMonthEnd?: boolean
+  /**
    * Earliest month ("YYYY-MM") this ladder awards for. Standing ladders are
    * deliberately NOT retrospective: the metrics could be computed for earlier
    * months, but handing out three months of titles retroactively on deploy would
@@ -182,10 +192,11 @@ export const STANDING_LADDERS: TitleLadder[] = [
     label: "Cap conversion",
     metric: "cap_conversion",
     from: "2026-09",
+    settleAtMonthEnd: true,
     tiers: [
-      { id: "conv-opportunist", title: "Opportunist", threshold: 8, rarity: "common" },
-      { id: "conv-finisher", title: "Finisher", threshold: 11, rarity: "rare" },
-      { id: "conv-closer", title: "Closer", threshold: 14, rarity: "epic" },
+      { id: "conv-opportunist", title: "Opportunist", threshold: 11, rarity: "common" },
+      { id: "conv-finisher", title: "Finisher", threshold: 13, rarity: "rare" },
+      { id: "conv-closer", title: "Closer", threshold: 16, rarity: "epic" },
       { id: "conv-clinical", title: "Clinical", threshold: 20, rarity: "legendary" },
       { id: "conv-ice-cold", title: "Ice Cold", threshold: 25, rarity: "mythic" },
     ],
@@ -209,6 +220,7 @@ export const STANDING_LADDERS: TitleLadder[] = [
     label: "DFA duel vs cheese",
     metric: "cheese_dfa",
     from: "2026-08",
+    settleAtMonthEnd: true,
     tiers: [{ id: "cheese-grater", title: "Cheese Grater", threshold: 2, rarity: "legendary" }],
   },
   {
@@ -224,9 +236,10 @@ export const STANDING_LADDERS: TitleLadder[] = [
     label: "Ret rate",
     metric: "ret_rate",
     from: "2026-09",
+    settleAtMonthEnd: true,
     tiers: [
-      { id: "denial-interceptor", title: "Interceptor", threshold: 0.25, rarity: "common" },
-      { id: "denial-gatekeeper", title: "Gatekeeper", threshold: 0.35, rarity: "rare" },
+      { id: "denial-interceptor", title: "Interceptor", threshold: 0.35, rarity: "common" },
+      { id: "denial-gatekeeper", title: "Gatekeeper", threshold: 0.4, rarity: "rare" },
       { id: "denial-wall", title: "Wall", threshold: 0.45, rarity: "epic" },
       { id: "denial-lockdown", title: "Lockdown", threshold: 0.5, rarity: "legendary" },
       { id: "denial-no-way-through", title: "No Way Through", threshold: 0.6, rarity: "mythic" },

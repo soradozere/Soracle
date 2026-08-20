@@ -53,8 +53,27 @@ export async function recordSeasonalTitles(
   const season = SEASONS[key]
   // Standing ladders run every month; a themed season is optional on top. A
   // month with neither has nothing to record.
-  const standing = STANDING_LADDERS.filter((l) => !l.from || key >= l.from)
-  if (!season && standing.length === 0) return 0
+  // A month is settled only once it's over. Ladders whose metric can fall
+  // (every standing one) must not bank a partial month: rows are never removed,
+  // so a player five games in at 0.55/min would keep Lockdown after finishing on
+  // 0.30. month_score only climbs, so the themed season stays live-banked.
+  const monthComplete = (k: string) => Date.now() >= Date.parse(monthBounds(k).end)
+  const standingFor = (k: string) =>
+    STANDING_LADDERS.filter(
+      (l) => (!l.from || k >= l.from) && (!l.settleAtMonthEnd || monthComplete(k)),
+    )
+  const standing = standingFor(key)
+  // Settling the PREVIOUS month here is what actually closes a month out: the
+  // first match of September finalises August. Without it a settle-at-month-end
+  // ladder would never fire, because the save that could settle a month always
+  // lands inside it. Idempotent, so repeating it every save is free.
+  const prevKey = (() => {
+    const [y, m] = key.split("-").map(Number)
+    const d = new Date(Date.UTC(y, m - 2, 1))
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`
+  })()
+  const prevStanding = standingFor(prevKey)
+  if (!season && standing.length === 0 && prevStanding.length === 0) return 0
   if (playerIds && playerIds.length === 0) return 0
 
   const { start, end } = monthBounds(key)
@@ -126,6 +145,21 @@ export async function recordSeasonalTitles(
       bank(ladder, ladder.label, playerId, value)
     }
   }
+
+  // Close out the previous month. Not scoped to this match's players — settling
+  // is about everyone who played that month, not whoever happens to be in the
+  // game that triggered it.
+  if (prevStanding.length > 0) {
+    const prevIds = await matchIdsForMonth(supabase, prevKey)
+    if (prevIds.length > 0) {
+      for (const ladder of prevStanding) {
+        const values = await standingValues(supabase, ladder.metric, prevIds)
+        for (const [playerId, value] of values) {
+          rowsForMonth(rows, ladder, prevKey, playerId, value)
+        }
+      }
+    }
+  }
   if (!rows.length) return 0
 
   const { error } = await supabase
@@ -134,6 +168,39 @@ export async function recordSeasonalTitles(
   if (error) throw new Error(`Failed to record seasonal titles for ${key}: ${error.message}`)
 
   return rows.length
+}
+
+/** Bank a value against a ladder for an explicit month key. */
+function rowsForMonth(
+  rows: {
+    player_id: string
+    title_id: string
+    season_key: string
+    season_name: string
+    title: string
+    rarity: string
+  }[],
+  ladder: TitleLadder,
+  key: string,
+  playerId: string,
+  value: number,
+) {
+  for (const tier of progressFor(ladder, value).earned) {
+    rows.push({
+      player_id: playerId,
+      title_id: tier.id,
+      season_key: key,
+      season_name: ladder.label,
+      title: tier.title,
+      rarity: tier.rarity,
+    })
+  }
+}
+
+async function matchIdsForMonth(supabase: SupabaseClient, key: string): Promise<string[]> {
+  const { start, end } = monthBounds(key)
+  const { data } = await supabase.from("matches").select("id").gte("created_at", start).lt("created_at", end)
+  return (data ?? []).map((m: { id: string }) => m.id)
 }
 
 /**
