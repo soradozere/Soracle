@@ -3,9 +3,15 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Download, X, ExternalLink, AlertTriangle, Upload } from "lucide-react"
+import { Download, X, ExternalLink, AlertTriangle, Upload, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { approveRender, markPublished, rejectRender } from "@/app/admin/renders/actions"
+import {
+  approveRender,
+  discardRender,
+  markPublished,
+  rejectRender,
+} from "@/app/admin/renders/actions"
+import { announceRenderQueueChanged } from "@/lib/render-queue-events"
 import { Input } from "@/components/ui/input"
 
 export interface RenderJob {
@@ -75,7 +81,13 @@ export function RenderQueue({ jobs, atCap }: { jobs: RenderJob[]; atCap: boolean
     const result = await fn(id)
     setBusy(null)
     if (!result.success) setErrors((e) => ({ ...e, [id]: result.error ?? "That didn't work." }))
-    else router.refresh()
+    else {
+      // The queue is a server component, but the masthead's badge is a client
+      // one holding its count in state -- refreshing the page data alone leaves
+      // it insisting work is waiting that has just been dealt with.
+      announceRenderQueueChanged()
+      router.refresh()
+    }
   }
 
   if (jobs.length === 0) {
@@ -162,6 +174,24 @@ export function RenderQueue({ jobs, atCap }: { jobs: RenderJob[]; atCap: boolean
           )}
 
           {errors[job.id] && <p className="mt-3 text-sm text-destructive">{errors[job.id]}</p>}
+
+          {/* Terminal states only. A failed job counts toward the masthead
+              badge so a broken pipeline cannot die quietly -- but until now
+              nothing could clear one, so a single GitHub 503 at dispatch left a
+              permanent notification with no way to acknowledge it. */}
+          {(job.status === "rejected" || job.status === "failed") && (
+            <div className="mt-3">
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy === job.id}
+                onClick={() => act(job.id, discardRender)}
+              >
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                Delete
+              </Button>
+            </div>
+          )}
 
           {job.status === "pending_review" && (
             <div className="mt-3 space-y-3">
