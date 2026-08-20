@@ -1503,7 +1503,7 @@ export function DemoViewer({
    * A mouse has hover to say "I am still here", and the bar uses it. A thumb
    * has nothing equivalent, so the bar would sit over the picture until it was
    * deliberately dismissed -- and on a phone in landscape it covers most of
-   * what you came to watch. Sam found the clean view by accident and then had
+   * what you came to watch. Sora found the clean view by accident and then had
    * no way back to it.
    *
    * So playback hides it, and a tap brings it back. Only while genuinely

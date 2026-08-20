@@ -38,7 +38,7 @@ const FLAG_PITCH = -30
  * cleanly because it's expressed in the player's frame; this is the only term
  * where the bone's own axes leak in.
  *
- * DERIVED, not guessed, after two rounds of guessing wasted Sam's time. The
+ * DERIVED, not guessed, after two rounds of guessing wasted Sora's time. The
  * banner's mean normal is the prop's local +X (measured off flag-red.glb),
  * which this basis maps to the flag's forward. Forward in glTF is
  * (cos·cos(yaw), sin, -cos·sin(yaw)) at pitch -30, so pointing it out of the

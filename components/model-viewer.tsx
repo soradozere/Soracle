@@ -136,7 +136,7 @@ const HAND_BOLT = "r_hand"
  * person. Rendered at face value it towers over the figure and leaves the frame.
  *
  * The game's own number is exactly 0.5 (`ent.modelScale` in `CG_PlayerFlag`).
- * We deliberately run smaller: Sam compared the two against the game and chose
+ * We deliberately run smaller: Sora compared the two against the game and chose
  * 0.4 as reading cleaner in a profile-sized canvas. So this is the one number
  * here that is a taste decision rather than a transcription — which is fine, as
  * long as nobody later "corrects" it back to 0.5 thinking it's a bug.

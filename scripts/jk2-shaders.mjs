@@ -83,7 +83,7 @@ export function readShaderScripts(assetsRoots) {
  * stages are the motivating case: none of them carry the literal `glow`
  * keyword (only mouth_eyes does) but all read, in game, as the same
  * colourful energy shimmer — confirmed against a real gameplay screenshot
- * Sam sent showing it strongly on the hand/arm.
+ * Sora sent showing it strongly on the hand/arm.
  *
  * `additive` is different in kind from the rest: a block whose FIRST stage
  * already blends against the framebuffer never draws an opaque base at all,
