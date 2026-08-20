@@ -1,6 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Rarity } from "@/lib/achievement-meta"
-import { SEASONS, progressFor, catalogueTitleById, type RecordedTitle } from "@/lib/titles"
+import {
+  SEASONS,
+  STANDING_LADDERS,
+  progressFor,
+  catalogueTitleById,
+  type RecordedTitle,
+  type TitleLadder,
+} from "@/lib/titles"
+import { computeCapConversion } from "@/lib/cap-conversion"
+import { computeReturnerRate } from "@/lib/returner-rate"
 import { createAnonClient } from "@/lib/supabase/anon"
 
 // Recording earned seasonal titles.
@@ -42,8 +51,10 @@ export async function recordSeasonalTitles(
 ): Promise<number> {
   const key = monthKeyOf(whenIso)
   const season = SEASONS[key]
-  // A month with no catalogue entry has no seasonal ladder — nothing to record.
-  if (!season) return 0
+  // Standing ladders run every month; a themed season is optional on top. A
+  // month with neither has nothing to record.
+  const standing = STANDING_LADDERS.filter((l) => !l.from || key >= l.from)
+  if (!season && standing.length === 0) return 0
   if (playerIds && playerIds.length === 0) return 0
 
   const { start, end } = monthBounds(key)
@@ -88,16 +99,31 @@ export async function recordSeasonalTitles(
     title: string
     rarity: string
   }[] = []
-  for (const [playerId, score] of scoreByPlayer) {
-    for (const tier of progressFor(season.ladder, score).earned) {
+  const bank = (ladder: TitleLadder, seasonName: string, playerId: string, value: number) => {
+    for (const tier of progressFor(ladder, value).earned) {
       rows.push({
         player_id: playerId,
         title_id: tier.id,
-        season_key: season.key,
-        season_name: season.name,
+        season_key: key,
+        season_name: seasonName,
         title: tier.title,
         rarity: tier.rarity,
       })
+    }
+  }
+
+  if (season) {
+    for (const [playerId, score] of scoreByPlayer) bank(season.ladder, season.name, playerId, score)
+  }
+
+  // Standing role ladders. Both helpers already take the month's match ids and
+  // apply their own qualifying floors, so they return only players whose figure
+  // is meaningful — no second floor needed here.
+  for (const ladder of standing) {
+    const values = await standingValues(supabase, ladder.metric, matchIds)
+    for (const [playerId, value] of values) {
+      if (playerIds && !playerIds.includes(playerId)) continue
+      bank(ladder, ladder.label, playerId, value)
     }
   }
   if (!rows.length) return 0
@@ -108,6 +134,32 @@ export async function recordSeasonalTitles(
   if (error) throw new Error(`Failed to record seasonal titles for ${key}: ${error.message}`)
 
   return rows.length
+}
+
+/**
+ * Per-player value for a standing ladder's metric over one month's matches.
+ *
+ * Deliberately reuses the same functions the site and bot read, so a title can
+ * never disagree with the board that displays the number behind it. Both apply
+ * their own relative floor and return only qualifying players.
+ */
+async function standingValues(
+  supabase: SupabaseClient,
+  metric: TitleLadder["metric"],
+  matchIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  // Names aren't needed — rows are keyed by player_id — but both helpers take
+  // the map, so an empty one is passed rather than paying for a players read.
+  const noNames = new Map<string, string>()
+  if (metric === "cap_conversion") {
+    const { rows } = await computeCapConversion(supabase, noNames, matchIds)
+    for (const r of rows) out.set(r.playerId, r.conversion)
+  } else if (metric === "ret_rate") {
+    const { rows } = await computeReturnerRate(supabase, noNames, matchIds)
+    for (const r of rows) out.set(r.playerId, r.perMinute)
+  }
+  return out
 }
 
 /** Never throws — a title-recording failure must not fail the match save it rides on. */
