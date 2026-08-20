@@ -271,7 +271,15 @@ jobs:
           # overrun 2GB. Clamped either side: a chunk shorter than 4s makes
           # boundaries needlessly frequent, and one longer than 30s stops
           # bounding peak disk, which is the reason chunking exists.
-          BYTES_PER_FRAME=$(( WIDTH * HEIGHT * 45 / 100 ))
+          #
+          # 0.80 rather than 0.45 since quality moved to 98. That is a
+          # deliberate OVER-estimate, not a measurement: guessing high makes
+          # chunks shorter and more numerous, while guessing low walks straight
+          # back into the 2GB engine-side split that drops a frame and prints
+          # into the picture. At 1440p60 this gives ~5.6s chunks against the
+          # previous ~10s, still clear of the 4s floor. Worth re-measuring from
+          # a real run's chunk sizes and tightening if it proves pessimistic.
+          BYTES_PER_FRAME=$(( WIDTH * HEIGHT * 80 / 100 ))
           CHUNK_FRAMES=$(( CHUNK_BYTES / BYTES_PER_FRAME ))
           [ "$CHUNK_FRAMES" -lt $(( FPS * 4 )) ] && CHUNK_FRAMES=$(( FPS * 4 ))
           [ "$CHUNK_FRAMES" -gt $(( FPS * 30 )) ] && CHUNK_FRAMES=$(( FPS * 30 ))
@@ -312,10 +320,18 @@ jobs:
             echo "set s_volume 0.8"
             echo "set cl_aviFrameRate $FPS"
             echo "set cl_aviMotionJpeg 1"
-            # 95 rather than 90: this is the only original of the footage, and
+            # 98 rather than 95: this is the only original of the footage, and
             # everything downstream re-encodes it. Compression artefacts baked
             # in here cannot be recovered later.
-            echo "set cl_aviMotionJpegQuality 95"
+            #
+            # The finished video passes through three lossy stages -- this
+            # MJPEG capture, the per-chunk intermediate, and the final encode --
+            # and only this one is irreversible in the sense that no later
+            # setting can undo it. 100 is not the answer either: libjpeg's top
+            # step roughly triples the data for a difference that does not
+            # survive two x264 passes. Raising this means raising
+            # BYTES_PER_FRAME with it, or the chunk budget stops bounding disk.
+            echo "set cl_aviMotionJpegQuality 98"
             # The HUD, as the game draws it: health, shield, force, score, and
             # the followed player's portrait and name. cg_draw2D 0 was hiding
             # all of it at once for a "clean" picture nobody asked for.
@@ -378,11 +394,29 @@ jobs:
             echo "seekdemo $START_MS"
             # Zero-padded so lexical order is chronological order -- part10
             # must not sort before part2, or chunks concat out of sequence.
+            # Freeze the demo across every chunk seam, or the video jumps there.
+            #
+            # cl_main.cpp pins the frame's time step to 1000/cl_aviFrameRate
+            # *only while CL_VideoRecording()*. The moment `stopvideo` runs,
+            # msec goes back to real elapsed wall-clock -- and the seam is the
+            # worst possible moment for that, because the previous chunk's
+            # transcode is running concurrently and stealing CPU. So the demo
+            # silently advanced by however long that frame took (tens of ms,
+            # sometimes far more) with nothing captured, and the finished video
+            # jumped at every boundary.
+            #
+            # That is the stutter: deterministic, always at the same spot, and
+            # absent when the same demo plays on the site, which never chunks.
+            # Freezing means no demo time passes while the file is closed and
+            # reopened, so the seam costs nothing.
             for i in $(seq 0 $(( CHUNKS - 1 ))); do
+              echo "set cl_freezeDemo 0"
               printf 'video part%03d\n' "$i"
               echo "wait $CHUNK_WAITS"
+              echo "set cl_freezeDemo 1"
               echo "stopvideo"
             done
+            echo "set cl_freezeDemo 0"
             echo "quit"
           } > "$CFG"
           head -30 "$CFG"
@@ -441,12 +475,17 @@ jobs:
             avi="$1"
             out=$(chunkname "$avi")
             [ -f "$out" ] && return 0
-            # crf 16, not 21: this intermediate is a ceiling on the finished
+            # crf 14, not 21: this intermediate is a ceiling on the finished
             # video's quality, so encoding it cheaply would throw away detail
-            # that the final pass then cannot recover. Still roughly a tenth of
+            # that the final pass then cannot recover. Still far smaller than
             # the MJPEG it replaces, which is what keeps disk flat.
+            #
+            # `faster` rather than `veryfast`, and crf 14 rather than 16, for
+            # the same reason: this runs while the engine is still capturing,
+            # so it has slack that the wall-clock does not notice, and detail
+            # lost here is unrecoverable downstream.
             ffmpeg -nostdin -y -i "$avi" \
-              -c:v libx264 -pix_fmt yuv420p -preset veryfast -crf 16 \
+              -c:v libx264 -pix_fmt yuv420p -preset faster -crf 14 \
               -c:a aac -b:a 192k "$out" >/dev/null 2>&1 || return 1
             # The engine removes its own index sidecar on close; this only
             # catches one left behind by a capture that died mid-write.
@@ -580,11 +619,20 @@ jobs:
           # Re-encode rather than copy: a stream copy can only cut on a
           # keyframe, which would drift the segment by up to a couple of
           # seconds from what the requester actually chose.
-          # crf 20 with a 192k audio track. YouTube re-encodes anything it is
-          # given and recommends ~12 Mbps for 1080p60, so this sits comfortably
-          # above their target without the ~35 Mbps that crf 18 produced -- a
-          # bitrate that buys nothing visible downstream and would make a long
-          # match unwieldy to store and upload.
+          # crf 18 at preset slow, with a 192k audio track.
+          #
+          # This was crf 20 at preset medium, reasoned against YouTube's
+          # ~12 Mbps guidance for 1080p60. That anchor was the wrong one: the
+          # default tier here is 1440p60, where YouTube asks for roughly double
+          # that, so "comfortably above target" was measured against a target
+          # this pipeline does not render at.
+          #
+          # `slow` is most of the win and costs only CPU on a single pass over
+          # the joined file -- it buys back much of what dropping two crf steps
+          # spends, so the result is not the ~35 Mbps that crf 18 at `medium`
+          # produced. Fast-moving saber and flag footage is exactly the content
+          # x264 struggles with at crf 20, and it is what the channel is made
+          # of.
           #
           # Brightness rides along with this pass rather than getting one of its
           # own: the grade is a filter, the encode was happening anyway, and a
@@ -596,7 +644,7 @@ jobs:
           echo "grading with: ${GRADE:-none}"
           # shellcheck disable=SC2086
           ffmpeg -nostdin -y -i joined.mp4 -t "$DUR" $GRADE \
-            -c:v libx264 -pix_fmt yuv420p -preset medium -crf 20 \
+            -c:v libx264 -pix_fmt yuv420p -preset slow -crf 18 \
             -c:a aac -b:a 192k -movflags +faststart render.mp4 2>&1 | tail -3
 
           ls -la render.mp4
