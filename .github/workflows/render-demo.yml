@@ -394,11 +394,29 @@ jobs:
             echo "seekdemo $START_MS"
             # Zero-padded so lexical order is chronological order -- part10
             # must not sort before part2, or chunks concat out of sequence.
+            # Freeze the demo across every chunk seam, or the video jumps there.
+            #
+            # cl_main.cpp pins the frame's time step to 1000/cl_aviFrameRate
+            # *only while CL_VideoRecording()*. The moment `stopvideo` runs,
+            # msec goes back to real elapsed wall-clock -- and the seam is the
+            # worst possible moment for that, because the previous chunk's
+            # transcode is running concurrently and stealing CPU. So the demo
+            # silently advanced by however long that frame took (tens of ms,
+            # sometimes far more) with nothing captured, and the finished video
+            # jumped at every boundary.
+            #
+            # That is the stutter: deterministic, always at the same spot, and
+            # absent when the same demo plays on the site, which never chunks.
+            # Freezing means no demo time passes while the file is closed and
+            # reopened, so the seam costs nothing.
             for i in $(seq 0 $(( CHUNKS - 1 ))); do
+              echo "set cl_freezeDemo 0"
               printf 'video part%03d\n' "$i"
               echo "wait $CHUNK_WAITS"
+              echo "set cl_freezeDemo 1"
               echo "stopvideo"
             done
+            echo "set cl_freezeDemo 0"
             echo "quit"
           } > "$CFG"
           head -30 "$CFG"
