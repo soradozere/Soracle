@@ -191,6 +191,22 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     rarity: "mythic",
   },
   {
+    // Finish a match on EXACTLY 1337. Deliberately not a one-of-one: it is a
+    // coin flip rather than a feat, and at roughly one occurrence every 26
+    // months (0.012% of scorelines; 0.21 expected across the whole 5.5-month
+    // history, which is why nobody has done it since tracking began) a
+    // first-past-the-post crest would leave the second person to fluke it with
+    // nothing. Repeatable, so everyone who lands it gets it.
+    id: "leet",
+    title: "1337",
+    category: "match",
+    icon: "death-star-training-academy", // shares 2000 Club's crest — a score feat
+    condition: "Finish a match on exactly 1337 score",
+    metric: { type: "matchPredicate", test: (s) => s.score === 1337 },
+    threshold: 1,
+    rarity: "mythic",
+  },
+  {
     id: "1500-club",
     title: "1500 Club",
     category: "match",
@@ -1151,7 +1167,25 @@ export interface SecretDef {
   category: AchievementCategory
   icon: string // /achievements/<icon>.svg
   condition: string
-  claim: (s: AchStat, m: ClaimContext) => boolean
+  /**
+   * Match-resolved crests only. Omitted for crests answered by an aggregate the
+   * scoreboard can't see (see `scoreThreshold`) — resolveSecretHolders skips any
+   * def without one rather than inventing a per-match reading of a career stat.
+   */
+  claim?: (s: AchStat, m: ClaimContext) => boolean
+  /**
+   * Achievement Score to cross, for score-resolved crests. Held by whoever got
+   * there FIRST, replayed off the unlock ledger rather than today's totals — the
+   * question is who crossed it earliest, not who is highest now.
+   */
+  scoreThreshold?: number
+  /**
+   * Points this crest contributes, overriding its rarity. Only The GOAT sets it
+   * (to 0): it fires AT 1337 Achievement Score, and a 150-point crest would
+   * shove its own holder to 1487 the instant they earned it. Zero keeps them on
+   * the number they earned it with.
+   */
+  points?: number
   // Forward-only cutoff: matches before this ISO timestamp can never claim the
   // crest. Used when the back catalogue already contains a qualifying match that
   // should NOT silently take it on deploy (see protector-of-yavin below).
@@ -1225,6 +1259,22 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
     condition: "2+ caps, 20+ returns and 100+ kills in one match",
     from: "2026-07-09T00:00:00.000Z",
     claim: (s) => s.captures >= 2 && s.returns >= 20 && s.kills >= 100,
+  },
+  {
+    // Score-resolved, not match-resolved: no single scoreboard row can answer
+    // "have you reached 1337 Achievement Score". See resolveScoreSecretHolders.
+    //
+    // The GOAT is ALSO a hidden tier on SCORE_LADDER (lib/titles.ts) at the same
+    // 1337. That is deliberate and they are not duplicates: the title is earned
+    // by everyone who ever crosses it, the crest only by whoever crossed it
+    // first. A second player to 1337 gets the title and no crest.
+    id: "the-goat",
+    title: "The GOAT",
+    category: "career",
+    icon: "new-jedi-order",
+    condition: "Reach 1337 Achievement Score",
+    scoreThreshold: 1337,
+    points: 0,
   },
   {
     id: "mayhem-4",
