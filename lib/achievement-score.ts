@@ -1,4 +1,4 @@
-import { ACHIEVEMENTS, RARITY_META, type Rarity } from "@/lib/achievement-meta"
+import { ACHIEVEMENTS, RARITY_META, SECRET_ACHIEVEMENTS, type Rarity } from "@/lib/achievement-meta"
 
 // Achievement Score turns a player's crest collection into one comparable number.
 //
@@ -19,6 +19,16 @@ export const RARITY_POINTS: Record<Rarity, number> = {
   legendary: 20,
   mythic: 50,
   oneofone: 150,
+}
+
+/**
+ * What one crest is worth. Rarity decides it, unless the def overrides — The
+ * GOAT is worth 0 so that crossing 1337 Achievement Score leaves you ON 1337
+ * rather than immediately on 1487.
+ */
+export function pointsForSecret(secretId: string): number {
+  const def = SECRET_ACHIEVEMENTS.find((d) => d.id === secretId)
+  return def?.points ?? RARITY_POINTS.oneofone
 }
 
 export const scoreFor = (rarities: Iterable<Rarity>) => {
@@ -55,8 +65,12 @@ export function scoreFromViews(views: { id: string; rank: number; rarity: Rarity
     const def = ACHIEVEMENTS.find((d) => d.id === v.id)
     if (def?.ranks?.length) {
       for (let i = 0; i < v.rank && i < def.ranks.length; i++) total += RARITY_POINTS[def.ranks[i].rarity]
+    } else if (v.rarity === "oneofone") {
+      // A claimed one-of-one is a single rank, worth whatever its def says (see
+      // pointsForSecret) rather than a flat 150.
+      total += pointsForSecret(v.id)
     } else {
-      // Untiered crests and claimed one-of-ones are a single rank worth their own rarity.
+      // Untiered crests are a single rank worth their own rarity.
       total += RARITY_POINTS[v.rarity]
     }
   }

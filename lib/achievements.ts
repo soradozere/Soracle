@@ -11,6 +11,7 @@ import {
   type Rank,
   type Rarity,
 } from "@/lib/achievement-meta"
+import { RARITY_POINTS } from "@/lib/achievement-score"
 
 // Turns a player's chronological match history into earned/locked state for
 // every achievement. Pure and presentation-free — the crest styling is derived
@@ -397,14 +398,75 @@ function claimedFirst(a: SecretCandidate, b: SecretHolder): boolean {
 export function resolveSecretHolders(candidates: SecretCandidate[]): Map<string, SecretHolder> {
   const holders = new Map<string, SecretHolder>()
   for (const def of SECRET_ACHIEVEMENTS) {
+    // Score-resolved crests are answered by resolveScoreSecretHolders, off the
+    // unlock ledger. There is no per-match reading of "have you reached 1337
+    // Achievement Score", so asking claim() here would be meaningless.
+    if (!def.claim) continue
     // Forward-only crests ignore the back catalogue entirely (see SecretDef.from).
     // Parsed timestamps, not string compare — created_at spelling varies (+00:00 vs Z).
     const fromMs = def.from ? Date.parse(def.from) : null
     let best: SecretHolder | null = null
     for (const c of candidates) {
       if (fromMs !== null && Date.parse(c.date) < fromMs) continue
-      if (!def.claim(c.stat, c.ctx)) continue
+      if (!def.claim!(c.stat, c.ctx)) continue
       if (!best || claimedFirst(c, best)) best = { playerId: c.playerId, matchId: c.matchId, date: c.date }
+    }
+    if (best) holders.set(def.id, best)
+  }
+  return holders
+}
+
+/**
+ * Holders of score-resolved secrets (The GOAT).
+ *
+ * "First to 1337 Achievement Score" is a question about a moment in history, not
+ * about today's board — the player highest NOW may not be the one who got there
+ * first. So each player's unlock events are replayed in date order, points
+ * accumulated, and the event that takes them over the line is recorded as the
+ * claim. Earliest crossing across all players wins, on the same total-and-stable
+ * tiebreak the match-resolved crests use.
+ *
+ * Only rank crossings count toward the running total. Secret crests are excluded
+ * deliberately: they are resolved globally rather than chronologically per
+ * player, so folding them in would make a player's score depend on a crest whose
+ * holder isn't settled until every player has been walked. The GOAT itself is
+ * worth 0 anyway, so it can never contribute to reaching its own threshold.
+ */
+export function resolveScoreSecretHolders(
+  seqByPlayer: Map<string, AchMatch[]>,
+): Map<string, SecretHolder> {
+  const holders = new Map<string, SecretHolder>()
+  for (const def of SECRET_ACHIEVEMENTS) {
+    if (def.scoreThreshold === undefined) continue
+    const fromMs = def.from ? Date.parse(def.from) : null
+    let best: SecretHolder | null = null
+
+    for (const [playerId, seq] of seqByPlayer) {
+      const events: UnlockEvent[] = []
+      for (const d of ACHIEVEMENTS) events.push(...unlockEventsFor(d, seq))
+      events.sort(
+        (a, b) =>
+          Date.parse(a.date) - Date.parse(b.date) ||
+          (a.matchId < b.matchId ? -1 : a.matchId > b.matchId ? 1 : 0) ||
+          (a.achId < b.achId ? -1 : a.achId > b.achId ? 1 : 0),
+      )
+      let total = 0
+      for (const ev of events) {
+        total += RARITY_POINTS[ev.rarity]
+        if (total < def.scoreThreshold) continue
+        if (fromMs !== null && Date.parse(ev.date) < fromMs) break
+        const candidate: SecretCandidate = {
+          playerId,
+          matchId: ev.matchId,
+          date: ev.date,
+          stat: null as unknown as AchStat,
+          ctx: null as unknown as ClaimContext,
+        }
+        if (!best || claimedFirst(candidate, best)) {
+          best = { playerId, matchId: ev.matchId, date: ev.date }
+        }
+        break
+      }
     }
     if (best) holders.set(def.id, best)
   }
