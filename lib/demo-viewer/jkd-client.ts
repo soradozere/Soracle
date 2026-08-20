@@ -303,7 +303,7 @@ const EXTRAS_VERSION = "20260806"
  * few minutes and a hard refresh before concluding it does not work.
  *
  * Viewer only for now. Renders keep the flag from
- * z_flag-console-field-scoreboard.pk3, which works there and which Sam has seen,
+ * z_flag-console-field-scoreboard.pk3, which works there and which Sora has seen,
  * so the two disagree about flags until this is settled either way.
  */
 const EXTRA_PK3S = [
