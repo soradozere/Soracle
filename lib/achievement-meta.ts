@@ -65,6 +65,9 @@ export interface AchStat {
   tele_kills: number
   mine_grabs_red: number
   mine_grabs_blue: number
+  // Which side the player was ON. Required to read the two mine columns: they
+  // are BASE LOCATIONS, not ownership, so "enemy mines" depends on the player.
+  team: string | null
   dfa_kills: number
   dfa_attempts: number
   blocks_enemy: number
@@ -162,10 +165,18 @@ const FORTY_MINUTES_MS = 2_400_000
 // flag-hold floor for Efficient Capper's ratio gate — see that family below.
 const TEN_MINUTES_MS = 600_000
 
-// Enemy mines grabbed has always been two columns (red side / blue side) since
-// nobody cares which colour, only that it was the other team's — every combo
-// achievement below sums them the same way SWAT Support's careerSum does.
-const mineGrabsOf = (s: AchStat) => s.mine_grabs_red + s.mine_grabs_blue
+// Enemy mines grabbed. The two columns are BASE LOCATIONS (mines taken in the
+// red base / in the blue base), NOT "whose mines" — so which one is the enemy's
+// depends on the side the player was on.
+//
+// This was originally summed as `mine_grabs_red + mine_grabs_blue` on the
+// assumption that "nobody cares which colour, only that it was the other
+// team's". That assumption was wrong, and it counted the mines you clear out of
+// your OWN base — base-cleaner work — toward SWAT Support, a support crest.
+// Only 43% of the career total it awarded was ever enemy mines; players holding
+// the Epic on 5% enemy grabs is what surfaced it.
+const enemyMineGrabsOf = (s: AchStat) =>
+  (s.team ?? "").toLowerCase() === "red" ? s.mine_grabs_blue : s.mine_grabs_red
 
 export const ACHIEVEMENTS: AchievementDef[] = [
   // ---------------------------------------------------------------- Match feats
@@ -538,7 +549,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       test: (s) =>
         s.score >= 1 &&
         s.returns >= 15 &&
-        mineGrabsOf(s) >= 20 &&
+        enemyMineGrabsOf(s) >= 20 &&
         s.turret_kills >= 3 &&
         s.mine_kills >= 10 &&
         s.mine_returns >= 3,
@@ -572,7 +583,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     metric: {
       type: "matchMax",
       get: (s) => {
-        const grabs = mineGrabsOf(s)
+        const grabs = enemyMineGrabsOf(s)
         if (s.captures >= 5 && s.returns >= 15 && grabs >= 4) return 3
         if (s.captures >= 4 && s.returns >= 12 && grabs >= 3) return 2
         if (s.captures >= 3 && s.returns >= 10 && grabs >= 2) return 1
@@ -878,16 +889,23 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ],
   },
   {
+    // Thresholds re-cut when the metric was corrected to enemy-only grabs: the
+    // old 100/1000/2500 were set against a number ~2.3x larger, so keeping them
+    // would have stripped the crest from nearly everyone holding it. Judged on
+    // 12-MONTH PROJECTIONS, not today's totals — the stat columns only carry
+    // data from 2026-06-01, so a snapshot reads about a fifth of a year.
     id: "swat-support",
-    title: "SWAT Support",
+    title: "Mine Grabber",
     category: "career",
     icon: "mandalorian-mercs",
     condition: "Career enemy mines grabbed",
-    metric: { type: "careerSum", get: (s) => s.mine_grabs_red + s.mine_grabs_blue },
+    metric: { type: "careerSum", get: enemyMineGrabsOf },
     ranks: [
       { threshold: 100, rarity: "common" },
-      { threshold: 1000, rarity: "epic", title: "Minewhore" },
-      { threshold: 2500, rarity: "legendary", title: "Mine Dominatrix" },
+      { threshold: 300, rarity: "rare", title: "Mine Fiend" },
+      { threshold: 700, rarity: "epic", title: "Minewhore" },
+      { threshold: 1500, rarity: "legendary", title: "Mine Dominatrix" },
+      { threshold: 3000, rarity: "mythic", title: "SWAT Support" },
     ],
   },
   {
