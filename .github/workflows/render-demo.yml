@@ -217,7 +217,18 @@ jobs:
           mkdir -p "$ROOT/base/demos"
           tar -xf assets/base-min.tar -C "$ROOT/base"
           # After base-min, so the names decide what wins -- see EXTRA_PK3S.
-          cp assets/extras/*.pk3 "$ROOT/base/" 2>/dev/null || true
+          #
+          # Copied by NAME, not by wildcard. The extras directory is restored
+          # from a cache keyed only on EXTRAS_VERSION, so it holds whatever any
+          # previous run put there -- and a wildcard stages all of it. That is
+          # how x_kestis_sounds.pk3 kept reaching renders after it was dropped
+          # from this list AND deleted from R2: removing it stopped the
+          # download, but the cached copy was still being copied in, and every
+          # render refreshed the cache's expiry so it would never have aged
+          # out. The list is now the single source of truth for what is staged.
+          for P in $EXTRA_PK3S; do
+            cp "assets/extras/$P" "$ROOT/base/" 2>/dev/null || true
+          done
           ls -la "$ROOT/base"/*.pk3
           # Demos are publicly readable, so this needs no credentials. Only the
           # upload at the end does.
