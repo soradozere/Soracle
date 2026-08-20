@@ -311,7 +311,6 @@ const EXTRA_PK3S = [
   "z_basemin_chrome2.pk3",
   "solar_yavinsky2.pk3",
   "eoi_imperialworker_v2_sounds.pk3",
-  "x_kestis_sounds.pk3",
   "z_nightmares.pk3",
   "zzz_bones.pk3",
   "zzzTricolor_Sabers_by_Apple.pk3",
