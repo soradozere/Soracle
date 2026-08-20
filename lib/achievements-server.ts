@@ -3,6 +3,7 @@ import { createAnonClient } from "@/lib/supabase/anon"
 import {
   computeAchievements,
   resolveSecretHolders,
+  resolveScoreSecretHolders,
   secretViewsFor,
   unlockEventsFor,
   type AchievementView,
@@ -21,7 +22,7 @@ import {
   type AchStat,
   type Rarity,
 } from "@/lib/achievement-meta"
-import { RARITY_ORDER, bestRarity, scoreFor } from "@/lib/achievement-score"
+import { RARITY_ORDER, bestRarity, pointsForSecret, scoreFor } from "@/lib/achievement-score"
 import { roman } from "@/lib/achievement-format"
 
 // Server-side achievement computation, for the Discord bot flows (unlock pings +
@@ -285,7 +286,12 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
     }
   }
 
-  return { seqByPlayer, nameById, metaById, holders: resolveSecretHolders(candidates) }
+  // Match-resolved and score-resolved secrets answer different questions off the
+  // same history, so they're resolved separately and merged into one map. Ids
+  // never overlap: a def has claim() or scoreThreshold, never both.
+  const holders = resolveSecretHolders(candidates)
+  for (const [id, holder] of resolveScoreSecretHolders(seqByPlayer)) holders.set(id, holder)
+  return { seqByPlayer, nameById, metaById, holders }
 }
 
 // Compute every player's achievements in one pass over the full match history.
@@ -514,9 +520,14 @@ export async function computePlayersDirectory(): Promise<PlayerRow[]> {
       }
     }
     // A claimed one-of-one outranks everything, so it takes the title outright.
+    // Its POINTS come from the def, not the rarity: The GOAT is worth 0 (see
+    // pointsForSecret), while still counting as a one-of-one for the rarity
+    // breakdown and the board's accent colour.
+    let secretPoints = 0
     for (const def of SECRET_ACHIEVEMENTS) {
       if (holders.get(def.id)?.playerId !== pid) continue
       rarities.push(SECRET_RARITY)
+      secretPoints += pointsForSecret(def.id)
       topEvent = { rarity: SECRET_RARITY, rank: 1, date: holders.get(def.id)!.date, label: def.title }
     }
 
@@ -536,7 +547,7 @@ export async function computePlayersDirectory(): Promise<PlayerRow[]> {
       name: meta.name,
       tierValue: meta.tierValue,
       avatarUrl: meta.avatarUrl,
-      score: scoreFor(rarities),
+      score: scoreFor(rarities.filter((r) => r !== SECRET_RARITY)) + secretPoints,
       unlocks: rarities.length,
       best: bestRarity(rarities),
       title: topEvent?.label ?? null,
