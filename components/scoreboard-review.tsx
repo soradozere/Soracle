@@ -74,7 +74,7 @@ const flagKeyOf = (d: DisplayRow) => (d.kind === "merged" ? d.originalRowIndices
 const indicesOf = (d: DisplayRow) => (d.kind === "merged" ? d.originalRowIndices : [d.rowIndex])
 
 // The columns shown inline in the review table, mirroring the match-history
-// scoreboard. Sam's call: kills and base cleans are the two most frequently
+// scoreboard. Sora's call: kills and base cleans are the two most frequently
 // wrong, and both are already in this set.
 const INLINE_COLUMNS: { label: string; col: string }[] = [
   { label: "Score", col: "SCORE-SUM" },

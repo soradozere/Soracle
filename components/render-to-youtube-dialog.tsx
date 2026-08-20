@@ -102,7 +102,7 @@ export function RenderToYoutubeDialog({
    * out of view for stretches of it. The live viewer warns per moment; a
    * finished mp4 cannot -- it just shows a stale position, permanently, on
    * YouTube. Flagged when the engine currently reports the target as absent,
-   * which is a hint rather than coverage analysis: Sam reviews every render
+   * which is a hint rather than coverage analysis: Sora reviews every render
    * before it publishes, and a person watching beats anything cheap here.
    */
   const povWarning = camera === "follow" && follow >= 0 && target && !target.visible

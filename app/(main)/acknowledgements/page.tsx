@@ -19,7 +19,7 @@ function Ext({ href, children }: { href: string; children: React.ReactNode }) {
   )
 }
 
-// Sam's own words, verbatim -- the links are the only editorial addition.
+// Sora's own words, verbatim -- the links are the only editorial addition.
 export default function AcknowledgementsPage() {
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl relative z-10">

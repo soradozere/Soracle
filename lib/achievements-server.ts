@@ -136,7 +136,7 @@ interface RawHistory {
  * success -- updateTag rather than revalidateTag because one of those writers
  * needs the very next read in the same action to see fresh data, not just
  * future requests -- and the 1-hour window below exists only as a safety net
- * for a write path that bypasses that: Sam edits players/matches by hand in
+ * for a write path that bypasses that: Sora edits players/matches by hand in
  * Supabase sometimes, and that's real, not hypothetical.
  */
 export const HISTORY_TAG = "achievement-history"
