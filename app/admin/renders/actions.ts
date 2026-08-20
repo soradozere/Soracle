@@ -73,6 +73,57 @@ export async function rejectRender(id: string): Promise<ActionResult> {
 }
 
 /**
+ * Clear a job that is finished with, so it stops asking for attention.
+ *
+ * Only `rejected` and `failed`, because those are the two terminal states
+ * nothing will ever move again. Everything else is either in flight or is the
+ * record of a published video, and deleting those would lose real history.
+ *
+ * `failed` is the one that actually needed this. A failed job counts toward the
+ * masthead's notification -- deliberately, so a broken pipeline cannot die
+ * quietly, which is how a lapsed credential once went unnoticed. But nothing
+ * could clear one: `rejectRender` only accepts `pending_review`, so a job that
+ * failed at dispatch (a GitHub 503 is enough) left a permanent badge with no
+ * way to dismiss it. Being told about a failure and being unable to acknowledge
+ * it is worse than not being told, because the next real failure is invisible
+ * inside a count that was already non-zero.
+ */
+export async function discardRender(id: string): Promise<ActionResult> {
+  if (!(await requireAdmin())) return { success: false, error: "Not authorized." }
+
+  const supabase = createServiceClient()
+  const { data: row } = await supabase
+    .from("youtube_render_queue")
+    .select("id, status, render_r2_key")
+    .eq("id", id)
+    .maybeSingle()
+  if (!row) return { success: false, error: "That job no longer exists." }
+  if (row.status !== "rejected" && row.status !== "failed") {
+    return {
+      success: false,
+      error: `Only a rejected or failed job can be deleted (this one is ${row.status}).`,
+    }
+  }
+
+  // A rejected job has already had its mp4 removed, but a failed one may not
+  // have. Best effort for the same reason rejectRender is: the row must still
+  // go, or a transient R2 error puts the job right back where it was.
+  if (row.render_r2_key) {
+    await deleteRender(row.render_r2_key as string).catch(() => {})
+  }
+
+  const { error } = await supabase
+    .from("youtube_render_queue")
+    .delete()
+    .eq("id", id)
+    .in("status", ["rejected", "failed"])
+  if (error) return { success: false, error: error.message }
+
+  revalidatePath("/admin/renders")
+  return { success: true }
+}
+
+/**
  * Approve, and hand the upload to a runner.
  *
  * The upload does not happen here. A full match is gigabytes, and a serverless
