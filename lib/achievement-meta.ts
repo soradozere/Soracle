@@ -191,22 +191,6 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     rarity: "mythic",
   },
   {
-    // Finish a match on EXACTLY 1337. Deliberately not a one-of-one: it is a
-    // coin flip rather than a feat, and at roughly one occurrence every 26
-    // months (0.012% of scorelines; 0.21 expected across the whole 5.5-month
-    // history, which is why nobody has done it since tracking began) a
-    // first-past-the-post crest would leave the second person to fluke it with
-    // nothing. Repeatable, so everyone who lands it gets it.
-    id: "leet",
-    title: "1337",
-    category: "match",
-    icon: "death-star-training-academy", // shares 2000 Club's crest — a score feat
-    condition: "Finish a match on exactly 1337 score",
-    metric: { type: "matchPredicate", test: (s) => s.score === 1337 },
-    threshold: 1,
-    rarity: "mythic",
-  },
-  {
     id: "1500-club",
     title: "1500 Club",
     category: "match",
