@@ -158,6 +158,90 @@ async function standingValues(
   } else if (metric === "ret_rate") {
     const { rows } = await computeReturnerRate(supabase, noNames, matchIds)
     for (const r of rows) out.set(r.playerId, r.perMinute)
+  } else if (metric === "cheese_dfa") {
+    for (const [id, ratio] of await cheeseDfaRatios(supabase, matchIds)) out.set(id, ratio)
+  }
+  return out
+}
+
+/** 30% of the month's matches, the site-wide monthly qualifier. */
+const ATTENDANCE_FRACTION = 0.3
+/** Without this, one DFA against none would win on an infinite ratio. */
+const MIN_DFA_ON_TARGET = 5
+
+/**
+ * Your DFAs on cheese divided by his on you, over one month.
+ *
+ * Reads match_kills.kill_types, the per-pair style breakdown — the only place
+ * "who DFA'd whom" exists, and JSON-era only, so this can never score a match
+ * before 9 Aug 2026.
+ *
+ * The target is resolved BY NAME each time rather than pinned to an id: a
+ * hardcoded uuid would silently stop matching if the row were ever replaced. If
+ * no such player exists the ladder simply awards nothing, which is the right
+ * failure for a named-rival award whose subject has left.
+ */
+async function cheeseDfaRatios(
+  supabase: SupabaseClient,
+  matchIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const { data: target } = await supabase
+    .from("players")
+    .select("id")
+    .ilike("name", "cheese")
+    .maybeSingle()
+  if (!target?.id) return out
+
+  const PAGE = 1000
+  const games = new Map<string, number>()
+  for (let from = 0; ; from += PAGE) {
+    const { data } = await supabase
+      .from("match_stats")
+      .select("player_id")
+      .in("match_id", matchIds)
+      .range(from, from + PAGE - 1)
+    const rows = (data ?? []) as { player_id: string }[]
+    for (const r of rows) games.set(r.player_id, (games.get(r.player_id) ?? 0) + 1)
+    if (rows.length < PAGE) break
+  }
+  const needed = Math.ceil(matchIds.length * ATTENDANCE_FRACTION)
+
+  const tally = new Map<string, { on: number; by: number }>()
+  const dfaOf = (kt: Record<string, number> | null) => kt?.DFA ?? 0
+  for (let from = 0; ; from += PAGE) {
+    const { data } = await supabase
+      .from("match_kills")
+      .select("killer_player_id, victim_player_id, kill_types")
+      .in("match_id", matchIds)
+      .range(from, from + PAGE - 1)
+    const rows = (data ?? []) as {
+      killer_player_id: string
+      victim_player_id: string
+      kill_types: Record<string, number> | null
+    }[]
+    for (const r of rows) {
+      const dfa = dfaOf(r.kill_types)
+      if (!dfa) continue
+      if (r.victim_player_id === target.id) {
+        const t = tally.get(r.killer_player_id) ?? { on: 0, by: 0 }
+        t.on += dfa
+        tally.set(r.killer_player_id, t)
+      } else if (r.killer_player_id === target.id) {
+        const t = tally.get(r.victim_player_id) ?? { on: 0, by: 0 }
+        t.by += dfa
+        tally.set(r.victim_player_id, t)
+      }
+    }
+    if (rows.length < PAGE) break
+  }
+
+  for (const [playerId, t] of tally) {
+    if (playerId === target.id) continue
+    if ((games.get(playerId) ?? 0) < needed) continue
+    if (t.on < MIN_DFA_ON_TARGET) continue
+    // by === 0 with enough volume is a clean sweep, not a divide-by-zero.
+    out.set(playerId, t.by === 0 ? t.on : t.on / t.by)
   }
   return out
 }

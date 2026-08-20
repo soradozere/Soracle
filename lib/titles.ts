@@ -30,7 +30,7 @@ export interface TitleTier {
 export interface TitleLadder {
   id: string
   label: string
-  metric: "achievement_score" | "month_score" | "cap_conversion" | "ret_rate"
+  metric: "achievement_score" | "month_score" | "cap_conversion" | "ret_rate" | "cheese_dfa"
   tiers: TitleTier[]
   /**
    * Earliest month ("YYYY-MM") this ladder awards for. Standing ladders are
@@ -189,6 +189,27 @@ export const STANDING_LADDERS: TitleLadder[] = [
       { id: "conv-clinical", title: "Clinical", threshold: 20, rarity: "legendary" },
       { id: "conv-ice-cold", title: "Ice Cold", threshold: 25, rarity: "mythic" },
     ],
+  },
+  {
+    // Out-DFA cheese over a month, by a factor of two.
+    //
+    // A named-rival award, and the first thing built on the per-pair kill styles
+    // in match_kills.kill_types. The value is the RATIO (your DFAs on cheese
+    // divided by his on you), so one tier at 2.0 reads as "twice as many".
+    //
+    // Eligibility is handled where the value is computed, not here: 30% of the
+    // month's matches played (the site-wide monthly qualifier) plus a small
+    // volume floor, without which 1-v-0 would win it on an infinite ratio.
+    // Against Aug 2026 that yields two winners -- giraffe (11 v 3) and levi
+    // (12 v 5) -- out of 15 players eligible on attendance.
+    //
+    // Starts 2026-08 rather than 09: explicitly wanted "for this month". It is
+    // the one standing ladder that awards retroactively on deploy.
+    id: "cheese-hunt",
+    label: "DFA duel vs cheese",
+    metric: "cheese_dfa",
+    from: "2026-08",
+    tiers: [{ id: "cheese-grater", title: "Cheese Grater", threshold: 2, rarity: "legendary" }],
   },
   {
     // Returns per minute over returner games only (lib/returner-rate.ts), so it
