@@ -12,6 +12,7 @@ import { extractKillMatrix, isJsonScoreboard, parseScoreboardFile } from "@/lib/
 import { computeCapConversion } from "@/lib/cap-conversion"
 import { computeReturnerRate } from "@/lib/returner-rate"
 import { notifyAchievementUnlocks } from "@/lib/achievement-notify"
+import { runAutoCalibrationSafely } from "@/lib/calibration"
 import { recordSeasonalTitlesSafely } from "@/lib/titles-server"
 import { HISTORY_TAG, computeAchievementLedger, computeStreakRecord, type LedgerEntry } from "@/lib/achievements-server"
 
@@ -302,6 +303,11 @@ export async function logMatch(data: {
     // now the thing that tells them a match landed, not the clock.
     updateTag(HISTORY_TAG)
 
+    // Auto-calibration pass over this match's twelve (no-op unless the admin
+    // switch is on; never throws). Service client on purpose: the calibrator is
+    // a system behaviour, not something riding the logging user's permissions.
+    await runAutoCalibrationSafely(createServiceClient(), allPlayers)
+
     return { success: true }
   } catch (error) {
     return {
@@ -570,6 +576,10 @@ async function persistMatchWithStats(
     payload.played_at ?? new Date().toISOString(),
     statPlayerIds,
   )
+
+  // Auto-calibration pass over this match's twelve (no-op unless the admin
+  // switch is on; never throws). `supabase` here is already the service client.
+  await runAutoCalibrationSafely(supabase, allPlayers)
 
   return { success: true, matchId }
 }
