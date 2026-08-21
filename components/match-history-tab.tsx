@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getMatches, deleteMatch, updateMatchDate, getMatchStats } from "@/app/admin/actions"
+import { getMatches, deleteMatch, updateMatchDate, updateMatchType, getMatchStats } from "@/app/admin/actions"
 import { createClient } from "@/lib/supabase/client"
 import { checkCanLogMatches } from "@/lib/is-admin"
 import { Trophy, Clock, Trash2, Pencil, Check, X, BarChart3, ChevronDown, Loader2 } from "lucide-react"
@@ -142,6 +142,7 @@ export function MatchHistoryTab() {
   const [statsCache, setStatsCache] = useState<Record<string, ScoreboardRow[]>>({})
   const [statsLoadingId, setStatsLoadingId] = useState<string | null>(null)
   const [statsErrors, setStatsErrors] = useState<Record<string, string>>({})
+  const [togglingTypeId, setTogglingTypeId] = useState<string | null>(null)
 
   const loadMatches = () => {
     return getMatches().then((result) => {
@@ -183,6 +184,21 @@ export function MatchHistoryTab() {
     }
     setEditDateId(null)
     setIsSavingDate(false)
+  }
+
+  // Optimistic flip with rollback on failure -- mislabelled matches (a
+  // balancer split tweaked by hand, or vice versa) are usually spotted and
+  // fixed in the same glance, so this should feel instant rather than opening
+  // a dialog like the date editor does.
+  const handleToggleType = async (match: Match) => {
+    const nextType = match.match_type === "algorithm" ? "manual" : "algorithm"
+    setTogglingTypeId(match.id)
+    setMatches((prev) => prev.map((m) => (m.id === match.id ? { ...m, match_type: nextType } : m)))
+    const result = await updateMatchType(match.id, nextType)
+    if (!result.success) {
+      setMatches((prev) => prev.map((m) => (m.id === match.id ? { ...m, match_type: match.match_type } : m)))
+    }
+    setTogglingTypeId(null)
   }
 
   // Lazy-load a match's scoreboard the first time it's expanded; cache thereafter.
@@ -337,13 +353,29 @@ export function MatchHistoryTab() {
 
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className={`px-2 py-0.5 rounded text-xs font-bold ${
-                    match.match_type === "algorithm" 
-                      ? "bg-[var(--color-primary)]/20 text-[var(--color-primary)]" 
-                      : "bg-[var(--color-text-dim)]/20 text-[var(--color-text-dim)]"
-                  }`}>
-                    {match.match_type === "algorithm" ? "ALGORITHM" : "MANUAL"}
-                  </span>
+                  {canManage ? (
+                    <button
+                      onClick={() => handleToggleType(match)}
+                      disabled={togglingTypeId === match.id}
+                      title="Click to switch between Algorithm and Manual"
+                      className={`px-2 py-0.5 rounded text-xs font-bold transition-colors inline-flex items-center gap-1 cursor-pointer ${
+                        match.match_type === "algorithm"
+                          ? "bg-[var(--color-primary)]/20 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/30"
+                          : "bg-[var(--color-text-dim)]/20 text-[var(--color-text-dim)] hover:bg-[var(--color-text-dim)]/30"
+                      } disabled:opacity-60 disabled:cursor-wait`}
+                    >
+                      {togglingTypeId === match.id && <Loader2 className="w-3 h-3 animate-spin" />}
+                      {match.match_type === "algorithm" ? "ALGORITHM" : "MANUAL"}
+                    </button>
+                  ) : (
+                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${
+                      match.match_type === "algorithm"
+                        ? "bg-[var(--color-primary)]/20 text-[var(--color-primary)]"
+                        : "bg-[var(--color-text-dim)]/20 text-[var(--color-text-dim)]"
+                    }`}>
+                      {match.match_type === "algorithm" ? "ALGORITHM" : "MANUAL"}
+                    </span>
+                  )}
                   {match.red_tiers && match.blue_tiers && (() => {
                     const redTotal = match.red_tiers.reduce((a, b) => a + b, 0)
                     const blueTotal = match.blue_tiers.reduce((a, b) => a + b, 0)
