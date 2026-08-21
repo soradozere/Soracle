@@ -151,3 +151,92 @@ describe("best-capper / best-chaser separation", () => {
     })
   })
 })
+
+describe("bottom-cluster draft anchor and constraint repricing", () => {
+  // Real lobby from the August 2026 watertight audit. ewok (tier 4) is the unique
+  // weakest player and the bottom cluster is devy(5), sora(5), ewok(4). The old build's
+  // Perfect Balance handed ewok's team sora as well — two of the three bottom-cluster
+  // players on one side, the "last picks ride together" complaint. The draft anchor rule
+  // caps the weakest player's team at a minority of the cluster, which for a cluster of
+  // three means ewok stands alone.
+  const lastPickLobby = [
+    mk("Interlude", 9, 8, 0, 0, 10, 10),
+    mk("fetchd", 9, 0, 10, 0, 0, 0),
+    mk("jin", 7, 6, 7, 8, 6, 7),
+    mk("xan", 6, 6, 0, 6, 7, 6),
+    mk("eze", 6, 0, 0, 8, 7, 0),
+    mk("devy", 5, 0, 0, 5, 0, 5),
+    mk("ultra", 9, 8, 10, 0, 0, 0),
+    mk("arhont", 8, 0, 8, 8, 8, 0),
+    mk("cheese", 8, 6, 9, 9, 0, 0),
+    mk("twinblade", 7, 0, 0, 8, 8, 8),
+    mk("sora", 5, 4, 0, 3, 5, 5),
+    mk("ewok", 4, 0, 0, 4, 5, 6),
+  ]
+
+  it("keeps the unique weakest player away from the bottom-cluster majority", () => {
+    const options = balanceTeamsWithOptions(
+      lastPickLobby.map((p) => p.name),
+      lastPickLobby,
+    )
+
+    expect(sameTeam(options[0], "ewok", "sora")).toBe(false)
+    expect(sameTeam(options[0], "ewok", "devy")).toBe(false)
+  })
+
+  // Real lobby where the lobby's only two viable returners (ultra chase 10, arhont
+  // chase 8) both landed on one team in the old Perfect Balance — the 500-point coverage
+  // penalty was outbid by role-sum smoothing. At constraint pricing they must split.
+  const noReturnerLobby = [
+    mk("ultra", 9, 8, 10, 0, 0, 0),
+    mk("arhont", 8, 0, 8, 8, 8, 0),
+    mk("phoenix", 7, 7, 0, 0, 0, 8),
+    mk("xan", 6, 6, 0, 6, 7, 6),
+    mk("sora", 5, 4, 0, 3, 5, 5),
+    mk("Apple", 4, 0, 0, 4, 4, 0),
+    mk("Interlude", 9, 8, 0, 0, 10, 10),
+    mk("glempa", 7, 6, 0, 7, 6, 0),
+    mk("shax", 7, 7, 0, 0, 0, 6),
+    mk("yuki", 6, 0, 0, 7, 8, 0),
+    mk("devy", 5, 0, 0, 5, 0, 5),
+    mk("link", 4, 2, 0, 0, 3, 2),
+  ]
+
+  it("leaves both teams a viable returner when the lobby has exactly two", () => {
+    const options = balanceTeamsWithOptions(
+      noReturnerLobby.map((p) => p.name),
+      noReturnerLobby,
+    )
+
+    expect(sameTeam(options[0], "ultra", "arhont")).toBe(false)
+  })
+
+  // Real lobby whose old option 2 shipped tier totals 43 v 40 even though a gap-1 split
+  // of the same twelve exists. With the over-max wall at 2000 a three-point gap can no
+  // longer be bought with role-sum gains.
+  const gapLobby = [
+    mk("Interlude", 9, 8, 0, 0, 10, 10),
+    mk("fetchd", 9, 0, 10, 0, 0, 0),
+    mk("jin", 7, 6, 7, 8, 6, 7),
+    mk("glempa", 7, 6, 0, 7, 6, 0),
+    mk("yuki", 6, 0, 0, 7, 8, 0),
+    mk("devy", 5, 0, 0, 5, 0, 5),
+    mk("arhont", 8, 0, 8, 8, 8, 0),
+    mk("cheese", 8, 6, 9, 9, 0, 0),
+    mk("cooky", 8, 8, 9, 0, 0, 0),
+    mk("xan", 6, 6, 0, 6, 7, 6),
+    mk("giraffe", 6, 0, 0, 6, 8, 6),
+    mk("ewok", 4, 0, 0, 4, 5, 6),
+  ]
+
+  it("keeps every suggested option within the two-point tier gap", () => {
+    const options = balanceTeamsWithOptions(
+      gapLobby.map((p) => p.name),
+      gapLobby,
+    )
+
+    for (const option of options) {
+      expect(Math.abs(option.result.redTierTotal - option.result.blueTierTotal)).toBeLessThanOrEqual(2)
+    }
+  })
+})
