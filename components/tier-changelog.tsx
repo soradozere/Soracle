@@ -12,6 +12,9 @@ interface TierChange {
   new_tier: number
   changed_at: string
   hidden: boolean
+  // 'auto' = the calibrator moved this tier from results; 'admin' (or null on
+  // rows predating migration 042) = a human did.
+  source?: "admin" | "auto" | null
 }
 
 interface TierChangelogProps {
@@ -132,6 +135,18 @@ export function TierChangelog({ year, month, isAdmin = false }: TierChangelogPro
                 <span className="px-2 py-1 rounded text-sm font-semibold bg-green-500/20 text-green-600">
                   Tier {change.new_tier}
                 </span>
+                {change.source === "auto" && (
+                  <span
+                    className="px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold uppercase tracking-[0.08em]"
+                    style={{
+                      color: "var(--color-primary-dim)",
+                      background: "color-mix(in srgb, var(--color-primary) 12%, transparent)",
+                    }}
+                    title="Moved automatically by the calibrator from match results"
+                  >
+                    Auto
+                  </span>
+                )}
               </div>
             </div>
             <span className={`text-sm text-[var(--color-text-dim)] whitespace-nowrap ${isAdmin ? "pr-5" : ""}`}>
