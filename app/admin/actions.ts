@@ -997,6 +997,36 @@ export async function updateMatchDate(matchId: string, newDate: string) {
   }
 }
 
+// Corrects a match logged under the wrong type -- e.g. a balancer-suggested
+// lineup that got tweaked by hand before the game, or a manual entry someone
+// mislabelled. Splits the Algorithm/Manual reports-tab breakdown (see
+// reports-tab.tsx algorithmMatches/manualMatches), so a wrong label skews
+// which balancing method looks more accurate, not just the badge in Match
+// History.
+export async function updateMatchType(matchId: string, matchType: "algorithm" | "manual") {
+  const authz = await requireMatchManager()
+  if (!authz.ok) return { success: false, error: authz.error }
+  try {
+    const { error } = await createServiceClient()
+      .from("matches")
+      .update({ match_type: matchType })
+      .eq("id", matchId)
+
+    if (error) {
+      return { success: false, error: error.message }
+    }
+
+    updateTag(HISTORY_TAG)
+
+    return { success: true }
+  } catch (error) {
+    return {
+      success: false,
+      error: error instanceof Error ? error.message : "Failed to update match type",
+    }
+  }
+}
+
 export async function deleteMatch(matchId: string) {
   const authz = await requireMatchManager()
   if (!authz.ok) return { success: false, error: authz.error }
