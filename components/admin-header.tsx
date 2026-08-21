@@ -42,7 +42,9 @@ export function AdminHeader({
         }}
       />
 
-      <div className="container mx-auto px-4 py-3 relative">
+      {/* Full-bleed on purpose, unlike the public masthead: this header sits
+          over data-dense admin tables that use the whole viewport. */}
+      <div className="w-full px-6 py-3 relative">
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link href="/admin" className="flex items-center gap-3 min-w-0 hover:opacity-90 transition-opacity">
             <span
