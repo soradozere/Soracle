@@ -76,7 +76,9 @@ export default async function AdminPage() {
         }
       />
 
-      <main className="container mx-auto px-4 py-8 space-y-8">
+      {/* Full-width: the player table is the whole point of this page, and the
+          default container cap left it cramped in dead gutters at 100% zoom. */}
+      <main className="w-full px-6 py-8 space-y-8">
         <AdminSection
           title="Auto-Calibration"
           description="Adjusts player tiers from match results as the season is played — promotions on form, demotions on slumps, starting from the hand-set tier list. While off, tiers only change when an admin edits them. Admin edits always win either way."
