@@ -6,7 +6,7 @@ const CONFIG = {
   tier: {
     WEIGHT: 3.0,
     MAX_DIFF: 2,
-    OVER_MAX_PENALTY: 200,
+    OVER_MAX_PENALTY: 2000,
     TOP_3_WEIGHT: 3.0,
     BOTTOM_3_WEIGHT: 2.5,
   },
@@ -21,7 +21,7 @@ const CONFIG = {
     STACK_PENALTY: 8000,
   },
   roles: {
-    COVERAGE_PENALTY: 500,
+    COVERAGE_PENALTY: 4000,
     BALANCE_WEIGHT: 0.8,
     VIABLE_THRESHOLD: 4,
   },
@@ -53,7 +53,7 @@ const CONFIG = {
   // stacking 13 -> 0 with elite stacking still at 0. If this is ever loosened back into the
   // 1000-2000 band, re-check the elite-stack count, not just tier balance.
   split: {
-    CAPPER_CHASE_PENALTY: 1200,
+    CAPPER_CHASE_PENALTY: 4000,
     RUNNER_UP_PENALTY: 4000,
   },
   cluster: {
@@ -104,7 +104,19 @@ function bottomClusterPenalty(team1: Player[], team2: Player[]): number {
   const inTeam1 = team1.filter((p) => cluster.includes(p)).length
   const imbalance = Math.abs(inTeam1 * 2 - cluster.length) // == |count in team1 - count in team2|
   const excess = imbalance - (cluster.length % 2)
-  return excess > 0 ? excess * CONFIG.cluster.BOTTOM_CLUSTER_PENALTY * 0.5 : 0
+  let penalty = excess > 0 ? excess * CONFIG.cluster.BOTTOM_CLUSTER_PENALTY * 0.5 : 0
+
+  // Anchored draft rule: when one player is strictly the weakest in the lobby, their
+  // team must not hold the majority of the bottom cluster (the draft would hand the
+  // last pick to the side with fewer of the other low picks).
+  const atLowest = everyone.filter((p) => p.tierValue === lowestTier)
+  if (atLowest.length === 1) {
+    const weakest = atLowest[0]
+    const mine = (team1.includes(weakest) ? team1 : team2).filter((p) => cluster.includes(p)).length
+    const theirs = cluster.length - mine
+    if (mine > theirs) penalty += (mine - theirs) * CONFIG.cluster.BOTTOM_CLUSTER_PENALTY * 0.5
+  }
+  return penalty
 }
 
 // Best-capper / best-chaser separation — keep one team from owning BOTH pivotal duel
