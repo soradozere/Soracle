@@ -5,6 +5,7 @@ import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import { PasswordChangeForm } from "@/components/password-change-form"
 import { FeaturedVideoAdmin } from "@/components/featured-video-admin"
+import { AdminHeader, AdminSection } from "@/components/admin-header"
 
 export default async function SettingsPage() {
   const supabase = await createClient()
@@ -25,55 +26,44 @@ export default async function SettingsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <h1 className="text-2xl font-bold">Admin Settings</h1>
-          </div>
+    <div className="min-h-screen" style={{ background: "var(--color-background)" }}>
+      <AdminHeader
+        title="Admin Settings"
+        subtitle="Site configuration an admin can change without a deploy, plus your own account"
+        actions={
           <Link href="/admin">
             <Button variant="outline" size="sm">
               <ArrowLeft className="h-4 w-4 mr-2" />
               Back to Admin
             </Button>
           </Link>
-        </div>
-      </header>
+        }
+      />
 
-      <main className="container mx-auto px-4 py-8 max-w-2xl">
-        <div className="mb-6">
-          <h2 className="text-3xl font-bold mb-2">Site &amp; Account Settings</h2>
-          <p className="text-muted-foreground">Site configuration an admin can change without a deploy, plus your own account.</p>
-        </div>
+      <main className="container mx-auto px-4 py-8 max-w-2xl space-y-8">
+        <AdminSection
+          title="Homepage Featured Video"
+          description="Normally the newest upload on youtube.com/@jk2ctf. Pin a specific video when someone posts a frag movie on their own channel, then switch back to automatic."
+        >
+          <FeaturedVideoAdmin />
+        </AdminSection>
 
-        <div className="space-y-6">
-          <div className="border rounded-lg p-6">
-            <h3 className="text-xl font-semibold mb-1">Homepage Featured Video</h3>
-            <p className="text-muted-foreground text-sm mb-4">
-              Normally the newest upload on youtube.com/@jk2ctf. Pin a specific video when someone posts a frag movie
-              on their own channel, then switch back to automatic.
-            </p>
-            <FeaturedVideoAdmin />
-          </div>
+        <AdminSection title="Change Password">
+          <PasswordChangeForm />
+        </AdminSection>
 
-          <div className="border rounded-lg p-6">
-            <h3 className="text-xl font-semibold mb-4">Change Password</h3>
-            <PasswordChangeForm />
-          </div>
-
-          <div className="border rounded-lg p-6">
-            <h3 className="text-xl font-semibold mb-2">Account Information</h3>
-            <div className="space-y-2 text-sm">
-              <div>
-                <span className="text-muted-foreground">Email:</span> <span className="font-medium">{user.email}</span>
-              </div>
-              <div>
-                <span className="text-muted-foreground">User ID:</span>{" "}
-                <span className="font-mono text-xs">{user.id}</span>
-              </div>
+        <AdminSection title="Account Information">
+          <div className="space-y-2 text-sm">
+            <div>
+              <span style={{ color: "var(--color-text-dim)" }}>Email:</span>{" "}
+              <span className="font-medium">{user.email}</span>
+            </div>
+            <div>
+              <span style={{ color: "var(--color-text-dim)" }}>User ID:</span>{" "}
+              <span className="font-mono text-xs">{user.id}</span>
             </div>
           </div>
-        </div>
+        </AdminSection>
       </main>
     </div>
   )

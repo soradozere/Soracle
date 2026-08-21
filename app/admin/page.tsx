@@ -3,8 +3,11 @@ import { createClient } from "@/lib/supabase/server"
 import { PlayerManagementTable } from "@/components/player-management-table"
 import { AdminMatchLog } from "@/components/admin-match-log"
 import { RankSuggestions } from "@/components/rank-suggestions"
+import { AutoCalibrationToggle } from "@/components/auto-calibration-toggle"
+import { AdminHeader, AdminSection } from "@/components/admin-header"
 import { Button } from "@/components/ui/button"
 import { ExportDataButton } from "@/components/export-data-button"
+import { readAutoCalibrationEnabled } from "@/lib/calibration"
 import Link from "next/link"
 import { LogOut, Home, Settings, Youtube } from "lucide-react"
 
@@ -27,6 +30,8 @@ export default async function AdminPage() {
     redirect("/")
   }
 
+  const autoCalibration = await readAutoCalibrationEnabled(supabase)
+
   async function handleLogout() {
     "use server"
     const supabase = await createClient()
@@ -35,17 +40,12 @@ export default async function AdminPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="hover:opacity-80 transition-opacity">
-              <h1 className="text-2xl font-bold">JK2 Team Balancer</h1>
-            </Link>
-            <span className="text-sm text-muted-foreground">Admin Panel</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <span className="text-sm text-muted-foreground">{user.email}</span>
+    <div className="min-h-screen" style={{ background: "var(--color-background)" }}>
+      <AdminHeader
+        title="Admin Panel"
+        subtitle={`JK2 Capture the Flag · signed in as ${user.email}`}
+        actions={
+          <>
             <ExportDataButton />
             <Link href="/admin/renders">
               <Button variant="outline" size="sm">
@@ -59,10 +59,11 @@ export default async function AdminPage() {
                 Settings
               </Button>
             </Link>
+            <span className="w-px h-6 hidden sm:block" style={{ backgroundColor: "var(--glass-hair)" }} />
             <Link href="/">
               <Button variant="outline" size="sm">
                 <Home className="h-4 w-4 mr-2" />
-                Back to Balancer
+                Back to Site
               </Button>
             </Link>
             <form action={handleLogout}>
@@ -71,41 +72,34 @@ export default async function AdminPage() {
                 Logout
               </Button>
             </form>
-          </div>
-        </div>
-      </header>
+          </>
+        }
+      />
 
-      <main className="container mx-auto px-4 py-8 space-y-12">
-        <section>
-          <div className="mb-6">
-            <h2 className="text-3xl font-bold mb-2">Player Management</h2>
-            <p className="text-muted-foreground">
-              Add, edit, or remove players. Changes are saved automatically and will be reflected in the team balancer
-              immediately.
-            </p>
-          </div>
+      <main className="container mx-auto px-4 py-8 space-y-8">
+        <AdminSection
+          title="Auto-Calibration"
+          description="Adjusts player tiers from match results as the season is played — promotions on form, demotions on slumps, starting from the hand-set tier list. While off, tiers only change when an admin edits them. Admin edits always win either way."
+          headerRight={<AutoCalibrationToggle initialEnabled={autoCalibration} />}
+        />
+
+        <AdminSection
+          title="Player Management"
+          description="Add, edit, or remove players. Changes are saved automatically and will be reflected in the team balancer immediately."
+        >
           <PlayerManagementTable />
-        </section>
+        </AdminSection>
 
-        <section>
-          <div className="mb-6">
-            <h2 className="text-3xl font-bold mb-2">Log Match</h2>
-            <p className="text-muted-foreground">
-              Record match results to track win/loss statistics for players.
-            </p>
-          </div>
+        <AdminSection title="Log Match" description="Record match results to track win/loss statistics for players.">
           <AdminMatchLog />
-        </section>
+        </AdminSection>
 
-        <section>
-          <div className="mb-6">
-            <h2 className="text-3xl font-bold mb-2">Rank Suggestions</h2>
-            <p className="text-muted-foreground">
-              Players who are consistently over- or under-performing relative to their tier, based on match history analysis.
-            </p>
-          </div>
+        <AdminSection
+          title="Rank Suggestions"
+          description="Players who are consistently over- or under-performing relative to their tier, based on match history analysis."
+        >
           <RankSuggestions />
-        </section>
+        </AdminSection>
       </main>
     </div>
   )
