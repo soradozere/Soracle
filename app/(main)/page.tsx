@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import { Zap, BarChart3 } from "lucide-react"
+import { BookOpen, BarChart3 } from "lucide-react"
 import { computeAchievementLedger, computePlayersDirectory, computeHomeSummary } from "@/lib/achievements-server"
 import { resolveEquippedTitles } from "@/lib/titles-server"
 import { listFeedDemoUploads } from "@/lib/demos-server"
@@ -152,13 +152,17 @@ export default async function HomePage() {
             does the same job of separating "go do something" from "go look at
             something" without a second line. */}
         <div className="flex flex-wrap items-center justify-center gap-3 mt-8">
+          {/* Was "Open the Team Balancer" — the balancer itself is one click away
+              in the nav rail, but nothing on the homepage explained the ratings,
+              the balance rules, or auto-calibration to a new or returning player.
+              This is the front door to that explanation now. */}
           <Link
-            href="/balancer"
+            href="/how-it-works"
             style={{ backgroundColor: "var(--color-primary)", color: "var(--color-background)" }}
             className="px-6 py-2.5 font-bold rounded-md transition-all text-sm hover-glow inline-flex items-center gap-2"
           >
-            <Zap className="w-4 h-4" />
-            Open the Team Balancer
+            <BookOpen className="w-4 h-4" />
+            How It Works
           </Link>
           <Link
             href="/stats"
