@@ -289,3 +289,136 @@ describe("tied top tier and elite-chaser spread", () => {
     expect(forward?.score).toBe(reversed?.score)
   })
 })
+
+describe("crown-value ties must not disarm runner-up protection", () => {
+  // X is the sole best chaser (10) and shares the capper crown. Z is the
+  // second-best chaser and is stacked onto X's team, leaving the opposition no
+  // answer in either direction. Only Y's CAPPER rating differs between the two
+  // lobbies — nothing about the split changes — so the penalty must not move.
+  const lobby = (yCapper: number) => [
+    mk("X", 10, 10, 10, 0, 0, 0),
+    mk("Z", 8, 0, 9, 0, 0, 0),
+    mk("Y", 9, yCapper, 4, 0, 0, 0),
+    ...Array.from({ length: 9 }, (_, i) => mk(`h${i}`, i < 2 ? 7 : i < 5 ? 6 : 5, 4, 0, 4, 4, 4)),
+  ]
+  const stacked = ["X", "Z", "h0", "h1", "h2", "h3"]
+  const scoreStacked = (yCapper: number) => {
+    const players = lobby(yCapper)
+    const blue = players.filter((p) => !stacked.includes(p.name)).map((p) => p.name)
+    return evaluateTeams(stacked, blue, players)!.score
+  }
+
+  it("prices the stack the same whether or not the opposing capper ties the crown", () => {
+    // Before the fix a tie deleted a 4000-point constraint, so making the
+    // OPPOSING capper stronger made an already-stacked lineup look better.
+    expect(Math.abs(scoreStacked(10) - scoreStacked(9))).toBeLessThan(50)
+  })
+
+  it("still charges the stack when the crown is tied", () => {
+    const players = lobby(10)
+    const blue = players.filter((p) => !stacked.includes(p.name)).map((p) => p.name)
+    const separated = ["X", "h0", "h1", "h2", "h3", "h4"]
+    const sepBlue = players.filter((p) => !separated.includes(p.name)).map((p) => p.name)
+    expect(evaluateTeams(stacked, blue, players)!.score).toBeGreaterThan(
+      evaluateTeams(separated, sepBlue, players)!.score,
+    )
+  })
+})
+
+describe("Off-Role card reports a comparable score", () => {
+  const lobby = [
+    mk("a", 9, 9, 0, 0, 8, 8),
+    mk("b", 8, 0, 9, 8, 0, 0),
+    mk("c", 8, 8, 0, 0, 6, 6),
+    mk("d", 7, 0, 8, 7, 0, 0),
+    mk("e", 7, 7, 0, 6, 6, 6),
+    mk("f", 6, 0, 0, 6, 7, 6),
+    mk("g", 6, 6, 0, 0, 5, 5),
+    mk("h", 6, 0, 0, 6, 6, 5),
+    mk("i", 5, 4, 0, 4, 5, 5),
+    mk("j", 5, 0, 0, 5, 4, 5),
+    mk("k", 4, 3, 0, 4, 4, 4),
+    mk("l", 4, 0, 0, 3, 4, 4),
+  ]
+
+  it("scores the off-role split with the same evaluator as the other cards", () => {
+    const options = balanceTeamsWithOptions(
+      lobby.map((p) => p.name),
+      lobby,
+    )
+    const offRole = options[2]
+    // The reduced role-blind score is a strict subset of the full evaluator's
+    // terms, so reporting it made this card structurally out-score the others.
+    const honest = evaluateTeams(offRole.result.teamRed, offRole.result.teamBlue, lobby)!.score
+    expect(offRole.score).toBeCloseTo(honest, 5)
+  })
+})
+
+describe("odd clusters must not force the anchor's companions together", () => {
+  // A real 12-man lobby with today's ratings. Interlude is the unique tier-9, so
+  // the top cluster is the odd trio {Interlude, arhont, cheese} — and arhont and
+  // cheese are also the lobby's two best returners. Counting Interlude inside his
+  // own tally made every split that separated them look like a 2-v-1 stack and
+  // charged it 4000, outbidding the 1200 elite-chaser rule meant to keep exactly
+  // this pair apart. Measured over the match history, 67 of 67 odd-cluster
+  // lobbies charged the fair split and 38 of 53 recommendations stacked the pair.
+  const realLobby = [
+    mk("Interlude", 9, 8, 0, 0, 10, 10),
+    mk("arhont", 8, 0, 8, 8, 8, 0),
+    mk("cheese", 8, 6, 9, 9, 0, 0),
+    mk("suvix", 7, 8, 0, 0, 0, 0),
+    mk("andrew", 7, 0, 8, 9, 0, 0),
+    mk("phoenix", 7, 7, 0, 0, 0, 8),
+    mk("shax", 7, 7, 0, 0, 0, 6),
+    mk("jin", 7, 6, 7, 8, 6, 7),
+    mk("flawless", 6, 0, 0, 6, 6, 5),
+    mk("giraffe", 6, 0, 0, 6, 8, 6),
+    mk("Canon", 6, 0, 0, 4, 8, 6),
+    mk("xan", 6, 6, 0, 6, 7, 6),
+  ]
+
+  it("splits the two cluster-mates when they are the lobby's best returners", () => {
+    const options = balanceTeamsWithOptions(
+      realLobby.map((p) => p.name),
+      realLobby,
+    )
+    expect(sameTeam(options[0], "arhont", "cheese")).toBe(false)
+  })
+
+  // Mirror of the same off-by-one at the bottom: W is the unique weakest and the
+  // cluster widens to {W, x, y}. Counting W in his own tally charged one of the
+  // two equally-even orientations, so separating x and y cost a flat constraint
+  // and the only free arrangement pooled them opposite him.
+  const oddBottomLobby = [
+    ...Array.from({ length: 9 }, (_, i) => mk(`g${i}`, i < 3 ? 9 : i < 6 ? 8 : 7, 6, 5, 5, 5, 5)),
+    mk("W", 3, 2, 0, 3, 3, 3),
+    mk("x", 5, 3, 0, 4, 4, 4),
+    mk("y", 5, 3, 0, 4, 4, 4),
+  ]
+
+  it("does not price separating the weakest player's two companions as a constraint", () => {
+    const names = oddBottomLobby.map((p) => p.name)
+    let bestSeparating = Infinity
+    let bestTogether = Infinity
+    const walk = (start: number, red: string[]) => {
+      if (red.length === 6) {
+        const blue = names.filter((n) => !red.includes(n))
+        const score = evaluateTeams(red, blue, oddBottomLobby)!.score
+        const split = red.includes("x") !== red.includes("y")
+        if (split) bestSeparating = Math.min(bestSeparating, score)
+        else bestTogether = Math.min(bestTogether, score)
+        return
+      }
+      for (let i = start; i < names.length; i++) {
+        red.push(names[i])
+        walk(i + 1, red)
+        red.pop()
+      }
+    }
+    walk(0, [])
+    // Was 4083 — a constraint-level charge that made pooling the two weak
+    // players the only affordable shape. Anything under the 4000 band means the
+    // search is choosing rather than being forced.
+    expect(bestSeparating - bestTogether).toBeLessThan(4000)
+  })
+})
