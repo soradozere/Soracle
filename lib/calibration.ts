@@ -9,25 +9,41 @@ import type { SupabaseClient } from "@supabase/supabase-js"
  * this key before making any change; while the row is absent the tier list only
  * moves when an admin edits it by hand.
  *
- * Row absent = OFF (the table's documented default state). Value "on" = ON.
+ * Row absent = OFF (the table's documented default state). Value "on" = ON, and
+ * the row's updated_at is also the "since" boundary the engine evaluates from —
+ * see readAutoCalibrationEnabledAt.
  */
 export const AUTO_CALIBRATION_KEY = "auto_calibration"
 
 /** Whether auto-calibration is switched on. Takes the caller's Supabase client
  * (server, browser, or service-role — SELECT on site_settings is public). */
 export async function readAutoCalibrationEnabled(supabase: SupabaseClient): Promise<boolean> {
+  return (await readAutoCalibrationEnabledAt(supabase)) !== null
+}
+
+/**
+ * Whether auto-calibration is on, and if so, since when.
+ *
+ * The engine only counts matches logged at or after this moment — otherwise the
+ * very first save after flipping the switch would immediately judge everyone
+ * against whatever history already happened to exist, which can fire a burst of
+ * moves off games nobody watched the switch for. Each enable is a clean restart:
+ * setAutoCalibration() always writes a fresh updated_at, so toggling off and
+ * back on later re-arms the clock rather than resuming the old one.
+ */
+export async function readAutoCalibrationEnabledAt(supabase: SupabaseClient): Promise<string | null> {
   try {
     const { data, error } = await supabase
       .from("site_settings")
-      .select("value")
+      .select("value, updated_at")
       .eq("key", AUTO_CALIBRATION_KEY)
       .maybeSingle()
-    if (error) return false
-    return data?.value === "on"
+    if (error || data?.value !== "on") return null
+    return data.updated_at
   } catch {
     // An unreadable flag must fail CLOSED: silently calibrating tiers when the
     // switch can't be read is worse than skipping a run.
-    return false
+    return null
   }
 }
 
@@ -173,18 +189,20 @@ const RUNNER_MATCH_FETCH = 300
 
 /**
  * The save-path runner: evaluate the participants of a just-saved match and
- * apply any moves. Gated on the admin switch (fail closed), best-effort by
- * contract — a calibration failure must never fail the match save it rides on,
- * mirroring recordSeasonalTitlesSafely. Requires the service-role client:
- * players writes and tier_changes inserts bypass RLS the same way the other
- * system writes do.
+ * apply any moves. Gated on the admin switch (fail closed) and further scoped
+ * to matches at or after the switch's last enable — see
+ * readAutoCalibrationEnabledAt. Best-effort by contract — a calibration failure
+ * must never fail the match save it rides on, mirroring
+ * recordSeasonalTitlesSafely. Requires the service-role client: players writes
+ * and tier_changes inserts bypass RLS the same way the other system writes do.
  */
 export async function runAutoCalibrationSafely(
   service: SupabaseClient,
   matchPlayers: string[],
 ): Promise<TierMove[]> {
   try {
-    if (!(await readAutoCalibrationEnabled(service))) return []
+    const enabledAt = await readAutoCalibrationEnabledAt(service)
+    if (!enabledAt) return []
 
     const [{ data: players, error: playersError }, { data: matches, error: matchesError }] = await Promise.all([
       service.from("players").select("id, name, tier_value"),
@@ -193,6 +211,7 @@ export async function runAutoCalibrationSafely(
         .select("red_team, blue_team, red_tiers, blue_tiers, red_score, blue_score, created_at")
         .not("red_tiers", "is", null)
         .not("blue_tiers", "is", null)
+        .gte("created_at", enabledAt)
         .order("created_at", { ascending: false })
         .limit(RUNNER_MATCH_FETCH),
     ])
