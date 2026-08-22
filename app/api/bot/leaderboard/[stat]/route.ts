@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { rankByName } from "@/lib/rank-order"
 import { createClient } from "@/lib/supabase/server"
 import { fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
 
@@ -90,7 +91,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ stat
   const top = [...totals.entries()]
     .map(([id, value]) => ({ name: nameById.get(id) ?? "unknown", value }))
     .filter((r) => r.value > 0)
-    .sort((a, b) => b.value - a.value)
+    .sort(rankByName((a, b) => b.value - a.value))
     .slice(0, 5)
 
   return NextResponse.json({ stat, label: ALLOWED_STATS[stat], month: rangeLabel, top })

@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { rankBy, rankByName } from "@/lib/rank-order"
 import { createClient } from "@/lib/supabase/client"
 import { ArrowUp, ArrowDown, RefreshCw, Trophy, TrendingUp, TrendingDown, HelpCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -273,7 +274,7 @@ export function TrueSkillLeaderboard({ year, month, isAdmin = false, scope: scop
             deaths: kd.deaths,
           })
         }
-        rows.sort((a, b) => b.rating - a.rating)
+        rows.sort(rankByName((a, b) => b.rating - a.rating))
         return rows
       }
 
@@ -301,7 +302,7 @@ export function TrueSkillLeaderboard({ year, month, isAdmin = false, scope: scop
         const histogram = new Map<number, number>()
         for (const p of board) histogram.set(p.tier, (histogram.get(p.tier) || 0) + 1)
 
-        const sortedByRating = [...board].sort((a, b) => b.rating - a.rating)
+        const sortedByRating = [...board].sort(rankByName((a, b) => b.rating - a.rating))
         const impliedTier = new Map<string, number>()
         let idx = 0
         for (let tier = 10; tier >= 1; tier--) {
@@ -331,12 +332,14 @@ export function TrueSkillLeaderboard({ year, month, isAdmin = false, scope: scop
           })
         }
 
-        result.sort((a, b) => {
-          const gapA = Math.abs(a.impliedTier - a.currentTier)
-          const gapB = Math.abs(b.impliedTier - b.currentTier)
-          if (gapB !== gapA) return gapB - gapA
-          return b.rating - a.rating
-        })
+        result.sort(
+          rankBy((s) => s.playerName, (a, b) => {
+            const gapA = Math.abs(a.impliedTier - a.currentTier)
+            const gapB = Math.abs(b.impliedTier - b.currentTier)
+            if (gapB !== gapA) return gapB - gapA
+            return b.rating - a.rating
+          }),
+        )
         return result
       }
 
