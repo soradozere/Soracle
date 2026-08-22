@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { rankByName } from "@/lib/rank-order"
 import { createClient } from "@/lib/supabase/server"
 import { fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
 
@@ -70,7 +71,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
   const ranked = Array.from(together.entries())
     .map(([name, rec]) => ({ name, ...rec, rate: rec.losses / rec.games }))
     .filter((r) => r.games >= MIN_GAMES)
-    .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games))
+    .sort(rankByName((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games)))
 
   // Top 3 curses. `curse` is the single worst pairing.
   const curses = ranked.slice(0, 3)
