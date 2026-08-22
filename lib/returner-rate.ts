@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { rankByName } from "./rank-order"
 
 /**
  * Returns per minute, counting only the games a player actually spent returning.
@@ -122,7 +123,25 @@ function pickReturners(rows: StatRow[]): StatRow[] {
     )
 
   const keep = Math.max(1, Math.round(rows.length * RETURNERS_PER_TEAM))
-  return [...rows].sort((a, b) => involvement(a) - involvement(b)).slice(0, keep)
+  const sorted = [...rows].sort(
+    (a, b) => involvement(a) - involvement(b) || a.player_id.localeCompare(b.player_id),
+  )
+  if (sorted.length <= keep) return sorted
+
+  // Expand through everyone tied with the last kept player rather than cutting
+  // the tie arbitrarily. Slicing at `keep` alone made the cut by database row
+  // order: the sort is stable and the query below carries no ORDER BY, so which
+  // of several equally-uninvolved players counted as a returner was unspecified
+  // Postgres order — and it changed the monthly board AND the denial-ladder
+  // titles banked from it (lib/titles-server.ts). Boundary ties are real: on the
+  // 8 Aug 2026 recovery CSV (no mine data) every non-flag-holder sits at 0.
+  // A side with three equally-uninvolved players genuinely fielded three
+  // returners, so counting all of them is the honest reading; counting an
+  // arbitrary two was not.
+  const boundary = involvement(sorted[keep - 1])
+  let end = keep
+  while (end < sorted.length && involvement(sorted[end]) === boundary) end++
+  return sorted.slice(0, end)
 }
 
 export async function computeReturnerRate(
@@ -139,7 +158,10 @@ export async function computeReturnerRate(
       .select(
         "player_id, match_id, team, returns, time_played, flag_hold_ms, mine_grabs_red, mine_grabs_blue",
       )
-    return matchIds ? q.in("match_id", matchIds) : q
+    // Explicit order is required, not cosmetic: fetchAll pages with .range(),
+    // and a range over an unordered query can skip or repeat rows across page
+    // boundaries. It also pins the row order that downstream bucketing sees.
+    return (matchIds ? q.in("match_id", matchIds) : q).order("player_id").order("match_id")
   })
   if (stats.length === 0) return { rows: [], gameFloor: 0 }
 
@@ -192,7 +214,7 @@ export async function computeReturnerRate(
 
   const rows = all
     .filter((r) => r.games >= gameFloor)
-    .sort((a, b) => b.perMinute - a.perMinute || b.games - a.games)
+    .sort(rankByName((a, b) => b.perMinute - a.perMinute || b.games - a.games))
 
   return { rows, gameFloor }
 }

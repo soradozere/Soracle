@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/supabase/client"
+import { rankBy, rankByName } from "./rank-order"
 import { applyMatchElo, seedFromTier } from "@/lib/elo"
 import { BADGE_PRIORITY } from "@/lib/badge-meta"
 import {
@@ -434,7 +435,7 @@ function computeStarPlayer(
   const bestStar = Array.from(starStats.entries())
     .filter(([, s]) => s.matches >= starMinMatches)
     .map(([name, s]) => ({ name, wins: s.wins, losses: s.losses, matches: s.matches, avgScore: s.score / s.matches }))
-    .sort((a, b) => (b.avgScore !== a.avgScore ? b.avgScore - a.avgScore : b.matches - a.matches))[0]
+    .sort(rankByName((a, b) => (b.avgScore !== a.avgScore ? b.avgScore - a.avgScore : b.matches - a.matches)))[0]
   return bestStar
     ? { name: bestStar.name, wins: bestStar.wins, losses: bestStar.losses, avgScore: bestStar.avgScore }
     : null
@@ -497,11 +498,13 @@ function computeMonthlyHonours(
     const board: BoardPlace[] = Array.from(records.entries())
       .filter(([, rec]) => rec.played >= minGames)
       .map(([name, rec]) => ({ name, ...rec, winPct: rec.played > 0 ? (rec.wins / rec.played) * 100 : 0 }))
-      .sort((a, b) => {
-        if (b.winPct !== a.winPct) return b.winPct - a.winPct
-        if (b.wins !== a.wins) return b.wins - a.wins
-        return b.played - a.played
-      })
+      .sort(
+        rankByName((a, b) => {
+          if (b.winPct !== a.winPct) return b.winPct - a.winPct
+          if (b.wins !== a.wins) return b.wins - a.wins
+          return b.played - a.played
+        }),
+      )
       .map((p, i) => ({ name: p.name, rank: i + 1, wins: p.wins, losses: p.losses, winPct: p.winPct }))
 
 
@@ -530,7 +533,7 @@ function computeMonthlyHonours(
 
     const bestCaps = Array.from(caps.entries())
       .filter(([, total]) => total > 0)
-      .sort((a, b) => b[1] - a[1])[0]
+      .sort(rankBy(([name]) => name, (a, b) => b[1] - a[1]))[0]
     const topCapper = bestCaps ? { name: bestCaps[0], captures: bestCaps[1] } : null
 
     // K/D needs a floor too, or someone who played one clean match takes it.
@@ -538,7 +541,7 @@ function computeMonthlyHonours(
     const bestKD = Array.from(kd.entries())
       .filter(([, r]) => r.statMatches >= minStatMatches && r.kills > 0)
       .map(([name, r]) => [name, r.deaths === 0 ? r.kills : r.kills / r.deaths] as const)
-      .sort((a, b) => b[1] - a[1])[0]
+      .sort(rankBy(([name]) => name, (a, b) => b[1] - a[1]))[0]
     const topKD = bestKD ? { name: bestKD[0], kd: bestKD[1] } : null
 
     honours.push({
@@ -622,7 +625,7 @@ function topFriends(name: string, matches: ProfileMatch[]): PairRecord[] {
     const qualified = all.filter((r) => r.games >= floor)
     if (qualified.length) {
       return qualified
-        .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games))
+        .sort(rankByName((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games)))
         .slice(0, 3)
     }
   }
@@ -654,7 +657,7 @@ function topNemeses(name: string, matches: ProfileMatch[]): OppRecord[] {
     const qualified = all.filter((r) => r.meetings >= floor)
     if (qualified.length) {
       return qualified
-        .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.meetings - a.meetings))
+        .sort(rankByName((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.meetings - a.meetings)))
         .slice(0, 3)
     }
   }

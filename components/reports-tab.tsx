@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { rankBy, rankByName } from "@/lib/rank-order"
 import {
   getCapConversionByMonth,
   getMatchesByMonth,
@@ -503,12 +504,14 @@ export function ReportsTab() {
   const starPlayer = Array.from(starPlayerStats.values())
     .filter(p => p.matches >= starPlayerMinMatches)
     .map(p => ({ ...p, avgScore: p.score / p.matches }))
-    .sort((a, b) => {
-      // Sort by average score first
-      if (b.avgScore !== a.avgScore) return b.avgScore - a.avgScore
-      // Tiebreaker: more matches = more proven
-      return b.matches - a.matches
-    })[0] || null
+    .sort(
+      rankByName((a, b) => {
+        // Sort by average score first
+        if (b.avgScore !== a.avgScore) return b.avgScore - a.avgScore
+        // Tiebreaker: more matches = more proven
+        return b.matches - a.matches
+      }),
+    )[0] || null
 
   // How this month compares with the last one. Only shown where there is a
   // previous month to compare against — a first month reads as no delta rather
@@ -607,7 +610,7 @@ export function ReportsTab() {
   
   // Sort by streak length descending and take top 5
   const streakLeaders = allStreaks
-    .sort((a, b) => b.streak - a.streak)
+    .sort(rankByName((a, b) => b.streak - a.streak))
     .slice(0, 5)
   
   const longestStreak = streakLeaders.length > 0 ? streakLeaders[0].streak : 0
@@ -646,10 +649,14 @@ export function ReportsTab() {
     Math.abs(0.5 - p.player1Wins / p.count)
   const topRivalry = Array.from(opponentPairs.values())
     .filter((p) => p.count >= RIVALRY_MIN_MEETINGS)
-    .sort((a, b) =>
-      rivalryCloseness(a) !== rivalryCloseness(b)
-        ? rivalryCloseness(a) - rivalryCloseness(b)
-        : b.count - a.count,
+    .sort(
+      rankBy(
+        (p) => `${p.player1}|${p.player2}`,
+        (a, b) =>
+          rivalryCloseness(a) !== rivalryCloseness(b)
+            ? rivalryCloseness(a) - rivalryCloseness(b)
+            : b.count - a.count,
+      ),
     )[0] || null
 
   // Red vs Blue
@@ -699,12 +706,12 @@ export function ReportsTab() {
   const topFlagHold =
     [...qualifiedStatPlayers]
       .filter((p) => p.flagHoldMs > 0)
-      .sort((a, b) => b.flagHoldMs - a.flagHoldMs)[0] || null
+      .sort(rankByName((a, b) => b.flagHoldMs - a.flagHoldMs))[0] || null
 
   const topDbsKills =
     [...qualifiedStatPlayers]
       .filter((p) => p.dbsKills > 0)
-      .sort((a, b) => b.dbsKills - a.dbsKills)[0] || null
+      .sort(rankByName((a, b) => b.dbsKills - a.dbsKills))[0] || null
 
   // Returns per minute of play (TIME-SUM is already in minutes), not raw return count.
   // Counted over returner games only. Dividing returns by every minute played
@@ -717,7 +724,7 @@ export function ReportsTab() {
     [...qualifiedStatPlayers]
       .filter((p) => p.kills > 0 && p.deaths > 0)
       .map((p) => ({ ...p, kd: p.kills / p.deaths }))
-      .sort((a, b) => b.kd - a.kd)[0] || null
+      .sort(rankByName((a, b) => b.kd - a.kd))[0] || null
 
   // Best conversion — captures as a share of RESOLVED flag runs (capped, or
   // returned while carrying). Replaces minutes-of-hold-per-cap, which measured
@@ -733,7 +740,8 @@ export function ReportsTab() {
   const topScoreRow =
     [...matchStats]
       .filter((r) => (r.score || 0) > 0)
-      .sort((a, b) => (b.score || 0) - (a.score || 0))[0] || null
+      .sort(rankBy((r) => `${r.player_id}|${r.match_id}`, (a, b) => (b.score || 0) - (a.score || 0)))[0] ||
+    null
   const highestScore = topScoreRow
     ? {
         name: playerIdToName.get(topScoreRow.player_id) ?? "Unknown player",
@@ -785,7 +793,7 @@ export function ReportsTab() {
   const totalLeaderboardPlayers = leaderboard.length
   const totalLeaderboardWins = leaderboard.reduce((sum, p) => sum + p.wins, 0)
   const topWinner = leaderboard[0]?.name || null
-  const mostWinsPlayer = [...leaderboard].sort((a, b) => b.wins - a.wins)[0]
+  const mostWinsPlayer = [...leaderboard].sort(rankByName((a, b) => b.wins - a.wins))[0]
   const mostWins = mostWinsPlayer?.wins || 0
   const mostWinsName = mostWinsPlayer?.name || null
 
