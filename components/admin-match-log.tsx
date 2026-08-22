@@ -232,21 +232,32 @@ export function AdminMatchLog() {
         }),
       )
 
-      const result = await logMatchWithStats(formData)
+      // A Server Action request Next.js rejects outright (e.g. over the body
+      // size limit) never reaches logMatchWithStats's own try/catch, so it
+      // must be caught here too — otherwise the submit just hangs silently
+      // and isSubmitting never clears.
+      try {
+        const result = await logMatchWithStats(formData)
 
-      if (result.success) {
-        toast({ title: "Match logged with stats." })
-        setRedTeam([])
-        setBlueTeam([])
-        setRedScore("")
-        setBlueScore("")
-        setNotes("")
-        setCsvData(null)
-        const now = new Date()
-        const pad = (n: number) => String(n).padStart(2, "0")
-        setMatchDate(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`)
-      } else {
-        setMessage({ type: "error", text: result.error || "Failed to log match with stats" })
+        if (result.success) {
+          toast({ title: "Match logged with stats." })
+          setRedTeam([])
+          setBlueTeam([])
+          setRedScore("")
+          setBlueScore("")
+          setNotes("")
+          setCsvData(null)
+          const now = new Date()
+          const pad = (n: number) => String(n).padStart(2, "0")
+          setMatchDate(`${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}T${pad(now.getHours())}:${pad(now.getMinutes())}`)
+        } else {
+          setMessage({ type: "error", text: result.error || "Failed to log match with stats" })
+        }
+      } catch (error) {
+        setMessage({
+          type: "error",
+          text: error instanceof Error ? error.message : "The request failed before reaching the server.",
+        })
       }
 
       setIsSubmitting(false)

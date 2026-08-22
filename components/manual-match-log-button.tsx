@@ -38,14 +38,27 @@ export function ManualMatchLogButton({ onLogged }: { onLogged: () => void }) {
         match_stats: data.matchStats,
       }),
     )
-    const result = await logMatchWithStats(formData)
-    if (result.success) {
-      toast({ title: "Match logged with stats." })
-      onLogged()
-    } else {
+    // The modal closes the instant this fires (see onConfirm in
+    // MatchStatsCsvModal), so a thrown/rejected call here — a Server Action
+    // request Next.js rejects outright (e.g. over the body size limit) never
+    // reaches logMatchWithStats's own try/catch — must still be caught, or the
+    // failure is invisible: no toast, dialog already gone, nothing logged.
+    try {
+      const result = await logMatchWithStats(formData)
+      if (result.success) {
+        toast({ title: "Match logged with stats." })
+        onLogged()
+      } else {
+        toast({
+          title: "Failed to log match",
+          description: result.error,
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
       toast({
         title: "Failed to log match",
-        description: result.error,
+        description: error instanceof Error ? error.message : "The request failed before reaching the server.",
         variant: "destructive",
       })
     }
