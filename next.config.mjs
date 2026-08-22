@@ -36,6 +36,18 @@ const nextConfig = {
     unoptimized: true,
   },
   allowedDevOrigins: lanOrigins(),
+  experimental: {
+    serverActions: {
+      // logMatchWithStats/approvePendingMatch/createPendingFromUpload all send the
+      // raw scoreboard file through a Server Action, which is capped by this limit
+      // rather than any per-route config. Next's 1mb default silently rejects the
+      // request server-side with no error the client-side call site sees, so a
+      // heavily-subbed match (more playerData entries -> a bigger JSON export) can
+      // cross it — happened for real, 22 Aug 2026, a 19-player scoreboard at ~1.06mb.
+      // 10mb gives real headroom above any scoreboard seen so far.
+      bodySizeLimit: "10mb",
+    },
+  },
 }
 
 /**
