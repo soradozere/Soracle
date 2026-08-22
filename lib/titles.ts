@@ -30,8 +30,25 @@ export interface TitleTier {
 export interface TitleLadder {
   id: string
   label: string
-  metric: "achievement_score" | "month_score"
+  metric: "achievement_score" | "month_score" | "cap_conversion" | "ret_rate" | "cheese_dfa"
   tiers: TitleTier[]
+  /**
+   * Settle only once the month is over, instead of live on each match save.
+   *
+   * Required for any metric that can go DOWN. month_score only ever climbs, so
+   * banking it live is safe: crossing a threshold is permanent. A rate or a
+   * ratio is not — a player five games into a month can sit at 0.55/min and
+   * finish at 0.30 — and banked rows are never removed, so live-banking would
+   * freeze a partial month as a permanent title.
+   */
+  settleAtMonthEnd?: boolean
+  /**
+   * Earliest month ("YYYY-MM") this ladder awards for. Standing ladders are
+   * deliberately NOT retrospective: the metrics could be computed for earlier
+   * months, but handing out three months of titles retroactively on deploy would
+   * make them worthless. Omitted = no floor.
+   */
+  from?: string
 }
 
 // Ranked by lifetime Achievement Score. Re-calibrated 29 Jul 2026: the crest
@@ -145,6 +162,90 @@ export const SEASONS: Record<string, Season> = {
     },
   },
 }
+
+/**
+ * Standing monthly ladders — the same titles every month, alongside whatever
+ * themed season is running. Two reasons they aren't seasons: a `Season` holds
+ * exactly one ladder, and these are role awards that shouldn't need renaming
+ * every month.
+ *
+ * Both are scored over ONE month, so a player re-earns them (or doesn't) each
+ * time. Both start 2026-09: not retrospective, by choice.
+ *
+ * NAMING WINDOW: banking snapshots the title text into player_titles at match
+ * save, so renaming a tier after rows exist strands them under the old id and
+ * needs a remap migration (see scripts/039 for the season that taught us this).
+ * Nothing banks before September, so these names are free to change until then.
+ */
+export const STANDING_LADDERS: TitleLadder[] = [
+  {
+    // Cap conversion: share of resolved flag runs that ended in a capture, with
+    // the 30%-of-leader run floor from lib/cap-conversion.ts.
+    //
+    // Calibrated on ONE partial month (Aug 2026, 18 kill-matrix matches; every
+    // qualifier landed 7.9-17.1%, retpecs top at 17.1%), so treat September as a
+    // calibration run and expect to move these. 20% sits ~17% past the only
+    // monthly record we have; 25% has never been approached over a month, though
+    // 8% of individual MATCHES clear it — a month of dozens of runs regresses
+    // hard toward the mean, which is what makes the top ranks mean something.
+    id: "conversion",
+    label: "Cap conversion",
+    metric: "cap_conversion",
+    from: "2026-09",
+    settleAtMonthEnd: true,
+    tiers: [
+      { id: "conv-opportunist", title: "Opportunist", threshold: 11, rarity: "common" },
+      { id: "conv-finisher", title: "Finisher", threshold: 13, rarity: "rare" },
+      { id: "conv-closer", title: "Closer", threshold: 16, rarity: "epic" },
+      { id: "conv-clinical", title: "Clinical", threshold: 20, rarity: "legendary" },
+      { id: "conv-ice-cold", title: "Ice Cold", threshold: 25, rarity: "mythic" },
+    ],
+  },
+  {
+    // Out-DFA cheese over a month, by a factor of two.
+    //
+    // A named-rival award, and the first thing built on the per-pair kill styles
+    // in match_kills.kill_types. The value is the RATIO (your DFAs on cheese
+    // divided by his on you), so one tier at 2.0 reads as "twice as many".
+    //
+    // Eligibility is handled where the value is computed, not here: 30% of the
+    // month's matches played (the site-wide monthly qualifier) plus a small
+    // volume floor, without which 1-v-0 would win it on an infinite ratio.
+    // Against Aug 2026 that yields two winners -- giraffe (11 v 3) and levi
+    // (12 v 5) -- out of 15 players eligible on attendance.
+    //
+    // Starts 2026-08 rather than 09: explicitly wanted "for this month". It is
+    // the one standing ladder that awards retroactively on deploy.
+    id: "cheese-hunt",
+    label: "DFA duel vs cheese",
+    metric: "cheese_dfa",
+    from: "2026-08",
+    settleAtMonthEnd: true,
+    tiers: [{ id: "cheese-grater", title: "Cheese Grater", threshold: 2, rarity: "legendary" }],
+  },
+  {
+    // Returns per minute over returner games only (lib/returner-rate.ts), so it
+    // rewards defending well rather than being assigned to defend.
+    //
+    // Three months of history behind these: median 0.276, p90 0.429, all-time
+    // max 0.528. Player-months clearing each over Jun-Aug 2026: 23 / 13 / 4 / 2 /
+    // 0. Legendary at 0.50 has been done twice, by two different players -- rare
+    // but demonstrably reachable. Mythic at 0.60 is 14% past the all-time high,
+    // the same margin the best-calibrated one-of-ones use.
+    id: "denial",
+    label: "Ret rate",
+    metric: "ret_rate",
+    from: "2026-09",
+    settleAtMonthEnd: true,
+    tiers: [
+      { id: "denial-interceptor", title: "Interceptor", threshold: 0.35, rarity: "common" },
+      { id: "denial-gatekeeper", title: "Gatekeeper", threshold: 0.4, rarity: "rare" },
+      { id: "denial-wall", title: "Wall", threshold: 0.45, rarity: "epic" },
+      { id: "denial-lockdown", title: "Lockdown", threshold: 0.5, rarity: "legendary" },
+      { id: "denial-no-way-through", title: "No Way Through", threshold: 0.6, rarity: "mythic" },
+    ],
+  },
+]
 
 export const seasonFor = (iso: string): Season | null => SEASONS[iso.slice(0, 7)] ?? null
 

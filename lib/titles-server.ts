@@ -1,6 +1,15 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Rarity } from "@/lib/achievement-meta"
-import { SEASONS, progressFor, catalogueTitleById, type RecordedTitle } from "@/lib/titles"
+import {
+  SEASONS,
+  STANDING_LADDERS,
+  progressFor,
+  catalogueTitleById,
+  type RecordedTitle,
+  type TitleLadder,
+} from "@/lib/titles"
+import { computeCapConversion } from "@/lib/cap-conversion"
+import { computeReturnerRate } from "@/lib/returner-rate"
 import { createAnonClient } from "@/lib/supabase/anon"
 
 // Recording earned seasonal titles.
@@ -42,8 +51,29 @@ export async function recordSeasonalTitles(
 ): Promise<number> {
   const key = monthKeyOf(whenIso)
   const season = SEASONS[key]
-  // A month with no catalogue entry has no seasonal ladder — nothing to record.
-  if (!season) return 0
+  // Standing ladders run every month; a themed season is optional on top. A
+  // month with neither has nothing to record.
+  // A month is settled only once it's over. Ladders whose metric can fall
+  // (every standing one) must not bank a partial month: rows are never removed,
+  // so a player five games in at 0.55/min would keep Lockdown after finishing on
+  // 0.30. month_score only climbs, so the themed season stays live-banked.
+  const monthComplete = (k: string) => Date.now() >= Date.parse(monthBounds(k).end)
+  const standingFor = (k: string) =>
+    STANDING_LADDERS.filter(
+      (l) => (!l.from || k >= l.from) && (!l.settleAtMonthEnd || monthComplete(k)),
+    )
+  const standing = standingFor(key)
+  // Settling the PREVIOUS month here is what actually closes a month out: the
+  // first match of September finalises August. Without it a settle-at-month-end
+  // ladder would never fire, because the save that could settle a month always
+  // lands inside it. Idempotent, so repeating it every save is free.
+  const prevKey = (() => {
+    const [y, m] = key.split("-").map(Number)
+    const d = new Date(Date.UTC(y, m - 2, 1))
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`
+  })()
+  const prevStanding = standingFor(prevKey)
+  if (!season && standing.length === 0 && prevStanding.length === 0) return 0
   if (playerIds && playerIds.length === 0) return 0
 
   const { start, end } = monthBounds(key)
@@ -88,16 +118,46 @@ export async function recordSeasonalTitles(
     title: string
     rarity: string
   }[] = []
-  for (const [playerId, score] of scoreByPlayer) {
-    for (const tier of progressFor(season.ladder, score).earned) {
+  const bank = (ladder: TitleLadder, seasonName: string, playerId: string, value: number) => {
+    for (const tier of progressFor(ladder, value).earned) {
       rows.push({
         player_id: playerId,
         title_id: tier.id,
-        season_key: season.key,
-        season_name: season.name,
+        season_key: key,
+        season_name: seasonName,
         title: tier.title,
         rarity: tier.rarity,
       })
+    }
+  }
+
+  if (season) {
+    for (const [playerId, score] of scoreByPlayer) bank(season.ladder, season.name, playerId, score)
+  }
+
+  // Standing role ladders. Both helpers already take the month's match ids and
+  // apply their own qualifying floors, so they return only players whose figure
+  // is meaningful — no second floor needed here.
+  for (const ladder of standing) {
+    const values = await standingValues(supabase, ladder.metric, matchIds)
+    for (const [playerId, value] of values) {
+      if (playerIds && !playerIds.includes(playerId)) continue
+      bank(ladder, ladder.label, playerId, value)
+    }
+  }
+
+  // Close out the previous month. Not scoped to this match's players — settling
+  // is about everyone who played that month, not whoever happens to be in the
+  // game that triggered it.
+  if (prevStanding.length > 0) {
+    const prevIds = await matchIdsForMonth(supabase, prevKey)
+    if (prevIds.length > 0) {
+      for (const ladder of prevStanding) {
+        const values = await standingValues(supabase, ladder.metric, prevIds)
+        for (const [playerId, value] of values) {
+          rowsForMonth(rows, ladder, prevKey, playerId, value)
+        }
+      }
     }
   }
   if (!rows.length) return 0
@@ -108,6 +168,149 @@ export async function recordSeasonalTitles(
   if (error) throw new Error(`Failed to record seasonal titles for ${key}: ${error.message}`)
 
   return rows.length
+}
+
+/** Bank a value against a ladder for an explicit month key. */
+function rowsForMonth(
+  rows: {
+    player_id: string
+    title_id: string
+    season_key: string
+    season_name: string
+    title: string
+    rarity: string
+  }[],
+  ladder: TitleLadder,
+  key: string,
+  playerId: string,
+  value: number,
+) {
+  for (const tier of progressFor(ladder, value).earned) {
+    rows.push({
+      player_id: playerId,
+      title_id: tier.id,
+      season_key: key,
+      season_name: ladder.label,
+      title: tier.title,
+      rarity: tier.rarity,
+    })
+  }
+}
+
+async function matchIdsForMonth(supabase: SupabaseClient, key: string): Promise<string[]> {
+  const { start, end } = monthBounds(key)
+  const { data } = await supabase.from("matches").select("id").gte("created_at", start).lt("created_at", end)
+  return (data ?? []).map((m: { id: string }) => m.id)
+}
+
+/**
+ * Per-player value for a standing ladder's metric over one month's matches.
+ *
+ * Deliberately reuses the same functions the site and bot read, so a title can
+ * never disagree with the board that displays the number behind it. Both apply
+ * their own relative floor and return only qualifying players.
+ */
+async function standingValues(
+  supabase: SupabaseClient,
+  metric: TitleLadder["metric"],
+  matchIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  // Names aren't needed — rows are keyed by player_id — but both helpers take
+  // the map, so an empty one is passed rather than paying for a players read.
+  const noNames = new Map<string, string>()
+  if (metric === "cap_conversion") {
+    const { rows } = await computeCapConversion(supabase, noNames, matchIds)
+    for (const r of rows) out.set(r.playerId, r.conversion)
+  } else if (metric === "ret_rate") {
+    const { rows } = await computeReturnerRate(supabase, noNames, matchIds)
+    for (const r of rows) out.set(r.playerId, r.perMinute)
+  } else if (metric === "cheese_dfa") {
+    for (const [id, ratio] of await cheeseDfaRatios(supabase, matchIds)) out.set(id, ratio)
+  }
+  return out
+}
+
+/** 30% of the month's matches, the site-wide monthly qualifier. */
+const ATTENDANCE_FRACTION = 0.3
+/** Without this, one DFA against none would win on an infinite ratio. */
+const MIN_DFA_ON_TARGET = 5
+
+/**
+ * Your DFAs on cheese divided by his on you, over one month.
+ *
+ * Reads match_kills.kill_types, the per-pair style breakdown — the only place
+ * "who DFA'd whom" exists, and JSON-era only, so this can never score a match
+ * before 9 Aug 2026.
+ *
+ * The target is resolved BY NAME each time rather than pinned to an id: a
+ * hardcoded uuid would silently stop matching if the row were ever replaced. If
+ * no such player exists the ladder simply awards nothing, which is the right
+ * failure for a named-rival award whose subject has left.
+ */
+async function cheeseDfaRatios(
+  supabase: SupabaseClient,
+  matchIds: string[],
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>()
+  const { data: target } = await supabase
+    .from("players")
+    .select("id")
+    .ilike("name", "cheese")
+    .maybeSingle()
+  if (!target?.id) return out
+
+  const PAGE = 1000
+  const games = new Map<string, number>()
+  for (let from = 0; ; from += PAGE) {
+    const { data } = await supabase
+      .from("match_stats")
+      .select("player_id")
+      .in("match_id", matchIds)
+      .range(from, from + PAGE - 1)
+    const rows = (data ?? []) as { player_id: string }[]
+    for (const r of rows) games.set(r.player_id, (games.get(r.player_id) ?? 0) + 1)
+    if (rows.length < PAGE) break
+  }
+  const needed = Math.ceil(matchIds.length * ATTENDANCE_FRACTION)
+
+  const tally = new Map<string, { on: number; by: number }>()
+  const dfaOf = (kt: Record<string, number> | null) => kt?.DFA ?? 0
+  for (let from = 0; ; from += PAGE) {
+    const { data } = await supabase
+      .from("match_kills")
+      .select("killer_player_id, victim_player_id, kill_types")
+      .in("match_id", matchIds)
+      .range(from, from + PAGE - 1)
+    const rows = (data ?? []) as {
+      killer_player_id: string
+      victim_player_id: string
+      kill_types: Record<string, number> | null
+    }[]
+    for (const r of rows) {
+      const dfa = dfaOf(r.kill_types)
+      if (!dfa) continue
+      if (r.victim_player_id === target.id) {
+        const t = tally.get(r.killer_player_id) ?? { on: 0, by: 0 }
+        t.on += dfa
+        tally.set(r.killer_player_id, t)
+      } else if (r.killer_player_id === target.id) {
+        const t = tally.get(r.victim_player_id) ?? { on: 0, by: 0 }
+        t.by += dfa
+        tally.set(r.victim_player_id, t)
+      }
+    }
+    if (rows.length < PAGE) break
+  }
+
+  for (const [playerId, t] of tally) {
+    if (playerId === target.id) continue
+    if ((games.get(playerId) ?? 0) < needed) continue
+    if (t.on < MIN_DFA_ON_TARGET) continue
+    // by === 0 with enough volume is a clean sweep, not a divide-by-zero.
+    out.set(playerId, t.by === 0 ? t.on : t.on / t.by)
+  }
+  return out
 }
 
 /** Never throws — a title-recording failure must not fail the match save it rides on. */
