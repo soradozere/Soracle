@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { rankByName } from "./rank-order"
 
 /**
  * Cap conversion — what share of a player's *resolved* flag runs ended in a capture.
@@ -109,7 +110,13 @@ export async function computeCapConversion(
   const kills = await fetchAll<{ match_id: string; victim_player_id: string; rets: number }>(
     () => {
       const q = supabase.from("match_kills").select("match_id, victim_player_id, rets")
-      return matchIds ? q.in("match_id", matchIds) : q
+      // Ordered because of the paging below, not for presentation: PostgREST
+      // .range() over an unordered query has no stable row order between pages,
+      // so rows can be skipped or repeated at a page boundary — which here would
+      // silently under- or over-count someone's returns.
+      return (matchIds ? q.in("match_id", matchIds) : q)
+        .order("match_id")
+        .order("victim_player_id")
     },
   )
   if (kills.length === 0) return { rows: [], matchCount: 0, carryFloor: 0 }
@@ -120,7 +127,12 @@ export async function computeCapConversion(
   // of caps against a partial history of returns would invent conversion rates
   // well over 100%.
   const stats = await fetchAll<{ player_id: string; captures: number | null }>(() =>
-    supabase.from("match_stats").select("player_id, captures").in("match_id", coveredIds),
+    supabase
+      .from("match_stats")
+      .select("player_id, captures")
+      .in("match_id", coveredIds)
+      .order("player_id")
+      .order("match_id"),
   )
 
   const caught = new Map<string, number>()
@@ -153,7 +165,7 @@ export async function computeCapConversion(
 
   const rows = all
     .filter((r) => r.carries >= carryFloor)
-    .sort((a, b) => b.conversion - a.conversion || b.carries - a.carries)
+    .sort(rankByName((a, b) => b.conversion - a.conversion || b.carries - a.carries))
 
   return { rows, matchCount: coveredIds.length, carryFloor }
 }

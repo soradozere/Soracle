@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { rankByName } from "@/lib/rank-order"
 import { createClient } from "@/lib/supabase/server"
 import { fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
 
@@ -65,7 +66,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ disc
   const ranked = Array.from(h2h.entries())
     .map(([name, rec]) => ({ name, ...rec, rate: rec.theirWins / rec.meetings }))
     .filter((r) => r.meetings >= MIN_MEETINGS)
-    .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.meetings - a.meetings))
+    .sort(rankByName((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.meetings - a.meetings)))
 
   // Top 3 nemeses. `nemesis` kept as the single worst for backwards compatibility
   // with bot versions that predate the top-3 rollout.

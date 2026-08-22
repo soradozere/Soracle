@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { rankBy, rankByName } from "@/lib/rank-order"
 import { createClient } from "@/lib/supabase/client"
 import { ArrowUp, ArrowDown, RefreshCw, Trophy, TrendingUp, TrendingDown, HelpCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -317,7 +318,7 @@ export function EloLeaderboard({ year, month, isAdmin = false, scope: scopeProp 
             deaths: kd.deaths,
           })
         }
-        rows.sort((a, b) => b.elo - a.elo)
+        rows.sort(rankByName((a, b) => b.elo - a.elo))
         return rows
       }
 
@@ -340,7 +341,7 @@ export function EloLeaderboard({ year, month, isAdmin = false, scope: scopeProp 
         const histogram = new Map<number, number>()
         for (const p of board) histogram.set(p.tier, (histogram.get(p.tier) || 0) + 1)
 
-        const sortedByElo = [...board].sort((a, b) => b.elo - a.elo)
+        const sortedByElo = [...board].sort(rankByName((a, b) => b.elo - a.elo))
         const impliedTier = new Map<string, number>()
         let idx = 0
         for (let tier = 10; tier >= 1; tier--) {
@@ -371,12 +372,14 @@ export function EloLeaderboard({ year, month, isAdmin = false, scope: scopeProp 
           })
         }
 
-        result.sort((a, b) => {
-          const gapA = Math.abs(a.impliedTier - a.currentTier)
-          const gapB = Math.abs(b.impliedTier - b.currentTier)
-          if (gapB !== gapA) return gapB - gapA
-          return b.elo - a.elo
-        })
+        result.sort(
+          rankBy((s) => s.playerName, (a, b) => {
+            const gapA = Math.abs(a.impliedTier - a.currentTier)
+            const gapB = Math.abs(b.impliedTier - b.currentTier)
+            if (gapB !== gapA) return gapB - gapA
+            return b.elo - a.elo
+          }),
+        )
         return result
       }
 

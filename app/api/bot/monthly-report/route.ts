@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { rankBy, rankByName } from "@/lib/rank-order"
 import { createClient } from "@/lib/supabase/server"
 import { fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
 
@@ -93,7 +94,8 @@ export async function GET(request: Request) {
     Array.from(starStats.values())
       .filter((p) => p.matches >= starMinMatches)
       .map((p) => ({ ...p, avgScore: p.score / p.matches }))
-      .sort((a, b) => (b.avgScore !== a.avgScore ? b.avgScore - a.avgScore : b.matches - a.matches))[0] || null
+      .sort(rankByName((a, b) => (b.avgScore !== a.avgScore ? b.avgScore - a.avgScore : b.matches - a.matches)))[0] ||
+    null
 
   // --- Rivalries: pairs most often on opposite teams, with head-to-head ---
   const pairs = new Map<string, { player1: string; player2: string; count: number; player1Wins: number }>()
@@ -125,7 +127,12 @@ export async function GET(request: Request) {
     Math.abs(0.5 - p.player1Wins / p.count)
   const rivalries = Array.from(pairs.values())
     .filter((p) => p.count >= RIVALRY_MIN_MEETINGS)
-    .sort((a, b) => (closeness(a) !== closeness(b) ? closeness(a) - closeness(b) : b.count - a.count))
+    .sort(
+      rankBy(
+        (p) => `${p.player1}|${p.player2}`,
+        (a, b) => (closeness(a) !== closeness(b) ? closeness(a) - closeness(b) : b.count - a.count),
+      ),
+    )
     .slice(0, 5)
 
   // --- Duos: the month's best-winning team-mate pairs ("power couples") ---
@@ -160,7 +167,12 @@ export async function GET(request: Request) {
   const duos = Array.from(duoPairs.values())
     .map((d) => ({ ...d, rate: d.wins / d.games }))
     .filter((d) => d.games >= DUO_MIN_GAMES)
-    .sort((a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games))
+    .sort(
+      rankBy(
+        (d) => `${d.player1}|${d.player2}`,
+        (a, b) => (b.rate !== a.rate ? b.rate - a.rate : b.games - a.games),
+      ),
+    )
     .slice(0, 5)
 
   // --- Longest win streaks of the month (chronological) ---
@@ -192,7 +204,7 @@ export async function GET(request: Request) {
       return { name, streak: max }
     })
     .filter((p) => p.streak > 1)
-    .sort((a, b) => b.streak - a.streak)
+    .sort(rankByName((a, b) => b.streak - a.streak))
     .slice(0, 5)
 
   // --- Red vs Blue ---
