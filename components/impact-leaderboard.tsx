@@ -26,9 +26,10 @@ import {
 
 // The Impact board — the fourth leaderboard, alongside Wins, ELO and TrueSkill.
 //
-// One idea, four parts: a player's standing on win rate, ELO, TrueSkill and average
-// score per game, added together. All of the maths lives in lib/impact-rating.ts;
-// this file only fetches and draws.
+// Two votes, added: a player's standing on win rate, ELO and TrueSkill collapsed
+// into one result (they move together, so counted separately they would outvote
+// production three-to-one), plus average score per game. All of the maths lives in
+// lib/impact-rating.ts; this file only fetches and draws.
 //
 // Nothing is persisted. The board is derived fresh from matches + match_stats on
 // every load, so a re-uploaded scoreboard shows up immediately.
@@ -297,10 +298,10 @@ export function ImpactLeaderboard({ year, month, scope }: ImpactLeaderboardProps
       <div className="flex items-center justify-between gap-2">
         <p className="text-sm text-[var(--color-text-dim)]">
           {scope === "alltime"
-            ? "Where each player stands across every match with a scoreboard, on four measures at once."
-            : `Where each player stood in ${monthLabel}, on four measures at once.`}{" "}
-          Win rate, ELO, TrueSkill and average score per game — each compared to everyone else who qualified, then
-          added together.
+            ? "Where each player stands across every match with a scoreboard, on results and production."
+            : `Where each player stood in ${monthLabel}, on results and production.`}{" "}
+          Win rate, ELO and TrueSkill combine into one result, then add to average score per game — each compared
+          to everyone else who qualified.
         </p>
         <div className="flex items-center gap-2">
           <Dialog>
@@ -314,20 +315,25 @@ export function ImpactLeaderboard({ year, month, scope }: ImpactLeaderboardProps
               <DialogHeader>
                 <DialogTitle>Impact Rating</DialogTitle>
                 <DialogDescription>
-                  Four standings, added together — and an honest note about what that costs.
+                  Two votes, added together — how your month's results went, and how much you put on the
+                  scoreboard.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4 text-sm text-[var(--color-text)]">
                 <div>
-                  <h4 className="font-bold text-[var(--color-text)] mb-1">Four measures, one number</h4>
+                  <h4 className="font-bold text-[var(--color-text)] mb-1">Four measures, two votes</h4>
                   <p className="text-[var(--color-text-dim)]">
                     Your <span style={{ color: PART_COLOURS.win }}>win rate</span>,{" "}
-                    <span style={{ color: PART_COLOURS.elo }}>ELO</span>,{" "}
-                    <span style={{ color: PART_COLOURS.trueskill }}>TrueSkill</span> and{" "}
-                    <span style={{ color: PART_COLOURS.score }}>average score per game</span> are each compared to
-                    everyone else who qualified, which is what the −2 to +2 numbers in those columns are: standard
-                    deviations from the pool average, not points. The four are then added, and the total is shown
-                    on a scale where 50 is an average month.
+                    <span style={{ color: PART_COLOURS.elo }}>ELO</span> and{" "}
+                    <span style={{ color: PART_COLOURS.trueskill }}>TrueSkill</span>{" "}
+                    are each compared to everyone
+                    else who qualified — the −2 to +2 numbers in those columns are standard deviations from the
+                    pool average, not points. Those three are then averaged into a single result, because all three
+                    are built from nothing but who won: over one month they agree with each other 93–97% of the
+                    time, so counting them separately would let &ldquo;who won&rdquo; outvote everything else
+                    three-to-one. That combined result is added to{" "}
+                    <span style={{ color: PART_COLOURS.score }}>average score per game</span>, standardised the
+                    same way, and the total is shown on a scale where 50 is an average month.
                   </p>
                 </div>
                 <div>
@@ -339,15 +345,19 @@ export function ImpactLeaderboard({ year, month, scope }: ImpactLeaderboardProps
                   </p>
                 </div>
                 <div>
-                  <h4 className="font-bold text-[var(--color-text)] mb-1">What this board is weak at</h4>
+                  <h4 className="font-bold text-[var(--color-text)] mb-1">Why results only get one vote</h4>
                   <p className="text-[var(--color-text-dim)]">
-                    Three of the four ingredients are built from nothing but who won. Over a single month, win
-                    rate, ELO and TrueSkill agree with each other about 93–97% of the time — they are close to one
-                    measurement counted three times, and in a balanced 6v6 that measurement is mostly decided by
-                    your other eleven players rather than by you. Average score per game is the only part that
-                    reads what you personally did. Split a month in half at random and rebuild this board on each
-                    half and the two halves agree about 0.25 — against 0.87 for score per minute on its own. Read
-                    the four columns as much as the total.
+                    An earlier version added all four numbers separately. Win rate, ELO and TrueSkill moved in
+                    lockstep on almost every row — they are close to one measurement counted three times, and in a
+                    balanced 6v6 that measurement is decided mostly by your other eleven players rather than by
+                    you. Average score per game was the only column carrying independent information, so next to
+                    three numbers that always agreed with each other, it looked erratic by comparison — even
+                    though it wasn&apos;t the miscalibrated one. Collapsing results to a single vote fixed that:
+                    split a month in half at random and rebuild this board on each half, and the two halves now
+                    agree about 0.56, up from 0.28 when all four were added raw. Score per minute alone still
+                    agrees with itself more (0.87) than this board does — winning is kept in deliberately, at equal
+                    weight to production, because a leaderboard that ignored who won would stop being about the
+                    game.
                   </p>
                 </div>
                 <div>
@@ -516,10 +526,10 @@ export function ImpactLeaderboard({ year, month, scope }: ImpactLeaderboardProps
               </div>
               <p className="text-xs text-[var(--color-text-dim)]">
                 Bars are standard deviations from the qualified pool, so they diverge either side of the average
-                rather than filling from zero. The rating is the four added together. Worth knowing: win rate, ELO
-                and TrueSkill are all built from who won and agree with each other 93–97% of the time over a single
-                month, so the total leans heavily on match results and only lightly on what you personally did —
-                the Score/game column is the one part that reads your own scoreboard.
+                rather than filling from zero. Win rate, ELO and TrueSkill are all built from who won and agree
+                with each other 93–97% of the time over a single month, so they are combined into one result
+                before the rating is worked out — otherwise match results would outvote everything else
+                three-to-one. The rating is that combined result plus Score/game, in equal parts.
               </p>
             </div>
           </>

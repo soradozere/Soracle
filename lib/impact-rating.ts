@@ -1,14 +1,25 @@
 /**
- * Impact Rating — four standings, summed.
+ * Impact Rating — two votes, added: how the month's results went, and how much you
+ * personally put on the scoreboard.
  *
- * A player's Impact is the sum of where they stand on four measures of the month:
+ * Four measures go in — win rate, ELO, TrueSkill, average score per game — but they
+ * are not four independent votes. Win rate, ELO and TrueSkill are all built from
+ * nothing but who won, so over a single month they correlate 0.93-0.97 with each
+ * other (see the numbers below): they are close to the same measurement reported
+ * three times. Summing all three raw would hand "which side won" three votes
+ * against production's one, which is what an earlier version of this board did —
+ * and it visibly showed: the score column looked erratic purely because it was the
+ * only one of the four NOT moving in lockstep with the other three.
  *
- *     win rate  +  ELO  +  TrueSkill  +  average score per game
+ * So the three results measures are first averaged into one, standardised, then
+ * added to score per game, standardised the same way:
  *
- * Each is standardised across the qualified pool (a z-score: how many standard
- * deviations above or below the pool average) so that four quantities in four
- * different units can be added at all. The sum is shown on the same 50-centred
- * scale the other boards use.
+ *     value = zScore(mean(zScore(winRate), zScore(elo), zScore(trueSkill)))
+ *           + zScore(averageScorePerGame)
+ *
+ * Each z-score is how many standard deviations above or below the qualified pool's
+ * average a player sits. The final value is shown on the same 50-centred scale the
+ * other boards use.
  *
  * WHAT THIS DELIBERATELY IS NOT
  * -----------------------------
@@ -24,29 +35,24 @@
  * correlate the two across the qualified players (Spearman-Brown corrected). A
  * measure that is telling you something about a player agrees with itself:
  *
- *     this board (four standings summed) ......  0.25
- *     score per minute, on its own ............  0.87
- *     the role-weighted board this replaced ...  0.83
- *     win rate on its own .....................  0.13
+ *     this board (results collapsed to one vote + score) ...  0.53
+ *     the four raw measures summed individually .............  0.28
+ *     score per minute, on its own ............................  0.87
+ *     the role-weighted board this replaced ...................  0.83
+ *     win rate on its own ......................................  0.13
  *
- * The reason the sum lands so low is that three of its four ingredients are very
- * nearly the same measurement. Over August 2026's qualified pool:
+ * Over August 2026's qualified pool: win rate vs ELO 0.969, win rate vs TrueSkill
+ * 0.932, ELO vs TrueSkill 0.932, win rate vs score per game 0.247. Collapsing the
+ * redundant trio to one vote very nearly doubled reliability (0.277 -> 0.534)
+ * without dropping any of the four measures Sora asked for -- each is still its own
+ * column. Score per game on its own is still the more reliable half of the sum
+ * (win rate is close to noise inside one month, because in a balanced 6v6 the other
+ * eleven players decide most of it), which is why it gets an equal vote rather than
+ * a smaller one.
  *
- *     win rate vs ELO ............  0.969
- *     win rate vs TrueSkill ......  0.932
- *     ELO vs TrueSkill ...........  0.932
- *     win rate vs score per game .  0.247
- *
- * ELO and TrueSkill are both derived from nothing but who won, so over a single
- * month they are win rate with extra arithmetic. Summing all three weights that
- * one signal three times over against the one genuinely independent measure. And
- * win rate itself is close to noise inside a month, because in a balanced 6v6 the
- * other eleven players decide most of it.
- *
- * Kept because Sora asked to see it built rather than argued about. If it is to
- * stay, the cheapest single improvement is to drop ELO and TrueSkill from the sum:
- * they contribute almost nothing that win rate has not already contributed, and
- * every point of weight they take is weight off score per game.
+ * Kept as a 50/50 split, not pushed further toward score-only, because Sora asked
+ * to see a board built on standings rather than argued into a production-only one --
+ * that trade was made deliberately, with the numbers in front of him.
  */
 
 /** One match_stats row, narrowed to the columns this board reads. */
@@ -86,12 +92,19 @@ export interface ImpactRow {
   tier: number | null
   /** The summed standing, rendered on the 50-centred scale. What the board sorts on. */
   rating: number
-  /** Sum of the four z-scores, before scaling. */
+  /** resultsZ + scoreZ, before scaling. */
   value: number
-  /** The four parts, so a reader can see which one moved them. */
+  /**
+   * Win rate, ELO and TrueSkill averaged into one vote, then re-standardised. See
+   * the comment above zResults in computeImpactBoard for why they are collapsed
+   * rather than summed individually.
+   */
+  resultsZ: number
+  /** The three results columns, individually, so a reader can see which one moved. */
   winRateZ: number
   eloZ: number
   trueSkillZ: number
+  /** The other half of the rating: average score per game, standardised. */
   scoreZ: number
   games: number
   minutes: number
@@ -436,18 +449,34 @@ export function computeImpactBoard(
   const zTs = zScores(trueSkills)
   const zScore = zScores(scoresPerGame)
 
+  // Win rate, ELO and TrueSkill are three separate columns, but not three separate
+  // opinions: all three are built from nothing but who won, and over a single month
+  // they correlate 0.93-0.97 with each other. Summing all three raw would hand
+  // "which side won" three votes against production's one -- which is what made the
+  // score column look erratic by comparison: it wasn't miscalibrated, it was the
+  // only column not moving in lockstep with the other three.
+  //
+  // So the three are averaged into one result first, and that average is
+  // RE-STANDARDISED (zScores again) rather than just divided by three: averaging
+  // three correlated z-scores shrinks the spread below 1, and re-standardising
+  // restores it so the results vote and the score vote are on equal footing before
+  // they are added. Verified on real data: reliability 0.277 (summed raw) -> 0.534
+  // (collapsed to one vote) on the same split-half test used across this board.
+  const zResults = zScores(pool.map((_, i) => (zWin[i] + zElo[i] + zTs[i]) / 3))
+
   const rows: ImpactRow[] = pool.map(([name, rs], i) => {
-    // The whole rating, in one line: four standings, added together.
-    const value = zWin[i] + zElo[i] + zTs[i] + zScore[i]
+    // The whole rating: one results vote, one production vote, added together.
+    const value = zResults[i] + zScore[i]
     const rec = record.get(name)
     return {
       name,
       tier: tierByName.get(name) ?? null,
-      // Divided by four so the scale still reads as "standard deviations from an
-      // average month" rather than four times that, and the numbers stay in the
-      // same range as the other boards.
-      rating: Math.round(T_MEAN + (T_SPREAD * value) / 4),
+      // Divided by two so the scale still reads as "standard deviations from an
+      // average month" rather than twice that, and the numbers stay in the same
+      // range as the other boards.
+      rating: Math.round(T_MEAN + (T_SPREAD * value) / 2),
       value,
+      resultsZ: zResults[i],
       winRateZ: zWin[i],
       eloZ: zElo[i],
       trueSkillZ: zTs[i],

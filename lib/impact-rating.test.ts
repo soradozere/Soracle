@@ -3,11 +3,13 @@ import { ALL_TIME_MIN_MATCHES, MONTHLY_MIN_FRACTION, computeImpactBoard } from "
 import type { ImpactMatch, ImpactPlayer, ImpactStatRow } from "@/lib/impact-rating"
 
 /*
- * Impact is the sum of four standings: win rate, ELO, TrueSkill and average score
- * per game, each standardised across the qualified pool. The tests below pin the
- * behaviours a reader would notice if they broke -- who qualifies, what counts as a
- * played match, that the ratings really do reset each month, and that the four
- * parts add up to the whole -- rather than exact decimals, which are free to move.
+ * Impact is two votes added together: win rate, ELO and TrueSkill collapsed into
+ * one "results" vote (they correlate 0.93-0.97 with each other over a month, so
+ * summing them raw would let "who won" outvote production 3-to-1), plus average
+ * score per game as the other vote. The tests below pin the behaviours a reader
+ * would notice if they broke -- who qualifies, what counts as a played match, that
+ * the ratings really do reset each month, and that collapsing the results actually
+ * happens rather than exact decimals, which are free to move.
  */
 
 function stat(matchId: string, playerId: string, over: Partial<ImpactStatRow> = {}): ImpactStatRow {
@@ -142,7 +144,7 @@ describe("computeImpactBoard: the win record", () => {
   })
 })
 
-describe("computeImpactBoard: the four standings", () => {
+describe("computeImpactBoard: results collapsed to one vote, plus score", () => {
   /*
    * Three players whose results and scoreboards are deliberately pulled apart, so
    * each part of the sum can be seen moving on its own. `winner` wins everything
@@ -162,9 +164,21 @@ describe("computeImpactBoard: the four standings", () => {
   )
   const board = computeImpactBoard(matches, statRows, players, { minGames: 6 })
 
-  it("adds the four parts to make the value", () => {
+  /*
+   * The value is resultsZ + scoreZ, NOT the four raw z-scores summed. Win rate, ELO
+   * and TrueSkill are collapsed into one results vote first (averaged, then
+   * re-standardised) so that "who won" cannot outvote production 3-to-1 -- see the
+   * module header for why, and the reliability numbers that justified it.
+   */
+  it("adds the collapsed results vote to the score vote, not all four raw parts", () => {
     for (const row of board.rows) {
-      expect(row.value).toBeCloseTo(row.winRateZ + row.eloZ + row.trueSkillZ + row.scoreZ, 10)
+      expect(row.value).toBeCloseTo(row.resultsZ + row.scoreZ, 10)
+      // The raw sum of all four is a DIFFERENT, larger number -- this is the
+      // formula this design deliberately moved away from.
+      const rawSum = row.winRateZ + row.eloZ + row.trueSkillZ + row.scoreZ
+      if (Math.abs(row.resultsZ - row.winRateZ) > 1e-9) {
+        expect(row.value).not.toBeCloseTo(rawSum, 6)
+      }
     }
   })
 
@@ -174,6 +188,20 @@ describe("computeImpactBoard: the four standings", () => {
     expect(sum((r) => r.eloZ)).toBeCloseTo(0, 8)
     expect(sum((r) => r.trueSkillZ)).toBeCloseTo(0, 8)
     expect(sum((r) => r.scoreZ)).toBeCloseTo(0, 8)
+    expect(sum((r) => r.resultsZ)).toBeCloseTo(0, 8)
+  })
+
+  it("re-standardises the averaged results, so a unanimous result reads the same as any other extreme", () => {
+    // winner sweeps win rate, ELO and TrueSkill alike, so averaging them and
+    // re-standardising must not shrink their spread relative to a single raw
+    // z-score -- that shrinkage is exactly the bug re-standardising exists to fix.
+    const winner = rowFor(board, "winner")
+    expect(Math.abs(winner.resultsZ)).toBeGreaterThan(0)
+    // With three players and winner sweeping all results, its resultsZ should be
+    // as extreme as any individual results z-score it was built from -- collapsing
+    // must not quietly turn into an averaging-away of the signal.
+    const maxIndividual = Math.max(Math.abs(winner.winRateZ), Math.abs(winner.eloZ), Math.abs(winner.trueSkillZ))
+    expect(Math.abs(winner.resultsZ)).toBeGreaterThan(maxIndividual * 0.9)
   })
 
   it("puts the winner top on results and the scorer top on score", () => {
@@ -182,6 +210,7 @@ describe("computeImpactBoard: the four standings", () => {
     expect(winner.winRateZ).toBeGreaterThan(scorer.winRateZ)
     expect(winner.eloZ).toBeGreaterThan(scorer.eloZ)
     expect(winner.trueSkillZ).toBeGreaterThan(scorer.trueSkillZ)
+    expect(winner.resultsZ).toBeGreaterThan(scorer.resultsZ)
     expect(scorer.scoreZ).toBeGreaterThan(winner.scoreZ)
   })
 
