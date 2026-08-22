@@ -132,10 +132,22 @@ function topClusterPenalty(
 
   const topPlayerTeam = team1.includes(topPlayer) ? team1 : team2
   const otherTeam = team1.includes(topPlayer) ? team2 : team1
-  const clusterWithTop = topPlayerTeam.filter((p) => topCluster.includes(p)).length
+  // ALLIES beside the top player, not raw cluster membership: the top player is
+  // himself in topCluster, so counting membership charged his side for his own
+  // presence. For an odd cluster that made the unavoidable even ally split
+  // (one cluster-mate each) look like a 2-v-1 stack and priced it at 4000 —
+  // measured over the match history, 67 of 67 odd-cluster lobbies charged the
+  // fair split, and 38 of 53 recommendations herded BOTH cluster-mates onto the
+  // non-top team. Where those two were the lobby's best returners that re-created
+  // the very stack the elite-chaser rule was added to prevent, outbidding it
+  // 4000 to 1200. Sibling rules (the tied path above, bottomClusterPenalty) both
+  // allow unavoidable parity; this one now does too, while keeping the
+  // deliberate one-sidedness: 2-v-0 still costs 8000, and the top player ceding
+  // cluster members to the other side stays free.
+  const alliesWithTop = topPlayerTeam.filter((p) => p !== topPlayer && topCluster.includes(p)).length
   const clusterWithOther = otherTeam.filter((p) => topCluster.includes(p)).length
-  if (clusterWithTop > clusterWithOther) {
-    return (clusterWithTop - clusterWithOther) * CONFIG.cluster.TOP_TWO_PENALTY * 0.5
+  if (alliesWithTop > clusterWithOther) {
+    return (alliesWithTop - clusterWithOther) * CONFIG.cluster.TOP_TWO_PENALTY * 0.5
   }
   return 0
 }
@@ -171,8 +183,14 @@ function bottomClusterPenalty(team1: Player[], team2: Player[]): number {
   const atLowest = everyone.filter((p) => p.tierValue === lowestTier)
   if (atLowest.length === 1) {
     const weakest = atLowest[0]
-    const mine = (team1.includes(weakest) ? team1 : team2).filter((p) => cluster.includes(p)).length
-    const theirs = cluster.length - mine
+    // Companions beside the weakest, not membership including him — the same
+    // correction as the top-cluster rule above. Counting him charged one of the
+    // two equally-even 2-v-1 orientations of an odd cluster, leaving exactly one
+    // legal arrangement: every other weak player pooled opposite him.
+    const mine = (team1.includes(weakest) ? team1 : team2).filter(
+      (p) => p !== weakest && cluster.includes(p),
+    ).length
+    const theirs = cluster.length - 1 - mine
     if (mine > theirs) penalty += (mine - theirs) * CONFIG.cluster.BOTTOM_CLUSTER_PENALTY * 0.5
   }
   return penalty
@@ -209,8 +227,23 @@ function capperChaseSplitPenalty(
   const bestChaseVal = Math.max(...everyone.map(chaseOf))
   const topCappers = everyone.filter((p) => capOf(p) === bestCapperVal)
   const topChasers = everyone.filter((p) => chaseOf(p) === bestChaseVal)
+  // A player is a dual threat when they are the SOLE holder of one critical crown
+  // and hold the other outright or jointly. Requiring BOTH crowns to be unique let
+  // a value tie on either one disarm the rule entirely: the same tie also disarms
+  // the both-vs-neither pair check below (the tied player on the other team makes
+  // that side count as holding the crown), so a de-facto dual threat got no
+  // runner-up protection and the best remaining counter in his role could be
+  // stacked onto his team for free. The trigger even ran backwards — raising the
+  // OPPOSING capper from 9 to 10 deleted a 4000-point constraint from an already
+  // stacked lineup.
+  const soleTopCapper = topCappers.length === 1 ? topCappers[0] : null
+  const soleTopChaser = topChasers.length === 1 ? topChasers[0] : null
   const dualThreat =
-    topCappers.length === 1 && topChasers.length === 1 && topCappers[0] === topChasers[0] ? topCappers[0] : null
+    soleTopCapper && topChasers.includes(soleTopCapper)
+      ? soleTopCapper
+      : soleTopChaser && topCappers.includes(soleTopChaser)
+        ? soleTopChaser
+        : null
 
   if (!dualThreat) {
     const hasTopCapper = (team: Player[]) => team.some((p) => capOf(p) === bestCapperVal)
@@ -505,7 +538,12 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
   // Option line-up: the best split, then the THIRD-best unique split (the old
   // runner-up was always a near-clone of option 1 and never got picked), then the
   // best off-role split — tier balance only, role ratings ignored.
-  const chosen: Array<{ result: (typeof results)[number]; kind: "best" | "alt" | "offrole" }> = [
+  const chosen: Array<{
+    result: (typeof results)[number]
+    kind: "best" | "alt" | "offrole"
+    /** Score to REPORT, when it differs from the one used to select the split. */
+    displayScore?: number
+  }> = [
     { result: uniqueResults[0], kind: "best" },
     { result: uniqueResults[2] ?? uniqueResults[1] ?? uniqueResults[0], kind: "alt" },
   ]
@@ -530,10 +568,19 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
     offRoleResults.find((candidate) =>
       chosen.every(({ result }) => !isSameSplit(candidate.team1, candidate.team2, result.team1, result.team2)),
     ) ?? offRoleResults[0]
-  chosen.push({ result: offRolePick, kind: "offrole" })
+  // Selection stays role-blind — that is the whole point of the card — but the
+  // score REPORTED for it is the full one. evaluateOffRoleSplit keeps every tier
+  // term and drops all role/capper/crown terms, so it is a strict subset of
+  // evaluateSplit's non-negative terms and can never score a split worse than the
+  // honest evaluator does. The card therefore printed the highest confidence of
+  // the three in every lobby measured, while its split was usually the worst of
+  // the three and often left one team unable to field a capper or a chaser.
+  // Scored honestly, the three cards are finally comparable.
+  const offRoleDisplayScore = evaluateSplit(offRolePick.team1, offRolePick.team2, players[0], topCluster).score
+  chosen.push({ result: offRolePick, kind: "offrole", displayScore: offRoleDisplayScore })
 
   // Convert to BalanceOption format
-  return chosen.map(({ result, kind }) => {
+  return chosen.map(({ result, kind, displayScore }) => {
     // Sort teams by tier
     let [redTeam, blueTeam] = [result.team1, result.team2].map((team) =>
       team.sort((a, b) => b.tierValue - a.tierValue),
@@ -593,7 +640,7 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
 
     return {
       result: balanceResult,
-      score: result.score,
+      score: displayScore ?? result.score,
       label,
       description,
     }
@@ -719,6 +766,14 @@ function evaluateEloSplit(team1: Player[], team2: Player[], eloOf: (p: Player) =
   const eliteCappers1 = team1.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
   const eliteCappers2 = team2.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
   score += Math.abs(eliteCappers1 - eliteCappers2) * ELO_CONFIG.CAPPER_STACK_PENALTY
+
+  // Elite-chaser concentration — the mirror the tier evaluator gained after a live
+  // game stacked the lobby's only two chase-9s (Aug 2026). ELO mode shares the crown
+  // rule via capperChaseSplitPenalty but had no equivalent count of its own, so it
+  // could still hoard the returners.
+  const eliteChasers1 = team1.filter((p) => p.roles.Chase >= CONFIG.chase.ELITE_THRESHOLD).length
+  const eliteChasers2 = team2.filter((p) => p.roles.Chase >= CONFIG.chase.ELITE_THRESHOLD).length
+  score += Math.abs(eliteChasers1 - eliteChasers2) * ELO_CONFIG.CAPPER_STACK_PENALTY
 
   // Best-capper / best-chaser separation (mirrors the tier balancer's 3c, at ELO scale).
   score += capperChaseSplitPenalty(
