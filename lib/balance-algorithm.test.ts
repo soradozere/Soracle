@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { balanceTeamsWithOptions } from "@/lib/balance-algorithm"
+import { balanceTeamsWithOptions, evaluateTeams } from "@/lib/balance-algorithm"
 import type { Player } from "@/lib/types"
 
 function mk(
@@ -238,5 +238,54 @@ describe("bottom-cluster draft anchor and constraint repricing", () => {
     for (const option of options) {
       expect(Math.abs(option.result.redTierTotal - option.result.blueTierTotal)).toBeLessThanOrEqual(2)
     }
+  })
+})
+
+describe("tied top tier and elite-chaser spread", () => {
+  // The real 22 Aug 2026 lobby (exact DB ratings at match time) whose shipped
+  // Perfect Balance put cooky and cheese — the lobby's only two chase-9s — on one
+  // team against levi's chase 6, with a 32v30 tier edge on top. Red won 7-3.
+  // Two tie-driven gaps caused it: the anchored top-cluster rule only guarded
+  // Interlude's side (cooky and Interlude tie at 9), and the crown-pair rule was
+  // excused by Interlude tying cooky's capper 8.
+  const disasterLobby = [
+    mk("cooky", 9, 8, 9, 0, 0, 0),
+    mk("cheese", 8, 6, 9, 9, 0, 0),
+    mk("Interlude", 9, 8, 0, 0, 10, 10),
+    mk("levi", 6, 0, 6, 6, 6, 0),
+    mk("sora", 5, 4, 0, 3, 5, 5),
+    mk("riji", 5, 0, 0, 5, 5, 4),
+    mk("vee", 4, 0, 0, 4, 4, 4),
+    mk("Voodoo", 4, 0, 0, 0, 4, 0),
+    mk("savior", 3, 3, 0, 0, 3, 2),
+    mk("ben", 3, 0, 0, 3, 4, 3),
+    mk("matt", 3, 4, 0, 0, 0, 3),
+    mk("quasar", 3, 0, 0, 3, 3, 3),
+  ]
+
+  it("splits the tied-top players in every suggested option", () => {
+    const options = balanceTeamsWithOptions(
+      disasterLobby.map((p) => p.name),
+      disasterLobby,
+    )
+    for (const option of options) {
+      expect(sameTeam(option, "cooky", "Interlude")).toBe(false)
+    }
+  })
+
+  it("does not stack the only two elite chasers in the recommendation", () => {
+    const options = balanceTeamsWithOptions(
+      disasterLobby.map((p) => p.name),
+      disasterLobby,
+    )
+    expect(sameTeam(options[0], "cooky", "cheese")).toBe(false)
+  })
+
+  it("scores a lineup identically regardless of team argument order", () => {
+    const red = ["cooky", "sora", "savior", "ben", "vee", "cheese"]
+    const blue = ["riji", "matt", "Interlude", "Voodoo", "levi", "quasar"]
+    const forward = evaluateTeams(red, blue, disasterLobby)
+    const reversed = evaluateTeams(blue, red, disasterLobby)
+    expect(forward?.score).toBe(reversed?.score)
   })
 })

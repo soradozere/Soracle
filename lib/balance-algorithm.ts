@@ -34,6 +34,14 @@ const CONFIG = {
     TOP_2_WEIGHT: 2.5, // balance each team's top-2 capper pool
     CONCENTRATION_WEIGHT: 300, // squared diff in elite-capper COUNT per team (2-v-0 ≈ 1200)
   },
+  // Mirror of the capper concentration rule for returners, added after a live game
+  // (22 Aug 2026) where the recommendation put the lobby's only two chase-9s on one
+  // team against a chase-6. Role SUMS alone priced that 18-v-6 monopoly at ~115
+  // points; counting the elite bodies per side is what actually spreads them.
+  chase: {
+    ELITE_THRESHOLD: 8,
+    CONCENTRATION_WEIGHT: 300, // squared diff in elite-chaser COUNT per team (2-v-0 ≈ 1200)
+  },
   // Capper and Chase are the two critical roles. The capper terms above split the elite
   // cappers across teams, but nothing stops the single best capper and the single best
   // chase returner from landing together — a frequent complaint, since that one team then
@@ -79,6 +87,57 @@ function getCombinations<T>(arr: T[], k: number): T[][] {
 
   recurse(0, [])
   return result
+}
+
+/*
+ * Top-cluster separation (section 6 of both evaluators). Two regimes:
+ *
+ * UNIQUE top player: the original rule — the #1 must not hold more top-cluster
+ * allies than the other team. One-sided on purpose: the lone star ceding extra
+ * cluster members to the other side is a handicap, not a stack.
+ *
+ * TIED top tier: there is no unique star to protect, and anchoring on one of the
+ * tied players made the rule one-eyed — joining the anchor cost 8000 while
+ * joining the other tied player was free, so the rule FORCED the remaining
+ * cluster members onto the non-anchor's team (22 Aug 2026: cooky and Interlude
+ * tied at 9; cheese was pushed onto cooky's side, stacking the lobby's only two
+ * chase-9s in the shipped recommendation). With a tie both checks go symmetric:
+ * the tied-strongest spread as evenly as possible and so does the full cluster,
+ * with imbalance beyond unavoidable parity penalized whichever side holds it.
+ * The tied path uses no anchor at all, which also cures evaluateTeams scoring a
+ * lineup differently depending on argument order (its old tier-only sort could
+ * crown a different tied player than the search's tier-then-role-sum sort).
+ */
+function topClusterPenalty(
+  team1: Player[],
+  team2: Player[],
+  topPlayer: Player,
+  topCluster: Player[],
+): number {
+  const totalPlayers = team1.length + team2.length
+  // Only a genuine minority clusters; at half the lobby or more this is noise.
+  if (topCluster.length >= totalPlayers / 2) return 0
+
+  const maxTier = topPlayer.tierValue
+  const maxTierPlayers = topCluster.filter((p) => p.tierValue === maxTier)
+
+  if (maxTierPlayers.length >= 2) {
+    const spread = (group: Player[]) => {
+      const in1 = team1.filter((p) => group.includes(p)).length
+      const excess = Math.abs(in1 * 2 - group.length) - (group.length % 2)
+      return excess > 0 ? excess * CONFIG.cluster.TOP_TWO_PENALTY * 0.5 : 0
+    }
+    return spread(maxTierPlayers) + spread(topCluster)
+  }
+
+  const topPlayerTeam = team1.includes(topPlayer) ? team1 : team2
+  const otherTeam = team1.includes(topPlayer) ? team2 : team1
+  const clusterWithTop = topPlayerTeam.filter((p) => topCluster.includes(p)).length
+  const clusterWithOther = otherTeam.filter((p) => topCluster.includes(p)).length
+  if (clusterWithTop > clusterWithOther) {
+    return (clusterWithTop - clusterWithOther) * CONFIG.cluster.TOP_TWO_PENALTY * 0.5
+  }
+  return 0
 }
 
 // Bottom-cluster separation — the mirror of the top-player rule in section 6. Manual
@@ -237,6 +296,13 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const eliteCappers2 = team2.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
   score += Math.pow(eliteCappers1 - eliteCappers2, 2) * CONFIG.capper.CONCENTRATION_WEIGHT
 
+  // Elite-chaser concentration — see CONFIG.chase. The crown-pair rule below can be
+  // excused by a capper-value tie on the other team, so without this count the two
+  // best returners can legally end up together.
+  const eliteChasers1 = team1.filter((p) => p.roles.Chase >= CONFIG.chase.ELITE_THRESHOLD).length
+  const eliteChasers2 = team2.filter((p) => p.roles.Chase >= CONFIG.chase.ELITE_THRESHOLD).length
+  score += Math.pow(eliteChasers1 - eliteChasers2, 2) * CONFIG.chase.CONCENTRATION_WEIGHT
+
   // 3c. Best-capper / best-chaser separation. See capperChaseSplitPenalty.
   score += capperChaseSplitPenalty(
     team1,
@@ -271,22 +337,8 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const mic1 = team1.filter((p) => p.mic).length
   const mic2 = team2.filter((p) => p.mic).length
 
-  // 6. Top player separation — the #1 player should not be teamed with too many other top-cluster players.
-  // Only applies when the top cluster is a genuine minority; if half or more of the lobby is at the top tier,
-  // clustering is meaningless and this check becomes noise.
-  const totalPlayers = team1.length + team2.length
-  if (topCluster.length < totalPlayers / 2) {
-    const topPlayerTeam = team1.includes(topPlayer) ? team1 : team2
-    const otherTeam = team1.includes(topPlayer) ? team2 : team1
-    const clusterWithTop = topPlayerTeam.filter((p) => topCluster.includes(p)).length
-    const clusterWithOther = otherTeam.filter((p) => topCluster.includes(p)).length
-
-    // Graduated penalty: heavier when top player has significantly more cluster allies
-    if (clusterWithTop > clusterWithOther) {
-      const clusterImbalance = clusterWithTop - clusterWithOther
-      score += clusterImbalance * CONFIG.cluster.TOP_TWO_PENALTY * 0.5
-    }
-  }
+  // 6. Top-cluster separation — see topClusterPenalty for the unique-vs-tied regimes.
+  score += topClusterPenalty(team1, team2, topPlayer, topCluster)
 
   // 7. Bottom-cluster separation — the weakest players must be spread across teams,
   // like a draft's final picks. See bottomClusterPenalty.
@@ -326,16 +378,7 @@ function evaluateOffRoleSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const mic1 = team1.filter((p) => p.mic).length
   const mic2 = team2.filter((p) => p.mic).length
 
-  const totalPlayers = team1.length + team2.length
-  if (topCluster.length < totalPlayers / 2) {
-    const topPlayerTeam = team1.includes(topPlayer) ? team1 : team2
-    const otherTeam = team1.includes(topPlayer) ? team2 : team1
-    const clusterWithTop = topPlayerTeam.filter((p) => topCluster.includes(p)).length
-    const clusterWithOther = otherTeam.filter((p) => topCluster.includes(p)).length
-    if (clusterWithTop > clusterWithOther) {
-      score += (clusterWithTop - clusterWithOther) * CONFIG.cluster.TOP_TWO_PENALTY * 0.5
-    }
-  }
+  score += topClusterPenalty(team1, team2, topPlayer, topCluster)
 
   score += bottomClusterPenalty(team1, team2)
 
@@ -578,8 +621,16 @@ export function evaluateTeams(
     return null
   }
 
-  // Determine top player and cluster from the combined teams
-  const allPlayed = [...redTeam, ...blueTeam].sort((a, b) => b.tierValue - a.tierValue)
+  // Determine top player and cluster from the combined teams. The sort MUST match
+  // balanceTeamsWithOptions (tier, then role sum, then name): with a tied top tier a
+  // tier-only stable sort crowned whichever tied player the caller happened to list
+  // first, and the same lineup scored 4000 apart depending on argument order.
+  const roleSumOf = (p: Player) => ROLES.reduce((sum, role) => sum + p.roles[role], 0)
+  const allPlayed = [...redTeam, ...blueTeam].sort((a, b) => {
+    if (b.tierValue !== a.tierValue) return b.tierValue - a.tierValue
+    if (roleSumOf(b) !== roleSumOf(a)) return roleSumOf(b) - roleSumOf(a)
+    return a.name.localeCompare(b.name)
+  })
   const topPlayer = allPlayed[0]
   const topTier = topPlayer.tierValue
   const secondTier = allPlayed.find((p) => p.tierValue < topTier)?.tierValue ?? topTier
