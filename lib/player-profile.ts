@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/client"
 import { rankBy, rankByName } from "./rank-order"
+import { killDeathRatio } from "./kd"
 import { applyMatchElo, seedFromTier } from "@/lib/elo"
 import { BADGE_PRIORITY } from "@/lib/badge-meta"
 import {
@@ -540,7 +541,7 @@ function computeMonthlyHonours(
     const minStatMatches = Math.max(2, Math.ceil(statMatchCount * MONTHLY_MIN_FRACTION))
     const bestKD = Array.from(kd.entries())
       .filter(([, r]) => r.statMatches >= minStatMatches && r.kills > 0)
-      .map(([name, r]) => [name, r.deaths === 0 ? r.kills : r.kills / r.deaths] as const)
+      .map(([name, r]) => [name, killDeathRatio(r.kills, r.deaths)] as const)
       .sort(rankBy(([name]) => name, (a, b) => b[1] - a[1]))[0]
     const topKD = bestKD ? { name: bestKD[0], kd: bestKD[1] } : null
 

@@ -61,7 +61,7 @@ export async function readAutoCalibrationEnabledAt(supabase: SupabaseClient): Pr
  *
  * Deliberately NOT used: ELO, TrueSkill, win rate boards (month-scale split-half
  * reliability 0.13 / −0.22 / 0.03 — noise), per-stat performance and the Impact
- * rating (excluded by Sam while that board is still being reworked).
+ * rating (excluded by Sora while that board is still being reworked).
  *
  * Cadence is per-player, Overwatch-style: every saved match evaluates its twelve
  * participants, each against their own rolling window. Small samples pay a
