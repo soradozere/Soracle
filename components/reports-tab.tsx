@@ -29,7 +29,7 @@ import { checkIsAdmin } from "@/lib/is-admin"
 import { TierChangelog } from "@/components/tier-changelog"
 import { EloLeaderboard } from "@/components/elo-leaderboard"
 import { TrueSkillLeaderboard } from "@/components/trueskill-leaderboard"
-import { ImpactLeaderboard } from "@/components/impact-leaderboard"
+import { ProductionLeaderboard } from "@/components/production-leaderboard"
 import {
   LineChart,
   Line,
@@ -346,11 +346,11 @@ export function ReportsTab() {
    * different maths.
    */
   const [currentView, setCurrentView] = useState<"stats" | "leaderboard" | "alltime" | "wrapped">("stats")
-  const [boardView, setBoardView] = useState<"normal" | "elo" | "trueskill" | "impact">("normal")
+  const [boardView, setBoardView] = useState<"normal" | "elo" | "trueskill" | "production">("normal")
   // The All-Time tab shows the same two rating boards, so it needs its own
   // selection -- sharing boardView would leave it on "Wins", which has no
   // all-time form.
-  const [allTimeBoard, setAllTimeBoard] = useState<"wins" | "elo" | "trueskill" | "impact">("wins")
+  const [allTimeBoard, setAllTimeBoard] = useState<"wins" | "elo" | "trueskill" | "production">("wins")
   // Every match ever played, for the all-time Wins board. Fetched separately
   // from the month's matches and only once the admin-only All-Time tab is
   // actually opened -- no reason to pull the whole history for a page most
@@ -938,7 +938,7 @@ export function ReportsTab() {
               { key: "wins", label: "Wins", hint: "Won and lost across every match on record" },
               { key: "elo", label: "ELO", hint: "Running rating across every match ever played" },
               { key: "trueskill", label: "TrueSkill", hint: "Rating with a confidence interval" },
-              { key: "impact", label: "Impact", hint: "Production across every match with a scoreboard" },
+              { key: "production", label: "Impact", hint: "Experimental — what players did, with every role priced to pay the same" },
             ]}
           />
           <p className="text-sm italic text-[var(--color-text-dim)]">
@@ -960,7 +960,7 @@ export function ReportsTab() {
               { key: "normal", label: "Wins", hint: "Won and lost, this month" },
               { key: "elo", label: "ELO", hint: "Running rating, replayed from every match" },
               { key: "trueskill", label: "TrueSkill", hint: "Rating with a confidence interval" },
-              { key: "impact", label: "Impact", hint: "Ranked on what you did, not who you played with" },
+              { key: "production", label: "Impact", hint: "Experimental — ranked on what you did, not who you played with" },
             ]}
           />
           {isCurrentMonth && boardView === "normal" && (
@@ -1007,11 +1007,8 @@ export function ReportsTab() {
           )
         ) : allTimeBoard === "elo" ? (
           <EloLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="alltime" />
-        ) : allTimeBoard === "impact" ? (
-          // All-time Impact covers every match we hold a scoreboard for, which is a
-          // shorter history than the Wins board's — it says so itself rather than
-          // pretending the earlier, unstatted months simply had no production in them.
-          <ImpactLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="alltime" />
+        ) : allTimeBoard === "production" ? (
+          <ProductionLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="alltime" />
         ) : (
           <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="alltime" />
         )
@@ -1023,14 +1020,10 @@ export function ReportsTab() {
         // TrueSkill is likewise a running rating replayed fresh; the month selector drives
         // its own All-time / Monthly toggle.
         <TrueSkillLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="month" />
-      ) : currentView === "leaderboard" && boardView === "impact" ? (
-        // Deliberately above the "no matches this month" early return, alongside ELO and
-        // TrueSkill. Impact needs scoreboards, not merely matches, and scoreboards only
-        // start in June 2026 — so a month can have plenty of matches and still have
-        // nothing to rank. Letting it fall through would answer that with the generic
-        // "no matches logged" panel, which is simply untrue for March to May; the board
-        // renders its own empty state that explains which of the two is missing.
-        <ImpactLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="month" />
+      ) : currentView === "leaderboard" && boardView === "production" ? (
+        // Above the "no matches this month" early return for the same reason as Impact:
+        // this board needs scoreboards, not merely matches, and those start in June 2026.
+        <ProductionLeaderboard year={selectedYear} month={selectedMonth} isAdmin={isAdmin} scope="month" />
       ) : totalMatches === 0 ? (
         <div className="text-center py-12 text-[var(--color-text-dim)]">
           <BarChart3 className="w-12 h-12 mx-auto mb-4 opacity-50" />
