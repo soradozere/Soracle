@@ -29,6 +29,77 @@ const NAV: Segment[] = [
   { key: "/demos", href: "/demos", label: "Demos", icon: Film },
 ]
 
+// On hover, the title dissolves into AurekBesh — the game's own Latin title
+// decoding into the in-universe alien alphabet.
+// StarJedi as the default face was tried and dropped (it just looked bad);
+// this keeps the site's normal Orbitron as the resting state and only brings
+// in a custom font for the hover payoff.
+//
+// The trigger is group/title on the brand *link* (site-header's outer <Link>,
+// not this component), not on the heading itself — hovering the 3D logo or
+// the empty space beside the text decodes it too, matching the whole block's
+// bounce-on-hover, so the two read as one "this is the home button" affordance
+// rather than the title having its own separate, smaller hover target.
+//
+// Two identical strings, stacked in the same grid cell (col/row-start-1 on
+// both), rather than one relabelled span: no font can be *animated* into
+// another's glyph outlines, only crossfaded, so the illusion is two static
+// layers trading opacity. Split into per-character spans so the crossfade
+// sweeps left-to-right like a decode rather than flipping as one flat block —
+// the AurekBesh layer staggers in reverse-index so its wave visually follows
+// the Orbitron layer's wave the same direction rather than closing on it from
+// the other end.
+//
+// AurekBesh runs a size smaller: its glyphs are heavier/wider than Orbitron's
+// at the same font-size (different font, different metrics), so matching the
+// declared size still read as oversized against the rest of the masthead.
+//
+// aria-hidden on both layers plus one aria-label on the heading: screen
+// readers get the real string once, not the same text twice over.
+const MASTHEAD_TITLE = "JK2 CAPTURE THE FLAG"
+const MASTHEAD_TITLE_CHARS = Array.from(MASTHEAD_TITLE)
+const DECODE_STAGGER_MS = 16
+
+function MastheadTitle() {
+  return (
+    <h1
+      aria-label={MASTHEAD_TITLE}
+      className="relative grid text-[17px] font-bold glow-text tracking-[0.06em] leading-tight"
+    >
+      <span
+        aria-hidden
+        className="col-start-1 row-start-1 whitespace-nowrap"
+        style={{ fontFamily: "var(--font-orbitron)" }}
+      >
+        {MASTHEAD_TITLE_CHARS.map((char, i) => (
+          <span
+            key={`ob-${i}`}
+            className="inline-block opacity-100 blur-none transition duration-300 ease-out group-hover/title:opacity-0 group-hover/title:blur-[3px]"
+            style={{ transitionDelay: `${i * DECODE_STAGGER_MS}ms` }}
+          >
+            {char === " " ? " " : char}
+          </span>
+        ))}
+      </span>
+      <span
+        aria-hidden
+        className="col-start-1 row-start-1 whitespace-nowrap text-[11px]"
+        style={{ fontFamily: "var(--font-aurek-besh)" }}
+      >
+        {MASTHEAD_TITLE_CHARS.map((char, i) => (
+          <span
+            key={`ab-${i}`}
+            className="inline-block opacity-0 blur-[3px] transition duration-300 ease-out group-hover/title:opacity-100 group-hover/title:blur-none"
+            style={{ transitionDelay: `${(MASTHEAD_TITLE_CHARS.length - 1 - i) * DECODE_STAGGER_MS}ms` }}
+          >
+            {char === " " ? " " : char}
+          </span>
+        ))}
+      </span>
+    </h1>
+  )
+}
+
 export function SiteHeader() {
   const pathname = usePathname()
   const [currentTheme, setCurrentTheme] = useState<ThemeName>("jedi")
@@ -102,7 +173,12 @@ export function SiteHeader() {
         <div className="flex flex-wrap items-center justify-between gap-4">
           <Link
             href="/"
-            className="flex items-center gap-3 min-w-0 flex-1 basis-[420px] hover:opacity-90 transition-opacity"
+            className="group/title flex items-center gap-3 min-w-0 flex-1 basis-[420px] transition duration-300 hover:opacity-90 hover:-translate-y-0.5 hover:scale-[1.03]"
+            // A back-out easing curve, not Tailwind's ease-out: this one's control
+            // points push y briefly past 1 before settling, so the lift overshoots
+            // and eases back — that overshoot IS the bounce, not a keyframe loop.
+            // Reads as "this is a button" the way opacity alone didn't.
+            style={{ transitionTimingFunction: "cubic-bezier(0.34, 1.56, 0.64, 1)" }}
           >
             <span
               className="w-11 h-11 rounded-xl grid place-items-center shrink-0 overflow-hidden"
@@ -134,12 +210,7 @@ export function SiteHeader() {
               </div>
             </span>
             <div className="min-w-0">
-              <h1
-                className="text-[17px] font-bold glow-text tracking-[0.06em] leading-tight"
-                style={{ fontFamily: "var(--font-orbitron)" }}
-              >
-                JK2 CAPTURE THE FLAG
-              </h1>
+              <MastheadTitle />
               {/* Truncates rather than wraps: this line is the widest thing in
                   the masthead, and letting it demand its full width is what
                   starves the nav. */}

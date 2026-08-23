@@ -1,6 +1,7 @@
 import type React from "react"
 import type { Metadata } from "next"
 import { Inter, Oxanium, Orbitron } from "next/font/google"
+import localFont from "next/font/local"
 import { Analytics } from "@vercel/analytics/next"
 import "./globals.css"
 import { Toaster } from "@/components/ui/toaster"
@@ -25,6 +26,20 @@ const orbitron = Orbitron({
   subsets: ["latin"],
   weight: ["700", "800"],
   variable: "--font-orbitron",
+})
+
+// Masthead-title hover effect, Orbitron -> AurekBesh (see MastheadTitle in
+// components/site-header.tsx). A fan font (Boba Fonts, freeware/personal-use)
+// supplied by Sam from his Downloads folder — worth a licence check.
+//
+// Its pairing, StarJediHollow, was tried as the title's resting face and
+// dropped for looking bad; Orbitron (above) stayed the default instead. Its
+// font file, and the localFont() call that loaded it, were removed with it —
+// no reason to ship a font nothing renders.
+const aurekBesh = localFont({
+  src: "./fonts/AurekBesh.ttf",
+  variable: "--font-aurek-besh",
+  display: "swap",
 })
 
 const SITE_DESCRIPTION = "6v6 Capture the Flag team balancer for Star Wars Jedi Knight 2: Jedi Outcast"
@@ -53,7 +68,10 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="en" className={`${inter.variable} ${oxanium.variable} ${orbitron.variable}`}>
+    <html
+      lang="en"
+      className={`${inter.variable} ${oxanium.variable} ${orbitron.variable} ${aurekBesh.variable}`}
+    >
       <body>
         {children}
         <Toaster />
