@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Hammer, HelpCircle, RefreshCw } from "lucide-react"
+import { Hammer, HelpCircle, ListChecks, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -25,8 +25,12 @@ import {
   type ProductionStatRow,
 } from "@/lib/production-rating"
 
-// The Production board — an early look at rating a month on what players did rather
-// than on what the scoreboard said at the end.
+// The Impact board — rating a month on what players did rather than on what the
+// scoreboard said at the end.
+//
+// NAMING: displayed as "Impact", but the files are named production-* because
+// lib/impact-rating.ts is the PREVIOUS Impact board (win rate + ELO + TrueSkill +
+// score per game), left in place but unwired so it can be restored in one line.
 //
 // All of the maths lives in lib/production-rating.ts; this file only fetches and
 // draws. Nothing is persisted — the board is derived fresh from matches +
@@ -202,7 +206,7 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
       setBoard(result)
     } catch (err) {
       if (stale()) return
-      setError(err instanceof Error ? err.message : "Failed to calculate production ratings")
+      setError(err instanceof Error ? err.message : "Failed to calculate Impact ratings")
     }
 
     if (stale()) return
@@ -226,7 +230,7 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
         <div className="space-y-1">
           <h3 className="flex items-center gap-2 text-lg font-semibold text-[var(--color-text)]">
             <Hammer className="w-5 h-5" aria-hidden />
-            Production
+            Impact
             <span className="rounded-full border border-[var(--color-accent-yellow)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-accent-yellow)]">
               Experimental
             </span>
@@ -304,6 +308,107 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                     statistically indistinguishable from chance. So the other 75% measures the
                     half of the game the draw cannot equalise, and the board is checked for
                     consistency rather than against results.
+                  </p>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <ListChecks className="w-4 h-4 mr-1.5" aria-hidden />
+                Open questions
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>What we are still unsure about</DialogTitle>
+                <DialogDescription>
+                  This board is experimental. Here is everything we know is unsettled, so you
+                  can argue with it rather than guess at it.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 text-sm text-[var(--color-text-dim)]">
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
+                    A possible bug: assists might be paid twice
+                  </h4>
+                  <p>
+                    Assists track returns almost exactly — they move together 0.95 out of 1
+                    across players — yet both are priced separately and both sit in the Return
+                    job. If they are the same act counted twice, returners are over-credited by
+                    roughly a tenth of the board. Returners are currently the lowest-rated group,
+                    so fixing this would push them <em>down</em>, not up.
+                  </p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
+                    Prices set by judgement, not by data
+                  </h4>
+                  <p>
+                    The order of the stats is a call about JK2, not a measurement — nothing in the
+                    data can settle what a capture is worth against a base clean. Specifically
+                    unconfirmed: a mine grab is currently worth about two flag grabs, and it is
+                    what carries the top mine-heavy players. Assists are priced 4th. W/L counts
+                    for 25%, which costs some accuracy in exchange for reflecting results.
+                  </p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
+                    Combat is not measured at all
+                  </h4>
+                  <p>
+                    Kills, K/D and sentry kills were each tested and left out. Every one of them
+                    turned out to be a base-cleaner stat rather than a general one: per minute,
+                    base cleaners kill 28% above average and support players only 9%. Base
+                    cleaners fight in their own base with mines and a spawn behind them, so this
+                    scoreboard can only see combat through their circumstances. Adding K/D lifts
+                    base cleaners 6.7% and pushes everyone else down.
+                  </p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
+                    Support players rate about 13% low
+                  </h4>
+                  <p>
+                    Their only measurable output is mine work. Promoting mine grabs took this from
+                    17% to 12%, and sentry kills, kills and base cleans were all tested as fixes
+                    and rejected. The rest is missing data rather than bad weighting — the
+                    scoreboard does not record most of what a support player actually does.
+                  </p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
+                    The fairness check rests on guessed roles
+                  </h4>
+                  <p>
+                    Weights are tuned until each role&apos;s median player scores the same — but
+                    nobody tells us who plays what, so roles are inferred from the scoreboard and
+                    that guess agrees with the hand-written roster only about 57% of the time.
+                    The measured role gap swung from 2% to 18% purely on a change to how support
+                    players were identified. Treat &ldquo;every role pays the same&rdquo; as
+                    approximately true, not exactly.
+                  </p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">Not yet checked</h4>
+                  <p>
+                    June and July have never been eyeballed, only August. The all-time view has
+                    not been reviewed at all. The qualifying bar (30% of the month&apos;s statted
+                    matches) was inherited from the old board rather than chosen for this one.
+                  </p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
+                    What we can never settle here
+                  </h4>
+                  <p>
+                    We cannot check this board against winning. Teams are close enough that win
+                    rates come out statistically indistinguishable from coin flips, so there is no
+                    scoreboard for &ldquo;who was actually best&rdquo; to test against. Everything
+                    above is measured for <em>consistency</em> — the board says the same thing
+                    about a player from one half of the month to the other — which is not the same
+                    as being right.
                   </p>
                 </div>
               </div>
