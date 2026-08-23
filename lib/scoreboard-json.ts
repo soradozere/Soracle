@@ -100,7 +100,13 @@ export function parseScoreboardJsonText(
 
   const rows: CsvRow[] = []
   for (const entry of entries) {
-    if (!entry?.csvData) continue
+    // An entry with an EMPTY csvData object ({}) is truthy, so `!entry?.csvData`
+    // alone lets it through — happened for real, 22 Aug 2026, four ghost
+    // playerData entries with no fields at all, presumably an unused session
+    // slot. They aren't a real participant, blank name or otherwise (a genuine
+    // blank-named player still carries every other column), so they must not
+    // reach the review screen as a mappable "empty player".
+    if (!entry?.csvData || Object.keys(entry.csvData).length === 0) continue
     const row: CsvRow = { ...entry.csvData }
     // See the note above: TELE only ever appears as a killTypes key.
     row["TELE-KILLS"] = String(entry.killTypes?.TELE ?? 0)
