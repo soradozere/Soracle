@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { MODEL_BUCKET, MODEL_URL_TTL_SECONDS, findPlayerModel, findSkinAsset } from "@/lib/player-models"
 import { findPropAsset } from "@/lib/prop-assets"
+import { findMastheadAsset } from "@/lib/masthead-assets"
 
 // Mints a short-lived signed URL for a JK2 player model.
 //
@@ -17,8 +18,9 @@ import { findPropAsset } from "@/lib/prop-assets"
 //
 // The `id` is looked up in the catalogue rather than used as a path, so this
 // route can only ever sign objects we ship — no traversal, no enumeration. It
-// serves three catalogues: player models, the skin textures that repaint them,
-// and the shared props (saber hilt, blade textures) that hang off them.
+// serves four catalogues: player models, the skin textures that repaint them,
+// the shared props (saber hilt, blade textures) that hang off them, and the
+// masthead's rotating logo.
 //
 // Two shapes: `?id=` resolves one asset (the model .glb), `?ids=a,b,c`
 // resolves a set in ONE storage round trip via createSignedUrls. The batch
@@ -30,7 +32,7 @@ import { findPropAsset } from "@/lib/prop-assets"
 const MAX_BATCH = 64
 
 function resolveFile(id: string | null) {
-  return findPlayerModel(id)?.file ?? findSkinAsset(id) ?? findPropAsset(id)
+  return findPlayerModel(id)?.file ?? findSkinAsset(id) ?? findPropAsset(id) ?? findMastheadAsset(id)
 }
 
 export async function GET(request: Request) {
