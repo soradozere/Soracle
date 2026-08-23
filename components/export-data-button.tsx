@@ -6,6 +6,7 @@ import { Download, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
+import { balanceConfidencePct } from "@/lib/balance-confidence"
 
 // One-click export of all non-sensitive Soracle data as a multi-sheet Excel
 // workbook, for community analysis. Deliberately excluded: discord ids,
@@ -123,7 +124,12 @@ export function ExportDataButton() {
           blue_tier_total: blueTier,
           predicted_stronger: predicted,
           prediction_correct: winner === "Draw" || predicted === "Even" ? "" : predicted === winner ? "yes" : "no",
-          balance_confidence: m.balance_confidence ?? "",
+          // The column stores the raw evaluator score (lower is better,
+          // unbounded), which means nothing to a reader of a spreadsheet.
+          // Export the percentage the balancer actually showed instead, and
+          // leave it blank when no balancer ran rather than implying a result.
+          balance_confidence_pct:
+            m.balance_confidence === null ? "" : balanceConfidencePct(m.balance_confidence),
         }
       })
 

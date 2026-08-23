@@ -117,7 +117,8 @@ export function ReviewScreen({ pendingId }: { pendingId: string }) {
         red_score: data.redScore,
         blue_score: data.blueScore,
         match_type: data.matchType ?? "manual",
-        balance_confidence: 0,
+        // No balancer ran on a reviewed scoreboard — unknown, not flawless.
+        balance_confidence: null,
         played_at: data.matchPlayedAtIso,
         match_stats: data.matchStats,
       }),
