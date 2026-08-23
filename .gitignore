@@ -27,6 +27,11 @@ tsconfig.tsbuildinfo
 # asset to test against.
 public/models/*.glb
 !public/models/fox.glb
+# Exception, decided deliberately: the masthead emblem and its four textures
+# (logo-diffuse, logo-env, saber-core, saber-glow) ship in the repo rather than
+# the bucket, because the masthead renders on every page and cannot wait on a
+# signed URL. Same Raven/Activision caveat as everything above applies.
+!public/models/jk2logo.glb
 public/models/saber-hilt.glb
 public/models/saber/
 public/models/props/

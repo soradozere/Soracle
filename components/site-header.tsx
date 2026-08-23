@@ -2,11 +2,11 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
-import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { ThemeSelector } from "@/components/theme-selector"
 import { AccountMenu } from "@/components/account-menu"
 import { SegmentedRail, type Segment } from "@/components/segmented-rail"
+import { MastheadLogo3D } from "@/components/masthead-logo-3d"
 import { themes, applyTheme, type ThemeName } from "@/lib/themes"
 import { useToast } from "@/hooks/use-toast"
 import { History, BarChart3, Users, Film, Scale } from "lucide-react"
@@ -105,7 +105,7 @@ export function SiteHeader() {
             className="flex items-center gap-3 min-w-0 flex-1 basis-[420px] hover:opacity-90 transition-opacity"
           >
             <span
-              className="w-11 h-11 rounded-xl grid place-items-center shrink-0"
+              className="w-11 h-11 rounded-xl grid place-items-center shrink-0 overflow-hidden"
               style={{
                 border: "1px solid color-mix(in srgb, var(--color-primary) 38%, transparent)",
                 background: `radial-gradient(120% 120% at 30% 10%, color-mix(in srgb, var(--color-primary) 26%, transparent), transparent 70%),
@@ -114,14 +114,24 @@ export function SiteHeader() {
                   "inset 0 1px 0 var(--glass-spec), 0 0 18px -6px color-mix(in srgb, var(--color-primary) 60%, transparent)",
               }}
             >
-              <Image
-                src="/logo.png"
-                alt="JK2 Logo"
-                width={30}
-                height={30}
-                className="w-[30px] h-[30px] object-contain"
-                style={{ filter: "drop-shadow(0 0 6px color-mix(in srgb, var(--color-primary) 55%, transparent))" }}
-              />
+              {/* Matches the parent box exactly (44px), and three details here
+                  are load-bearing:
+                  - Must stay a definite size, never w-full/h-full. The parent
+                    is a grid with place-items-center, so the item is
+                    content-sized and a percentage height has no definite
+                    containing block to resolve against — R3F's Canvas then
+                    falls back to its 300x150 default and the icon vanishes.
+                  - No drop-shadow filter. It shaped a glow around the old
+                    small emblem, but now the blade reaches the edges, so the
+                    filter traces that bright bar and smears it past the box.
+                    The span's boxShadow already supplies the halo.
+                  - The parent needs its own overflow-hidden: the span's 1px
+                    border makes its content box 42px, so this 44px child
+                    overhangs by 1px top and bottom, and the blade is bright
+                    enough that the sliver reads as the saber escaping. */}
+              <div className="w-[44px] h-[44px] rounded-xl overflow-hidden">
+                <MastheadLogo3D />
+              </div>
             </span>
             <div className="min-w-0">
               <h1
