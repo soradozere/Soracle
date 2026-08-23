@@ -33,7 +33,9 @@ export function ManualMatchLogButton({ onLogged }: { onLogged: () => void }) {
         red_score: data.redScore,
         blue_score: data.blueScore,
         match_type: data.matchType ?? "manual",
-        balance_confidence: 0,
+        // Hand-logged: no balancer ran, so there is no score. Not 0 — that
+        // is the value of a flawless split (see lib/balance-confidence.ts).
+        balance_confidence: null,
         played_at: data.matchPlayedAtIso,
         match_stats: data.matchStats,
       }),

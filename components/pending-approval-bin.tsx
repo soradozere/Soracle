@@ -115,7 +115,8 @@ export function PendingApprovalBin({
         red_score: data.redScore,
         blue_score: data.blueScore,
         match_type: data.matchType ?? "manual",
-        balance_confidence: 0,
+        // No balancer ran on an approved upload — unknown, not flawless.
+        balance_confidence: null,
         played_at: data.matchPlayedAtIso,
         match_stats: data.matchStats,
       }),

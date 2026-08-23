@@ -3,34 +3,7 @@
 import type { BalanceResult, Player } from "@/lib/types"
 import { Check } from 'lucide-react'
 import { memo } from "react"
-
-/**
- * Converts raw balance penalty score to a confidence percentage.
- * Uses exponential decay — small differences near 0 matter more
- * than large differences at the high end.
- *
- * Score 0    → 100%  (perfect split)
- * Score 12   → ~95%  (excellent)
- * Score 50   → ~85%  (solid)
- * Score 150  → ~65%  (noticeable gaps)
- * Score 500+ → floors at 30%
- */
-function getBalanceConfidence(score: number): number {
-  const k = 0.004   // Decay rate
-  const floor = 30   // Minimum — even bad balances don't show 0%
-  const raw = floor + (100 - floor) * Math.exp(-k * score)
-  return Math.round(raw)
-}
-
-function getConfidenceColor(confidence: number): { bg: string; text: string } {
-  if (confidence >= 80) {
-    return { bg: "bg-[#27ae60]/20", text: "text-[#27ae60]" }
-  } else if (confidence >= 60) {
-    return { bg: "bg-[#f39c12]/20", text: "text-[#f39c12]" }
-  } else {
-    return { bg: "bg-[#ff4757]/20", text: "text-[#ff4757]" }
-  }
-}
+import { balanceConfidencePct, confidenceColor } from "@/lib/balance-confidence"
 
 interface BalanceOption {
   result: BalanceResult
@@ -144,8 +117,8 @@ export const BalanceOptions = memo(function BalanceOptions({
                 <div className="flex justify-between items-center">
                   <span className="text-[#c5c6c7]">Balance:</span>
                   {(() => {
-                    const confidence = getBalanceConfidence(option.score)
-                    const colors = getConfidenceColor(confidence)
+                    const confidence = balanceConfidencePct(option.score)
+                    const colors = confidenceColor(confidence)
                     return (
                       <span className="flex items-center gap-2">
                         <span

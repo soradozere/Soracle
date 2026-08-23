@@ -10,8 +10,9 @@ import { Check, X, Loader2 } from "lucide-react"
 interface MatchLogFormProps {
   redTeam: string[]
   blueTeam: string[]
-  balanceConfidence: number
-  matchType: "normal" | "competitive"
+  /** Raw evaluator score, or null when no balancer ran. */
+  balanceConfidence: number | null
+  matchType: "algorithm" | "manual"
   onSuccess?: () => void
 }
 

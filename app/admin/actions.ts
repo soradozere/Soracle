@@ -243,8 +243,9 @@ export async function logMatch(data: {
   blue_team: string[]
   red_score: number
   blue_score: number
-  match_type: "normal" | "competitive"
-  balance_confidence: number
+  match_type: "algorithm" | "manual"
+  /** Raw evaluator score, or null when no balancer ran. Never 0 for "unknown". */
+  balance_confidence: number | null
   notes?: string
   played_at?: string
 }) {
@@ -324,7 +325,8 @@ type MatchWithStatsPayload = {
   red_score: number
   blue_score: number
   match_type: string
-  balance_confidence: number
+  /** Raw evaluator score, or null when no balancer ran. Never 0 for "unknown". */
+  balance_confidence: number | null
   notes?: string
   played_at: string | null
   match_stats: Array<Record<string, unknown>>
