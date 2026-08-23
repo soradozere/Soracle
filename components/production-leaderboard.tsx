@@ -1,0 +1,441 @@
+"use client"
+
+import { useEffect, useState } from "react"
+import { createClient } from "@/lib/supabase/client"
+import { Hammer, HelpCircle, RefreshCw } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog"
+import { RankMedal } from "@/components/rank-medal"
+import {
+  ALL_TIME_MIN_MATCHES,
+  MONTHLY_MIN_FRACTION,
+  computeProductionBoard,
+  type Job,
+  type ProductionBoard,
+  type ProductionMatch,
+  type ProductionPlayer,
+  type ProductionRow,
+  type ProductionStatRow,
+} from "@/lib/production-rating"
+
+// The Production board — an early look at rating a month on what players did rather
+// than on what the scoreboard said at the end.
+//
+// All of the maths lives in lib/production-rating.ts; this file only fetches and
+// draws. Nothing is persisted — the board is derived fresh from matches +
+// match_stats on every load.
+
+const MONTH_NAMES = [
+  "January", "February", "March", "April", "May", "June",
+  "July", "August", "September", "October", "November", "December",
+]
+
+/** Scoreboards only exist from this date; before it there is nothing to rate. */
+const SCOREBOARD_ERA = "1 June 2026"
+
+const STAT_COLUMNS =
+  "match_id, player_id, team, captures, flag_grabs, flag_hold_ms, returns, assists, base_cleaner, " +
+  "mine_kills, mine_grabs_red, mine_grabs_blue, mine_returns, time_played"
+
+const PAGE_SIZE = 1000
+
+/** Every paged query must order on something unique — `.range()` is LIMIT/OFFSET. */
+const PAGE_ORDER = "id"
+
+/** One colour per job, shared by the legend, the bars and the breakdown columns. */
+const JOB_COLOURS: Record<Job, string> = {
+  cap: "var(--color-accent-blue)",
+  base: "var(--color-accent-green)",
+  returns: "var(--color-accent-yellow)",
+  support: "var(--color-accent-purple)",
+}
+
+const JOB_LABELS: Record<Job, string> = {
+  cap: "Cap",
+  base: "Base",
+  returns: "Return",
+  support: "Support",
+}
+
+const JOB_DETAIL: Record<Job, string> = {
+  cap: "captures, flag grabs and time carrying the flag",
+  base: "base cleans, mines picked up in your own base, mine kills",
+  returns: "returns and assists",
+  support: "mines picked up in the enemy base, and mine returns",
+}
+
+const JOBS: Job[] = ["cap", "base", "returns", "support"]
+
+/** The raw per-game numbers behind each job, for the column tooltips. */
+function jobDetail(row: ProductionRow, job: Job): string {
+  const per = (total: number) => (total / Math.max(row.games, 1)).toFixed(1)
+  switch (job) {
+    case "cap":
+      return `${per(row.captures)} caps, ${per(row.grabs)} grabs a game — ${
+        row.grabs > 0 ? Math.round((row.captures / row.grabs) * 100) : 0
+      }% conversion`
+    case "base":
+      return `${per(row.clears)} base cleans, ${per(row.homeMines)} own-base mines, ${per(row.mineKills)} mine kills a game`
+    case "returns":
+      return `${per(row.returns)} returns, ${per(row.assists)} assists a game`
+    case "support":
+      return `${per(row.awayMines)} enemy-base mines, ${per(row.mineReturns)} mine returns a game`
+  }
+}
+
+interface ProductionLeaderboardProps {
+  year: number
+  month: number
+  /** Unused by this board; kept so the caller's props match the other boards. */
+  isAdmin?: boolean
+  scope: "alltime" | "month"
+}
+
+interface MatchRow extends ProductionMatch {
+  created_at: string
+}
+
+async function fetchAll<T>(
+  build: () => {
+    range: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>
+  },
+): Promise<T[]> {
+  const rows: T[] = []
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await build().range(from, from + PAGE_SIZE - 1)
+    if (error) throw new Error(error.message)
+    const batch = (data ?? []) as T[]
+    rows.push(...batch)
+    if (batch.length < PAGE_SIZE) return rows
+  }
+}
+
+/**
+ * A player's rating, drawn as the four jobs stacked.
+ *
+ * FULL WIDTH for everyone, on purpose. This column answers "what is this rating made
+ * of", which is a question about proportions — and proportions are only comparable
+ * between players if the bars are the same length. Magnitude is already the Rating
+ * column right next to it, so varying the length too said the same thing twice while
+ * making the mixes impossible to compare by eye.
+ *
+ * Stacked rather than diverging because every part is non-negative: a capper's bar is
+ * mostly one blue block, which is the whole point, since not doing a job costs
+ * nothing here.
+ */
+function JobBar({ row }: { row: ProductionRow }) {
+  const title = JOBS.map((j) => `${JOB_LABELS[j]} ${row.jobs[j].toFixed(2)}`).join(" · ")
+  return (
+    <div className="flex items-center gap-2" title={`${title} — total ${row.value.toFixed(2)}`}>
+      <div
+        role="img"
+        aria-label={title}
+        className="relative h-3 w-full rounded-sm overflow-hidden bg-[var(--color-surface-elevated)] flex"
+      >
+        {JOBS.map((job) => {
+          const share = row.value > 0 ? (row.jobs[job] / row.value) * 100 : 0
+          if (share <= 0) return null
+          return (
+            <span key={job} style={{ width: `${share}%`, backgroundColor: JOB_COLOURS[job] }} />
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderboardProps) {
+  const [board, setBoard] = useState<ProductionBoard | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  const load = async ({ isStale }: { isStale?: () => boolean } = {}) => {
+    const stale = () => isStale?.() ?? false
+    setLoading(true)
+    setError(null)
+
+    try {
+      const supabase = createClient()
+
+      const matchQuery = () => {
+        const q = supabase
+          .from("matches")
+          .select("id, red_team, blue_team, red_score, blue_score, created_at")
+          .order(PAGE_ORDER, { ascending: true })
+        if (scope === "alltime") return q
+        const start = new Date(Date.UTC(year, month - 1, 1))
+        const end = new Date(Date.UTC(year, month, 1))
+        return q.gte("created_at", start.toISOString()).lt("created_at", end.toISOString())
+      }
+
+      const allMatches = (await fetchAll<MatchRow>(matchQuery)).filter(
+        (m) => m.red_team?.length && m.blue_team?.length,
+      )
+
+      const players = await fetchAll<ProductionPlayer>(() =>
+        supabase.from("players").select("id, name, tier_value").order(PAGE_ORDER, { ascending: true }),
+      )
+
+      const monthIds = allMatches.map((m) => m.id)
+      const statRows =
+        scope === "month" && monthIds.length === 0
+          ? []
+          : await fetchAll<ProductionStatRow>(() => {
+              const q = supabase.from("match_stats").select(STAT_COLUMNS).order(PAGE_ORDER, { ascending: true })
+              return scope === "month" ? q.in("match_id", monthIds) : q
+            })
+
+      const result = computeProductionBoard(
+        allMatches,
+        statRows,
+        players,
+        scope === "alltime" ? { minGames: ALL_TIME_MIN_MATCHES } : { minGamesFraction: MONTHLY_MIN_FRACTION },
+      )
+      if (stale()) return
+      setBoard(result)
+    } catch (err) {
+      if (stale()) return
+      setError(err instanceof Error ? err.message : "Failed to calculate production ratings")
+    }
+
+    if (stale()) return
+    setLoading(false)
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    load({ isStale: () => cancelled })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [year, month, scope])
+
+  const monthLabel = scope === "alltime" ? "every statted match" : `${MONTH_NAMES[month - 1]} ${year}`
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="space-y-1">
+          <h3 className="flex items-center gap-2 text-lg font-semibold text-[var(--color-text)]">
+            <Hammer className="w-5 h-5" aria-hidden />
+            Production
+            <span className="rounded-full border border-[var(--color-accent-yellow)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--color-accent-yellow)]">
+              Experimental
+            </span>
+          </h3>
+          <p className="max-w-2xl text-sm text-[var(--color-text-dim)]">
+            <strong className="text-[var(--color-text)]">
+              This board is experimental and the weights may still change.
+            </strong>{" "}
+            What players actually did in {monthLabel}, per minute played — with the jobs priced
+            so no role is worth more than another. Doing none of a job costs nothing. W/L counts
+            for 25% on top.
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button variant="outline" size="sm">
+                <HelpCircle className="w-4 h-4 mr-1.5" aria-hidden />
+                How it works
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>How the Production board works</DialogTitle>
+                <DialogDescription>
+                  One rating, built from four jobs, calibrated so each pays the same.
+                </DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 text-sm text-[var(--color-text-dim)]">
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">The four jobs</h4>
+                  <ul className="space-y-1">
+                    {JOBS.map((job) => (
+                      <li key={job}>
+                        <span style={{ color: JOB_COLOURS[job] }} className="font-semibold">
+                          {JOB_LABELS[job]}
+                        </span>{" "}
+                        — {JOB_DETAIL[job]}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
+                    Why not doing a job costs nothing
+                  </h4>
+                  <p>
+                    Every part of the rating counts how much you did per minute, so doing none of
+                    something scores zero rather than below average. A capper is not marked down
+                    for base cleans he never made, because he was in the enemy base — which is the
+                    job. It also means a player who switches role mid-match is credited for both
+                    halves instead of being judged against specialists at each.
+                  </p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
+                    Why no role is worth more
+                  </h4>
+                  <p>
+                    Each stat is divided by its own spread, so a return and a base clean count
+                    comparably rather than base cleans dominating because the number is bigger.
+                    The weights are then tuned until the median capper, returner, base cleaner and
+                    support player all score the same — role fairness is imposed, not hoped for.
+                    Nobody is classified when they are ranked; the roles only appear in that
+                    offline calibration.
+                  </p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">What it does not do</h4>
+                  <p>
+                    W/L is in, at 25% — a player can win without piling up numbers, and
+                    production alone cannot see that. But it is kept small deliberately. Team
+                    draws swing individual games hard: the stronger side takes 76% of the most
+                    lopsided matches. Across a season that evens out, leaving win rates that are
+                    statistically indistinguishable from chance. So the other 75% measures the
+                    half of the game the draw cannot equalise, and the board is checked for
+                    consistency rather than against results.
+                  </p>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+          <Button variant="outline" size="sm" onClick={() => load()} disabled={loading}>
+            <RefreshCw className={`w-4 h-4 mr-1.5 ${loading ? "animate-spin" : ""}`} aria-hidden />
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="rounded-md border border-[#ff4757] bg-[#ff4757]/10 px-3 py-2 text-sm text-[#ff4757]">
+          {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="py-12 text-center text-[var(--color-text-dim)]">Calculating…</div>
+      ) : !board || board.rows.length === 0 ? (
+        <div className="py-12 text-center text-[var(--color-text-dim)]">
+          {board && board.stattedMatches === 0 ? (
+            <>
+              No scoreboards for {monthLabel}. Uploads only start from {SCOREBOARD_ERA} — matches
+              before then recorded who played and who won, but not what anybody did.
+            </>
+          ) : (
+            <>
+              Nobody has played the {board?.minGames ?? 0} statted matches needed to qualify for{" "}
+              {monthLabel} yet.
+            </>
+          )}
+        </div>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-dim)]">
+            {JOBS.map((job) => (
+              <span key={job} className="flex items-center gap-1.5">
+                <span
+                  className="inline-block w-3 h-3 rounded-sm"
+                  style={{ backgroundColor: JOB_COLOURS[job] }}
+                  aria-hidden
+                />
+                {JOB_LABELS[job]}
+              </span>
+            ))}
+            <span className="italic">
+              {board.rows.length} qualified · {board.minGames}+ statted matches · {board.stattedMatches} with
+              scoreboards
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-[var(--color-border)] text-left text-[var(--color-text-dim)]">
+                  <th className="px-2 py-2 font-medium">#</th>
+                  <th className="px-2 py-2 font-medium">Player</th>
+                  <th className="px-2 py-2 font-medium text-right">Rating</th>
+                  <th className="px-2 py-2 font-medium text-right">GP</th>
+                  <th className="px-2 py-2 font-medium text-right" title="Counts for 25% of the rating">
+                    W-L
+                  </th>
+                  <th className="px-2 py-2 font-medium min-w-[160px]">What the rating is made of</th>
+                  {JOBS.map((job) => (
+                    <th
+                      key={job}
+                      className="px-2 py-2 font-medium text-center"
+                      style={{ color: JOB_COLOURS[job] }}
+                      title={JOB_DETAIL[job]}
+                    >
+                      {JOB_LABELS[job]}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {board.rows.map((row, i) => (
+                  <tr
+                    key={row.name}
+                    className="border-b border-[var(--color-border)]/50 hover:bg-[var(--color-surface-elevated)]/40"
+                  >
+                    <td className="px-2 py-1.5">
+                      <RankMedal index={i} />
+                    </td>
+                    <td className="px-2 py-1.5 font-medium text-[var(--color-text)]">{row.name}</td>
+                    <td className="px-2 py-1.5 text-right font-mono font-semibold text-[var(--color-text)]">
+                      {row.rating}
+                    </td>
+                    <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text-dim)]">
+                      {row.games}
+                    </td>
+                    <td
+                      className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text-dim)]"
+                      title={`${row.winPct.toFixed(0)}% — ${row.winAdjustment >= 0 ? "+" : ""}${row.winAdjustment.toFixed(2)} index points`}
+                    >
+                      {row.wins}-{row.losses}
+                      {row.draws > 0 ? `-${row.draws}` : ""}
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <JobBar row={row} />
+                    </td>
+                    {JOBS.map((job) => (
+                      <td
+                        key={job}
+                        className="px-2 py-1.5 text-center font-mono tabular-nums"
+                        style={{
+                          color:
+                            row.jobRatings[job] >= 62
+                              ? JOB_COLOURS[job]
+                              : "var(--color-text-dim)",
+                        }}
+                        title={`${JOB_LABELS[job]} ${row.jobRatings[job]} — ${jobDetail(row, job)}`}
+                      >
+                        {row.jobRatings[job]}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <p className="text-xs italic text-[var(--color-text-dim)]">
+            Every number on this board is the same scale: 50 is an average month, 62 is one
+            standard deviation above. The four job columns each say how you did at that job
+            specifically, so Base 88 means the same thing as Cap 88. A low one means you did
+            little of that job, never a penalty. Hover any of them for the real per-game numbers.
+          </p>
+        </>
+      )}
+    </div>
+  )
+}
