@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { rankBy, rankByName } from "@/lib/rank-order"
+import { killDeathRatio } from "@/lib/kd"
 import {
   getCapConversionByMonth,
   getMatchesByMonth,
@@ -720,11 +721,13 @@ export function ReportsTab() {
   // well they did it — a few games on cap sank the rate. See lib/returner-rate.ts.
   const topRetsPerMin = returnerRate?.rows[0] ?? null
 
-  // Highest kill/death ratio (needs at least one death for a meaningful ratio).
+  // Highest kill/death ratio. A deathless player stays in the running and is
+  // scored on the same scale as everyone else — see lib/kd.ts, which the player
+  // profile's monthly honours share so the two boards can't name different holders.
   const highestKd =
     [...qualifiedStatPlayers]
-      .filter((p) => p.kills > 0 && p.deaths > 0)
-      .map((p) => ({ ...p, kd: p.kills / p.deaths }))
+      .filter((p) => p.kills > 0)
+      .map((p) => ({ ...p, kd: killDeathRatio(p.kills, p.deaths) }))
       .sort(rankByName((a, b) => b.kd - a.kd))[0] || null
 
   // Best conversion — captures as a share of RESOLVED flag runs (capped, or
