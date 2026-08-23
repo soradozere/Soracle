@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react"
 import { logMatch, logMatchWithStats } from "@/app/admin/actions"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import { evaluateTeams } from "@/lib/balance-algorithm"
+import { balanceConfidencePct, confidenceColor } from "@/lib/balance-confidence"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -18,23 +19,6 @@ function isoToLocalInput(iso: string): string {
   const d = new Date(iso)
   const pad = (n: number) => String(n).padStart(2, "0")
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-function getBalanceConfidence(score: number): number {
-  const k = 0.004
-  const floor = 30
-  const raw = floor + (100 - floor) * Math.exp(-k * score)
-  return Math.round(raw)
-}
-
-function getConfidenceColor(confidence: number): { bg: string; text: string } {
-  if (confidence >= 80) {
-    return { bg: "bg-[#27ae60]/20", text: "text-[#27ae60]" }
-  } else if (confidence >= 60) {
-    return { bg: "bg-[#f39c12]/20", text: "text-[#f39c12]" }
-  } else {
-    return { bg: "bg-[#ff4757]/20", text: "text-[#ff4757]" }
-  }
 }
 
 export function AdminMatchLog() {
@@ -209,7 +193,10 @@ export function AdminMatchLog() {
       return
     }
 
-    const balance_confidence = balanceScore !== null ? Math.round(balanceScore) : 0
+    // null, not 0: 0 is a REAL score meaning a flawless split, so writing it
+    // when the balancer never ran would file a hand-picked game as perfectly
+    // balanced. Absent evidence is absent, not a perfect result.
+    const balance_confidence = balanceScore !== null ? Math.round(balanceScore) : null
     const played_at = matchDate ? new Date(matchDate).toISOString() : null
 
     if (csvData) {
@@ -482,8 +469,8 @@ export function AdminMatchLog() {
           <div className="flex items-center justify-center gap-3 py-3 px-4 rounded-lg bg-muted/30 border">
             <span className="text-sm text-muted-foreground">Balance:</span>
             {(() => {
-              const confidence = getBalanceConfidence(balanceScore)
-              const colors = getConfidenceColor(confidence)
+              const confidence = balanceConfidencePct(balanceScore)
+              const colors = confidenceColor(confidence)
               return (
                 <span className={`font-mono font-bold px-3 py-1 rounded-full text-sm ${colors.bg} ${colors.text}`}>
                   {confidence}%
