@@ -24,6 +24,13 @@
 // the blur map's 255 — so reproducing them needs a gain pass, and the result
 // was dimmer and muddier than tinting the neutral blur maps. The blur maps
 // also tint exactly to any theme colour, which the pre-coloured ones cannot.
+//
+// All five files are Raven/Activision assets and this repo is public, so —
+// same as the player models on profile pages — they aren't committed. They're
+// in the private Supabase bucket (lib/masthead-assets.ts, uploaded by
+// scripts/upload-model-assets.mjs) and resolved through /api/model-url, the
+// same route and the same useAssetUrls hook the profile viewer uses for a
+// dressed model's hilt and blade textures.
 
 import { Suspense, useEffect, useRef, useState } from "react"
 import { Canvas, useFrame } from "@react-three/fiber"
@@ -38,6 +45,15 @@ import {
   SRGBColorSpace,
   type Group,
 } from "three"
+import { useAssetUrls } from "@/hooks/use-asset-urls"
+import {
+  MASTHEAD_ASSET_IDS,
+  MASTHEAD_LOGO_DIFFUSE,
+  MASTHEAD_LOGO_ENV,
+  MASTHEAD_LOGO_MODEL,
+  MASTHEAD_SABER_CORE,
+  MASTHEAD_SABER_GLOW,
+} from "@/lib/masthead-assets"
 
 // Center of the ring+monogram band, in the model's own (already axis-remapped)
 // units — see md3_to_glb.py's per-Z-slice vertex dump.
@@ -103,9 +119,9 @@ function useThemePrimaryColor() {
   return color
 }
 
-function SaberBeam() {
+function SaberBeam({ coreUrl, glowUrl }: { coreUrl: string; glowUrl: string }) {
   const color = useThemePrimaryColor()
-  const [coreMap, glowMap] = useTexture(["/models/saber-core.jpg", "/models/saber-glow.jpg"])
+  const [coreMap, glowMap] = useTexture([coreUrl, glowUrl])
   const blade = useRef<Group>(null)
 
   // There is no saber animation in the assets to borrow — no animMap anywhere
@@ -181,9 +197,17 @@ function SaberBeam() {
   )
 }
 
-function SpinningLogo() {
-  const { scene } = useGLTF("/models/jk2logo.glb")
-  const [diffuseMap, envMap] = useTexture(["/models/logo-diffuse.jpg", "/models/logo-env.jpg"])
+function SpinningLogo({
+  modelUrl,
+  diffuseUrl,
+  envUrl,
+}: {
+  modelUrl: string
+  diffuseUrl: string
+  envUrl: string
+}) {
+  const { scene } = useGLTF(modelUrl)
+  const [diffuseMap, envMap] = useTexture([diffuseUrl, envUrl])
   const group = useRef<Group>(null)
 
   // Reproduces the model's actual two-stage shader (rw_models.shader) rather
@@ -247,6 +271,15 @@ function SpinningLogo() {
 }
 
 export function MastheadLogo3D() {
+  // One batch: model + diffuse + env + 2 blade textures, one signed-URL round
+  // trip. All-or-nothing, same as a dressed profile — there's no useful
+  // partial render of a logo missing its blade textures. Renders nothing
+  // until resolved rather than a placeholder: the bordered box around this
+  // (site-header.tsx) already reads fine empty for the brief gap, and this
+  // icon has no loading shell of its own the way the profile panel does.
+  const { urls } = useAssetUrls(MASTHEAD_ASSET_IDS)
+  if (!urls) return null
+
   return (
     <Canvas
       dpr={[1, 2]}
@@ -260,11 +293,13 @@ export function MastheadLogo3D() {
       style={{ background: "transparent" }}
     >
       <Suspense fallback={null}>
-        <SaberBeam />
-        <SpinningLogo />
+        <SaberBeam coreUrl={urls[MASTHEAD_SABER_CORE]} glowUrl={urls[MASTHEAD_SABER_GLOW]} />
+        <SpinningLogo
+          modelUrl={urls[MASTHEAD_LOGO_MODEL]}
+          diffuseUrl={urls[MASTHEAD_LOGO_DIFFUSE]}
+          envUrl={urls[MASTHEAD_LOGO_ENV]}
+        />
       </Suspense>
     </Canvas>
   )
 }
-
-useGLTF.preload("/models/jk2logo.glb")

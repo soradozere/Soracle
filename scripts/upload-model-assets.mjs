@@ -82,6 +82,15 @@ const ASSETS = [
   ["props/trip-mine.glb", "public/models/props/trip-mine.glb"],
   ["props/flag-red.glb", "public/models/props/flag-red.glb"],
   ["props/flag-blue.glb", "public/models/props/flag-blue.glb"],
+  // The masthead's rotating logo. Not a player model or an equippable prop —
+  // page chrome that happens to be a 3D asset — so it gets its own catalogue
+  // (lib/masthead-assets.ts) rather than living in PLAYER_MODELS or
+  // PROP_ASSETS.
+  ["masthead/jk2logo.glb", "public/models/masthead/jk2logo.glb"],
+  ["masthead/logo-diffuse.jpg", "public/models/masthead/logo-diffuse.jpg"],
+  ["masthead/logo-env.jpg", "public/models/masthead/logo-env.jpg"],
+  ["masthead/saber-core.jpg", "public/models/masthead/saber-core.jpg"],
+  ["masthead/saber-glow.jpg", "public/models/masthead/saber-glow.jpg"],
   // Skin variants: only the textures that differ from the model's default, which
   // is already embedded in its .glb.
   //
