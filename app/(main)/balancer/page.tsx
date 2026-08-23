@@ -326,6 +326,13 @@ export default function TeamBalancer() {
                 blueTierTotal: option.result.redTierTotal,
                 redMic: option.result.blueMic,
                 blueMic: option.result.redMic,
+                // Only set in the admin "Balance by ELO" mode, where the header
+                // shows ELO instead of tier totals. Left unswapped, those two
+                // numbers stayed with the old colour and the header then claimed
+                // the wrong side was stronger. Undefined swaps harmlessly in the
+                // normal tier mode.
+                redEloTotal: option.result.blueEloTotal,
+                blueEloTotal: option.result.redEloTotal,
               },
             }
           }
