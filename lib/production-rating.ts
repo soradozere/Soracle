@@ -158,6 +158,16 @@ export interface ProductionRow {
    * like "Cap 88". Display only — scoring never uses these.
    */
   jobRatings: Record<Job, number>
+  /**
+   * Whether the player did enough of each job for its rating to mean anything.
+   *
+   * A player who never plays support still gets a Support NUMBER, because the column
+   * is standardised — and a number below 50 reads as a mark against them even though
+   * doing none of a job costs exactly nothing in the scoring. Sam misread it that way
+   * within a day of the board going up, so the UI shows a dash instead when this is
+   * false. Display only.
+   */
+  jobPlayed: Record<Job, boolean>
   /** The single job that contributed most, for display. Not used in scoring. */
   topJob: Job
   games: number
@@ -344,6 +354,12 @@ const MIN_ROWS_FOR_STATTED_MATCH = 8
 
 const T_MEAN = 50
 const T_SPREAD = 12
+
+/**
+ * Below this share of the pool average for a job, the player is treated as not
+ * having played it and the column shows a dash rather than a number.
+ */
+const JOB_PLAYED_FRACTION = 0.3
 
 const n = (v: number | null | undefined) => v ?? 0
 const minutesOf = (r: ProductionStatRow) => Math.max(n(r.time_played), 1)
@@ -562,6 +578,10 @@ export function computeProductionBoard(
     }
   }
 
+  const jobMean = Object.fromEntries(
+    JOBS.map((job) => [job, scored.reduce((t, s) => t + s.jobs[job], 0) / scored.length]),
+  ) as Record<Job, number>
+
   const rows: ProductionRow[] = withWin.map((s) => {
     const rec = record.get(s.name)
     return {
@@ -576,6 +596,9 @@ export function computeProductionBoard(
         Math.round(T_MEAN + (T_SPREAD * (s.jobs[job] - jobScale[job].mean)) / jobScale[job].sd),
       ]),
     ) as Record<Job, number>,
+    jobPlayed: Object.fromEntries(
+      JOBS.map((job) => [job, s.jobs[job] >= jobMean[job] * JOB_PLAYED_FRACTION]),
+    ) as Record<Job, boolean>,
     topJob: s.topJob,
     games: s.rs.length,
     minutes: Math.round(sumOf(s.rs, minutesOf)),

@@ -522,13 +522,19 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                         className="px-2 py-1.5 text-center font-mono tabular-nums"
                         style={{
                           color:
-                            row.jobRatings[job] >= 62
-                              ? JOB_COLOURS[job]
-                              : "var(--color-text-dim)",
+                            !row.jobPlayed[job]
+                              ? "var(--color-border)"
+                              : row.jobRatings[job] >= 62
+                                ? JOB_COLOURS[job]
+                                : "var(--color-text-dim)",
                         }}
-                        title={`${JOB_LABELS[job]} ${row.jobRatings[job]} — ${jobDetail(row, job)}`}
+                        title={
+                          row.jobPlayed[job]
+                            ? `${JOB_LABELS[job]} ${row.jobRatings[job]} — ${jobDetail(row, job)}`
+                            : `Barely played this job — ${jobDetail(row, job)}. Costs nothing.`
+                        }
                       >
-                        {row.jobRatings[job]}
+                        {row.jobPlayed[job] ? row.jobRatings[job] : "–"}
                       </td>
                     ))}
                   </tr>
