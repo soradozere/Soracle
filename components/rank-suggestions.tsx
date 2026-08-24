@@ -11,6 +11,7 @@ import {
   readAutoCalibrationEnabledAt,
   type TierMove,
 } from "@/lib/calibration"
+import { AUTO_CALIBRATION_CHANGED } from "@/lib/calibration-events"
 
 /*
  * A preview of the auto-calibrator, not a second opinion on it.
@@ -67,6 +68,12 @@ export function RankSuggestions() {
 
   useEffect(() => {
     fetchSuggestions()
+    // Both the numbers and the advisory label below are answers to "is the
+    // switch on?", so a toggle three sections up invalidates them outright.
+    const onSwitchChanged = () => fetchSuggestions()
+    window.addEventListener(AUTO_CALIBRATION_CHANGED, onSwitchChanged)
+    return () => window.removeEventListener(AUTO_CALIBRATION_CHANGED, onSwitchChanged)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const advisoryNote = !live && (

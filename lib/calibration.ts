@@ -274,7 +274,15 @@ export async function fetchCalibrationInputs(
     .limit(RUNNER_MATCH_FETCH)
   // `hidden` is deliberately not filtered — it hides a row from the public
   // changelog, it does not un-happen the tier move.
-  let changeQuery = supabase.from("tier_changes").select("player_id, changed_at")
+  //
+  // Ordered newest-first purely as insurance: lastTierChangeByName compares
+  // timestamps and does not care about order, but PostgREST caps an unpaged
+  // select at 1000 rows, and the row this needs is each player's LATEST. At 119
+  // rows the cap is years away; ordering means that when it does arrive it
+  // truncates the oldest changes rather than an arbitrary thousand, which is
+  // the difference between losing nothing and silently reviving the very bug
+  // this bound exists to close.
+  let changeQuery = supabase.from("tier_changes").select("player_id, changed_at").order("changed_at", { ascending: false })
   if (since) {
     matchQuery = matchQuery.gte("created_at", since)
     changeQuery = changeQuery.gte("changed_at", since)
