@@ -905,6 +905,29 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
           </filter>
         </svg>
 
+        {/* The way out, and it has to live INSIDE the stage.
+
+            Both fullscreen modes take the page's own controls away with them:
+            the real API renders the stage element and nothing else, and the CSS
+            fallback pins the stage over the viewport at z-50. Either way the
+            header's Exit button is outside or behind it, so the only remaining
+            door was Escape -- which the phones the fallback exists for do not
+            have. Filling the screen was therefore a one-way trip on exactly the
+            devices it was built for.
+
+            Drawn over the game on purpose, like the kill feed and the
+            spectating pill: a control that is only sometimes there is no use to
+            someone looking for the way out. */}
+        {filling && (
+          <button
+            onClick={toggleFullscreen}
+            className="absolute right-2 top-2 z-10 inline-flex items-center gap-1.5 rounded bg-black/60 px-3 py-2 text-sm text-white hover:bg-black/80"
+          >
+            <Minimize2 className="h-4 w-4" />
+            Exit full screen
+          </button>
+        )}
+
         {phase === "active" && (
           <>
             {/* Who the camera is on. Engine-fed, so it appears only once the
