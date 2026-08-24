@@ -562,13 +562,24 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                 </tr>
               </thead>
               <tbody>
-                {board.rows.map((row, i) => (
+                {board.rows.map((row, i) => {
+                  // RankMedal renders nothing past 3rd, so the number has to be
+                  // supplied here — same as the other three boards do it. Without
+                  // this the rank column is simply blank from 4th down.
+                  const isTop3 = i < 3
+                  return (
                   <tr
                     key={row.name}
-                    className="border-b border-[var(--color-border)]/50 hover:bg-[var(--color-surface-elevated)]/40"
+                    className={`border-b border-[var(--color-border)]/50 hover:bg-[var(--color-surface-elevated)]/40 ${
+                      isTop3 ? "bg-[#ffd700]/5" : ""
+                    }`}
                   >
                     <td className="px-2 py-1.5">
-                      <RankMedal index={i} />
+                      {isTop3 ? (
+                        <RankMedal index={i} />
+                      ) : (
+                        <span className="text-[var(--color-text-dim)]">{i + 1}</span>
+                      )}
                     </td>
                     <td className="px-2 py-1.5 font-medium text-[var(--color-text)]">{row.name}</td>
                     <td className="px-2 py-1.5 text-right font-mono font-semibold text-[var(--color-text)]">
@@ -609,7 +620,8 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                       </td>
                     ))}
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
               </table>
             </div>
