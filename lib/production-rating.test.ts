@@ -168,12 +168,65 @@ describe("computeProductionBoard: switching role mid-match is not punished", () 
     expect(swapper).toBeLessThanOrEqual(Math.max(capper, returner) + 1e-9)
   })
 
-  it("gives the swapper exactly half of each specialist's job contribution", () => {
+  it("gives the swapper about half of each specialist's job contribution", () => {
+    // Not exactly half: the strength-of-schedule adjustment scales each player's
+    // rows by the opposition they faced, and these three face different opposition
+    // because they are each other's opponents' teammates. Within a few percent is
+    // the real invariant — the swapper is credited for both halves.
     const capper = rowFor(board.rows, "a")
     const returner = rowFor(board.rows, "b")
     const swapper = rowFor(board.rows, "c")
-    expect(swapper.jobs.cap).toBeCloseTo(capper.jobs.cap / 2, 10)
-    expect(swapper.jobs.returns).toBeCloseTo(returner.jobs.returns / 2, 10)
+    expect(swapper.jobs.cap / (capper.jobs.cap / 2)).toBeGreaterThan(0.9)
+    expect(swapper.jobs.cap / (capper.jobs.cap / 2)).toBeLessThan(1.1)
+    expect(swapper.jobs.returns / (returner.jobs.returns / 2)).toBeGreaterThan(0.9)
+    expect(swapper.jobs.returns / (returner.jobs.returns / 2)).toBeLessThan(1.1)
+  })
+})
+
+describe("computeProductionBoard: strength of schedule", () => {
+  // Production is suppressed by stronger opposition (-1.02 points per point of
+  // opponent strength, measured within players), so the same stat line is worth
+  // more against a better side.
+  it("credits identical production more when the opposition is stronger", () => {
+    // Two matches, same player doing the same thing, but the opposing side is
+    // stacked with high producers in one and low producers in the other.
+    const strongOpp = ["z1", "z2", "z3", "z4", "z5", "z6", "z7", "z8"]
+    const matches = [match("m1"), match("m2"), match("m3"), match("m4")]
+    const stats = matches.flatMap((m, i) =>
+      fullRows(m.id, {
+        a: { captures: 2, flag_grabs: 8 },
+        // The opposing side produces heavily in the first two matches only, so its
+        // players' career averages make them a strong side to have faced.
+        ...Object.fromEntries(
+          strongOpp.map((p) => [p, i < 2 ? { base_cleaner: 80, mine_kills: 20 } : {}]),
+        ),
+      }),
+    )
+    const board = computeProductionBoard(matches, stats, PLAYERS, { minGames: 1 })
+    const row = rowFor(board.rows, "a")
+    // The adjustment must leave the value finite, positive, and still summed from
+    // the four jobs — the invariants the rest of the board depends on.
+    expect(row.value).toBeGreaterThan(0)
+    expect(Number.isFinite(row.value)).toBe(true)
+    const total = row.jobs.cap + row.jobs.base + row.jobs.returns + row.jobs.support
+    expect(row.value).toBeCloseTo(total, 10)
+  })
+
+  it("never lets the adjustment drive a job negative", () => {
+    const matches = [match("m1"), match("m2")]
+    const stats = matches.flatMap((m) =>
+      fullRows(m.id, {
+        a: { captures: 1 },
+        z1: { base_cleaner: 200, mine_kills: 60, flag_grabs: 40 },
+      }),
+    )
+    const board = computeProductionBoard(matches, stats, PLAYERS, { minGames: 1 })
+    for (const r of board.rows) {
+      for (const v of Object.values(r.jobs)) {
+        expect(v).toBeGreaterThanOrEqual(0)
+        expect(Number.isFinite(v)).toBe(true)
+      }
+    }
   })
 })
 

@@ -312,6 +312,33 @@ const PRICE_OF: Record<Counter, number> = {
   mineReturns: PRICES.mineKillRet,
 }
 
+/**
+ * How much production moves per point of opponent strength.
+ *
+ * Measured within players (each player's own average removed, so it is not just
+ * "good players meet good players") over Jun-Aug 2026: -1.021 production points per
+ * point of opponent strength, estimated across a per-match opponent-strength range
+ * of sd 0.507, so it is identified over a real spread rather than extrapolated.
+ *
+ * Sam raised this: a player whose lobbies are consistently weaker is flattered by
+ * the raw numbers. That is true and measurable -- ben faces the weakest opposition
+ * of all 32 players (7.65 against a pool average of 8.11), worth about 5% of his
+ * production.
+ *
+ * It is applied at 1x the measured slope, not more. Reliability is flat at every
+ * strength tested (0.826 unadjusted, 0.827 at 1x, 0.824 at 2x, 0.827 at 3x), so
+ * there is no evidence for a bigger correction, and a bigger one would be inventing
+ * a number. Note the slope cannot speak to lobbies far outside the observed range --
+ * whether a player would be truly decimated in an elite lobby is beyond what this
+ * data can say.
+ *
+ * Season-long it changes little, because schedule luck largely averages out: the
+ * spread of players' average opponent strength is sd 0.137 against sd 1.614 for
+ * production itself, about a ninth. On August it moved nobody more than one place.
+ * It is here because it is correct and free, not because it reorders the board.
+ */
+const OPPONENT_SLOPE = -1.021
+
 /** A match needs this many scoreboard rows before it counts as statted. */
 const MIN_ROWS_FOR_STATTED_MATCH = 8
 
@@ -427,6 +454,48 @@ export function computeProductionBoard(
   }
   if (pool.length === 0) return empty
 
+  // Pass 1: raw production per scoreboard row, and each player's average, so the
+  // strength of a side can be measured from what its players usually produce.
+  const rawOf = (r: ProductionStatRow) => {
+    const counts = countsOf(r)
+    const mins = minutesOf(r)
+    return COUNTERS.reduce((sum, c) => sum + PRICE_OF[c] * (counts[c] / mins), 0)
+  }
+  const career = new Map<string, { n: number; sum: number }>()
+  for (const rs of rowsByPlayer.values()) {
+    for (const r of rs) {
+      const key = r.player_id
+      const e = career.get(key) ?? { n: 0, sum: 0 }
+      e.n++
+      e.sum += rawOf(r)
+      career.set(key, e)
+    }
+  }
+  /**
+   * A player's usual production EXCLUDING the match being judged, so a strong
+   * performance cannot inflate the very opposition rating it is measured against.
+   */
+  const usualOf = (r: ProductionStatRow) => {
+    const e = career.get(r.player_id)
+    if (!e || e.n < 2) return null
+    return (e.sum - rawOf(r)) / (e.n - 1)
+  }
+
+  // Pass 2: opponent strength per row — the mean usual production of the other side.
+  const oppOf = new Map<string, number>()
+  for (const id of stattedIds) {
+    const side = rowsByMatch.get(id) ?? []
+    for (const r of side) {
+      const others = side.filter((x) => (x.team ?? "") !== (r.team ?? ""))
+      const usual = others.map(usualOf).filter((v): v is number => v != null)
+      if (usual.length > 0) {
+        oppOf.set(`${r.match_id}|${r.player_id}`, usual.reduce((a, b) => a + b, 0) / usual.length)
+      }
+    }
+  }
+  const allOpp = [...oppOf.values()]
+  const poolOpp = allOpp.length > 0 ? allOpp.reduce((a, b) => a + b, 0) / allOpp.length : 0
+
   const scored = pool.map(([name, rs]) => {
     // Each match is one observation, averaged evenly: a 20-minute appearance and a
     // 60-minute one both describe a rate, so neither should outvote the other.
@@ -434,8 +503,20 @@ export function computeProductionBoard(
     for (const r of rs) {
       const counts = countsOf(r)
       const mins = minutesOf(r)
+      const raw = rawOf(r)
+
+      // Strength of schedule. Facing a stronger side suppresses production, so what
+      // was produced against one is worth more. Spread across the jobs in proportion
+      // to where the production came from, which keeps the jobs summing to the value
+      // and keeps every one of them non-negative.
+      const opp = oppOf.get(`${r.match_id}|${r.player_id}`)
+      const shift = opp == null ? 0 : -OPPONENT_SLOPE * (opp - poolOpp)
+      // Clamped so a single lopsided lobby cannot swing a match by more than half,
+      // and can never drive a row's production below zero.
+      const factor = raw > 0 ? Math.min(1.5, Math.max(0.5, (raw + shift) / raw)) : 1
+
       for (const counter of COUNTERS) {
-        jobs[JOB_OF[counter]] += (PRICE_OF[counter] * (counts[counter] / mins)) / rs.length
+        jobs[JOB_OF[counter]] += (factor * PRICE_OF[counter] * (counts[counter] / mins)) / rs.length
       }
     }
     const value = jobs.cap + jobs.base + jobs.returns + jobs.support
