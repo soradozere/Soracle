@@ -498,9 +498,9 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
       )}
 
       {loading ? (
-        <div className="py-12 text-center text-[var(--color-text-dim)]">Calculating…</div>
+        <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg overflow-hidden py-12 text-center text-[var(--color-text-dim)]">Calculating…</div>
       ) : !board || board.rows.length === 0 ? (
-        <div className="py-12 text-center text-[var(--color-text-dim)]">
+        <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg overflow-hidden px-6 py-12 text-center text-[var(--color-text-dim)]">
           {board && board.stattedMatches === 0 ? (
             <>
               No scoreboards for {monthLabel}. Uploads only start from {SCOREBOARD_ERA} — matches
@@ -515,25 +515,30 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
         </div>
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-[var(--color-text-dim)]">
-            {JOBS.map((job) => (
-              <span key={job} className="flex items-center gap-1.5">
-                <span
-                  className="inline-block w-3 h-3 rounded-sm"
-                  style={{ backgroundColor: JOB_COLOURS[job] }}
-                  aria-hidden
-                />
-                {JOB_LABELS[job]}
+          {/* Same box the Wins, ELO and TrueSkill boards use, header strip and
+              all, so the four read as one family rather than this one floating
+              loose. The board's name is not repeated in here — it is already
+              above with the experimental badge, which the other three lack. */}
+          <div className="bg-[var(--color-surface)]/60 border border-[var(--color-border)] rounded-lg overflow-hidden">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 p-4 border-b border-[var(--color-border)] text-xs text-[var(--color-text-dim)]">
+              {JOBS.map((job) => (
+                <span key={job} className="flex items-center gap-1.5">
+                  <span
+                    className="inline-block w-3 h-3 rounded-sm"
+                    style={{ backgroundColor: JOB_COLOURS[job] }}
+                    aria-hidden
+                  />
+                  {JOB_LABELS[job]}
+                </span>
+              ))}
+              <span className="italic">
+                {board.rows.length} qualified · {board.minGames}+ statted matches · {board.stattedMatches} with
+                scoreboards
               </span>
-            ))}
-            <span className="italic">
-              {board.rows.length} qualified · {board.minGames}+ statted matches · {board.stattedMatches} with
-              scoreboards
-            </span>
-          </div>
+            </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-[var(--color-border)] text-left text-[var(--color-text-dim)]">
                   <th className="px-2 py-2 font-medium">#</th>
@@ -606,7 +611,8 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                   </tr>
                 ))}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
 
           <p className="text-xs italic text-[var(--color-text-dim)]">
