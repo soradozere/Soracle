@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { Hammer, HelpCircle, ListChecks, RefreshCw } from "lucide-react"
+import { ChevronLeft, ChevronRight, Hammer, HelpCircle, ListChecks, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   Dialog,
@@ -155,10 +155,30 @@ function JobBar({ row }: { row: ProductionRow }) {
   )
 }
 
+/** Everything one fetch returns, kept so the day cursor can re-slice it locally. */
+interface Fetched {
+  matches: MatchRow[]
+  statRows: ProductionStatRow[]
+  players: ProductionPlayer[]
+}
+
+/** UTC day of a match, as YYYY-MM-DD. UTC to match the month bucketing. */
+const dayOf = (m: MatchRow) => (m.created_at ?? "").slice(0, 10)
+
 export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderboardProps) {
-  const [board, setBoard] = useState<ProductionBoard | null>(null)
+  const [data, setData] = useState<Fetched | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * How far through the month to count, as an index into `matchDays`.
+   *
+   * null means the whole period, which is what the board shows by default and
+   * what every other board shows. Stepping back re-runs the rating over only the
+   * matches played up to that day, so the table reads as it stood that night --
+   * that is the point of the control, rather than paging between months, which
+   * the selector at the top of Stats already does.
+   */
+  const [dayIndex, setDayIndex] = useState<number | null>(null)
 
   const load = async ({ isStale }: { isStale?: () => boolean } = {}) => {
     const stale = () => isStale?.() ?? false
@@ -196,14 +216,9 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
               return scope === "month" ? q.in("match_id", monthIds) : q
             })
 
-      const result = computeProductionBoard(
-        allMatches,
-        statRows,
-        players,
-        scope === "alltime" ? { minGames: ALL_TIME_MIN_MATCHES } : { minGamesFraction: MONTHLY_MIN_FRACTION },
-      )
       if (stale()) return
-      setBoard(result)
+      setData({ matches: allMatches, statRows, players })
+      setDayIndex(null)
     } catch (err) {
       if (stale()) return
       setError(err instanceof Error ? err.message : "Failed to calculate Impact ratings")
@@ -221,6 +236,39 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [year, month, scope])
+
+  /**
+   * The days that actually saw a statted match, oldest first.
+   *
+   * Only these are offered as stops. Stepping through every calendar day would
+   * mean a dozen presses that change nothing, since the league plays on a
+   * handful of nights a month.
+   */
+  const matchDays = useMemo(() => {
+    if (!data) return []
+    const statted = new Set(data.statRows.map((r) => r.match_id))
+    const days = new Set(data.matches.filter((m) => statted.has(m.id)).map(dayOf).filter(Boolean))
+    return [...days].sort()
+  }, [data])
+
+  const cutoff = dayIndex == null ? null : matchDays[dayIndex]
+
+  /**
+   * The board for the selected slice. Recomputed locally, never refetched — the
+   * whole month is already in memory, so stepping a day is instant.
+   */
+  const board = useMemo(() => {
+    if (!data) return null
+    const matches = cutoff ? data.matches.filter((m) => dayOf(m) <= cutoff) : data.matches
+    const keep = new Set(matches.map((m) => m.id))
+    const statRows = cutoff ? data.statRows.filter((r) => keep.has(r.match_id)) : data.statRows
+    return computeProductionBoard(
+      matches,
+      statRows,
+      data.players,
+      scope === "alltime" ? { minGames: ALL_TIME_MIN_MATCHES } : { minGamesFraction: MONTHLY_MIN_FRACTION },
+    )
+  }, [data, cutoff, scope])
 
   const monthLabel = scope === "alltime" ? "every statted match" : `${MONTH_NAMES[month - 1]} ${year}`
 
@@ -535,6 +583,45 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                 {board.rows.length} qualified · {board.minGames}+ statted matches · {board.stattedMatches} with
                 scoreboards
               </span>
+
+              {/* Day cursor, top right. Steps back through the nights the league
+                  actually played, re-rating on only the matches up to that point,
+                  so the table can be read as it stood on the night. */}
+              {scope === "month" && matchDays.length > 1 && (
+                <div className="ml-auto flex items-center gap-1.5">
+                  <button
+                    onClick={() =>
+                      setDayIndex((i) => Math.max(0, (i == null ? matchDays.length - 1 : i) - 1))
+                    }
+                    disabled={dayIndex === 0}
+                    aria-label="Earlier in the month"
+                    className="w-6 h-6 rounded-md grid place-items-center transition-colors hover:bg-[var(--color-surface-elevated)] disabled:opacity-30 disabled:cursor-not-allowed"
+                    style={{ border: "1px solid var(--color-border)" }}
+                  >
+                    <ChevronLeft className="w-3 h-3" />
+                  </button>
+                  <span className="min-w-[104px] text-center font-medium not-italic text-[var(--color-text)]">
+                    {cutoff
+                      ? `up to ${new Date(`${cutoff}T00:00:00Z`).toLocaleDateString("en-GB", {
+                          day: "numeric",
+                          month: "short",
+                          timeZone: "UTC",
+                        })}`
+                      : `all of ${MONTH_NAMES[month - 1]}`}
+                  </span>
+                  <button
+                    onClick={() =>
+                      setDayIndex((i) => (i == null || i >= matchDays.length - 1 ? null : i + 1))
+                    }
+                    disabled={dayIndex == null}
+                    aria-label="Later in the month"
+                    className="w-6 h-6 rounded-md grid place-items-center transition-colors hover:bg-[var(--color-surface-elevated)] disabled:opacity-30 disabled:cursor-not-allowed"
+                    style={{ border: "1px solid var(--color-border)" }}
+                  >
+                    <ChevronRight className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
             </div>
 
             <div className="overflow-x-auto">
