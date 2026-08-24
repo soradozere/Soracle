@@ -42,6 +42,28 @@ interface Meteor {
   active: boolean
 }
 
+/*
+ * The frame duration a Meteor's `speed` is quoted against.
+ *
+ * Meteors are the only thing on the default sky that moves by POSITION.
+ * Everything else is opacity driven off `time` (wall clock), so it stays
+ * correct at any frame rate and degrades invisibly. Meteors advanced a fixed
+ * number of pixels per FRAME, which means a dropped frame did not delay one, it
+ * slowed it down — so the shooting stars became the page's one visible readout
+ * of its own frame rate, which is exactly how they got reported as "laggy"
+ * while nothing else looked wrong.
+ *
+ * 10ms, not the reflexive 16.667: `speed` was never converted from a rate, so
+ * whatever it looks like today IS on a 100Hz display. Normalising to 60 would
+ * quietly drop the on-screen speed to 60% of what it is now. This keeps that
+ * look and brings slower displays UP to it instead. If the meteors ever want
+ * to be the 60Hz-nominal speed instead, this is the one number to change.
+ */
+const REF_FRAME_MS = 10
+/** Ceiling on the catch-up step, in reference frames. A GC pause or a laptop
+ *  waking up would otherwise teleport a meteor clean across the sky. */
+const MAX_CATCHUP_FRAMES = 3
+
 // ---- Profile-theme backgrounds ---------------------------------------------
 // A profile can swap the shared starfield for one of these, selected via
 // data-profile-bg on <html> (set by the profile's apply effect). Each is a small
@@ -627,6 +649,9 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
     })
 
     let lastMeteorTime = Date.now()
+    // Rebased whenever the loop restarts (see handleVisibility), so the first
+    // frame back never bills a meteor for the whole time the tab was away.
+    let lastFrameMs = performance.now()
     const meteorInterval = 3000
     // Built once, reused every frame (redrawing scanlines as hundreds of
     // fillRects per frame was the main cause of the Slicer slowdown).
@@ -1096,6 +1121,12 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
 
       const time = Date.now() * 0.001
 
+      // How many reference frames this frame actually took. Computed before the
+      // early returns below so it can never go stale across a theme switch.
+      const nowMs = performance.now()
+      const dt = Math.min((nowMs - lastFrameMs) / REF_FRAME_MS, MAX_CATCHUP_FRAMES)
+      lastFrameMs = nowMs
+
       // Profile themes with a custom background take their own renderer and skip
       // the starfield/meteor/hyperspace path entirely.
       const kind = bgKindRef.current
@@ -1252,9 +1283,10 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
         meteorsRef.current.forEach((meteor) => {
           if (!meteor.active) return
 
-          // Update meteor position
-          meteor.x += Math.cos(meteor.angle) * meteor.speed
-          meteor.y += Math.sin(meteor.angle) * meteor.speed
+          // Update meteor position. Scaled by elapsed time rather than counted
+          // in frames — see REF_FRAME_MS.
+          meteor.x += Math.cos(meteor.angle) * meteor.speed * dt
+          meteor.y += Math.sin(meteor.angle) * meteor.speed * dt
 
           // Draw meteor trail
           const tailX = meteor.x - Math.cos(meteor.angle) * meteor.length
@@ -1307,6 +1339,7 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       }
       meteorsRef.current.forEach((m) => (m.active = false))
       lastMeteorTime = Date.now()
+      lastFrameMs = performance.now()
       if (animationFrameIdRef.current === undefined) animate()
     }
     document.addEventListener("visibilitychange", handleVisibility)
