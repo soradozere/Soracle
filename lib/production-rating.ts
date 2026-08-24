@@ -46,7 +46,7 @@
  *
  * WHERE THE PRICES COME FROM
  *
- * Sam ranked the stats by value, most to least: capture, return, BC kill, MINE GRAB,
+ * Sora ranked the stats by value, most to least: capture, return, BC kill, MINE GRAB,
  * assist, flag grab, mine kill/return, flag hold. That ordering is a judgement about
  * JK2 and is taken as given -- it cannot be derived here, because the only objective
  * arbiter (does it win games) has no signal in a league this balanced.
@@ -68,7 +68,7 @@
  * Read as price-per-event it buries captures at 3.8% of the board while BC kills
  * take 35.5%, purely because base cleans happen 16 times a game against a capture's
  * 0.87. Read as share-of-the-rating it puts captures at 22.8%, which is what the
- * ranking plainly means. The magnitudes are then tuned -- STRICTLY WITHIN Sam's
+ * ranking plainly means. The magnitudes are then tuned -- STRICTLY WITHIN Sora's
  * ordering, never reordering it -- until every role group's median player scores
  * the same:
  *
@@ -163,7 +163,7 @@ export interface ProductionRow {
    *
    * A player who never plays support still gets a Support NUMBER, because the column
    * is standardised — and a number below 50 reads as a mark against them even though
-   * doing none of a job costs exactly nothing in the scoring. Sam misread it that way
+   * doing none of a job costs exactly nothing in the scoring. Sora misread it that way
    * within a day of the board going up, so the UI shows a dash instead when this is
    * false. Display only.
    */
@@ -221,7 +221,7 @@ export interface ProductionBoard {
 /**
  * RETURNS WERE UNDER-PRICED (corrected 24 Aug 2026)
  *
- * Sam noticed a returner main sitting well below the cappers, and it was real. The
+ * Sora noticed a returner main sitting well below the cappers, and it was real. The
  * returner group's median was 14% below cap and base — the constrained tuner could
  * not lift it further without breaking his stat ordering, so it stopped short.
  *
@@ -233,7 +233,7 @@ export interface ProductionBoard {
  *   x1.6 ............ reliability 0.83, role gap 22%  (overshoots — returners
  *                     then out-earn cappers, 9.2 against 8.5)
  *
- * Sam's ordering still holds after the change: capture 24.6% of the board, return
+ * Sora's ordering still holds after the change: capture 24.6% of the board, return
  * 21.8%, BC kill 14.5%, mine grab 13.9%, assist 10.6%, flag grab 6.5%.
  *
  * WHAT THIS DOES NOT FIX, and cannot: the best returner is only 22% better than the
@@ -248,7 +248,7 @@ export interface ProductionBoard {
 /**
  * What one of each event is worth, with a capture set to 100.
  *
- * The ORDER is Sam's ranking and must not be reshuffled. The magnitudes were tuned
+ * The ORDER is Sora's ranking and must not be reshuffled. The magnitudes were tuned
  * within that order for role fairness — see the header. `mineGrabs` is one price
  * covering both own-base and enemy-base grabs (the same act, opposite ends of the
  * map); `mineKillRet` likewise covers mine kills and mine returns.
@@ -267,7 +267,7 @@ const PRICES = {
 /**
  * How much of the spread in the final rating comes from W/L rather than production.
  *
- * Sam asked for it: a player can win without piling up numbers, and production alone
+ * Sora asked for it: a player can win without piling up numbers, and production alone
  * cannot see that. It is deliberately a minority share -- the Wins board is already
  * 100% W/L -- and it is applied to a player's win rate over the whole period, not
  * per match.
@@ -278,7 +278,7 @@ const PRICES = {
  *
  *   0%  ... reliability 0.87, role gap 11%
  *   15% ... reliability 0.85, role gap 13%
- *   25% ... reliability 0.83, role gap 15%   (SHIPPED, Sam's call)
+ *   25% ... reliability 0.83, role gap 15%   (SHIPPED, Sora's call)
  *   30% ... reliability 0.81, role gap 16%
  *
  * Lowering this number improves both figures; raising it degrades both. It is the
@@ -330,7 +330,7 @@ const PRICE_OF: Record<Counter, number> = {
  * point of opponent strength, estimated across a per-match opponent-strength range
  * of sd 0.507, so it is identified over a real spread rather than extrapolated.
  *
- * Sam raised this: a player whose lobbies are consistently weaker is flattered by
+ * Sora raised this: a player whose lobbies are consistently weaker is flattered by
  * the raw numbers. That is true and measurable -- ben faces the weakest opposition
  * of all 32 players (7.65 against a pool average of 8.11), worth about 5% of his
  * production.

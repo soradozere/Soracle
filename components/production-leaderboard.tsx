@@ -254,60 +254,126 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
             </DialogTrigger>
             <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
               <DialogHeader>
-                <DialogTitle>How the Production board works</DialogTitle>
+                <DialogTitle>How the Impact board works</DialogTitle>
                 <DialogDescription>
-                  One rating, built from four jobs, calibrated so each pays the same.
+                  It counts what you did per minute, prices each thing, and adds it up.
                 </DialogDescription>
               </DialogHeader>
-              <div className="space-y-4 text-sm text-[var(--color-text-dim)]">
+              <div className="space-y-5 text-sm text-[var(--color-text-dim)]">
                 <div>
-                  <h4 className="font-semibold text-[var(--color-text)] mb-1">The four jobs</h4>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">The four steps</h4>
+                  <ol className="list-decimal list-inside space-y-1">
+                    <li>
+                      Count your captures, returns, BC kills, mine grabs, assists, flag grabs,
+                      mine kills and flag carry time
+                    </li>
+                    <li>Divide by minutes played, so a short appearance is not punished</li>
+                    <li>Multiply each by its price and add them together</li>
+                    <li>
+                      Adjust slightly for how strong the opposition was, then add a bit for your
+                      W/L record
+                    </li>
+                  </ol>
+                  <p className="mt-2">
+                    <strong className="text-[var(--color-text)]">50 is an average month. 62 is a good one.</strong>
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">The prices</h4>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-[var(--color-text-dim)]">
+                          <th className="py-1 font-medium">One of these</th>
+                          <th className="py-1 font-medium text-right">is worth</th>
+                        </tr>
+                      </thead>
+                      <tbody className="tabular-nums">
+                        {[
+                          ["Capture", "100"],
+                          ["Assist", "35"],
+                          ["Return", "11"],
+                          ["Mine grab", "5"],
+                          ["Mine kill / return", "4"],
+                          ["BC kill", "3.6"],
+                          ["Flag grab", "2.6"],
+                          ["Flag carry (per min)", "2"],
+                        ].map(([label, value]) => (
+                          <tr key={label} className="border-t border-[var(--color-border)]/40">
+                            <td className="py-1">{label}</td>
+                            <td className="py-1 text-right font-mono">{value}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-2">
+                    These stats were ranked by Sora, who is open to suggestions on changes.
+                  </p>
+                  <p className="mt-2">
+                    A capture is worth 30 BC kills each, but base cleans happen 16 times a game
+                    and captures 0.87 times — so they end up nearly level on the board overall.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
+                    The two rules that make it fair
+                  </h4>
+                  <p>
+                    <strong className="text-[var(--color-text)]">Not doing a job costs nothing.</strong>{" "}
+                    Never touch support? You score zero for it, not below. A capper is not marked
+                    down for base cleans he never made — he was in the enemy base, which is the
+                    job. That is why a column shows a dash rather than a number when you barely
+                    played it.
+                  </p>
+                  <p className="mt-2">
+                    <strong className="text-[var(--color-text)]">Nothing decides what role you played.</strong>{" "}
+                    Your caps go in Cap and your returns in Return, whoever you are. So switching
+                    role mid-game costs you nothing — you are credited for both halves. This is
+                    the reason the board works this way at all: scoring by role punished swappers
+                    by a full standard deviation.
+                  </p>
+                </div>
+
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
+                    What it deliberately ignores
+                  </h4>
                   <ul className="space-y-1">
-                    {JOBS.map((job) => (
-                      <li key={job}>
-                        <span style={{ color: JOB_COLOURS[job] }} className="font-semibold">
-                          {JOB_LABELS[job]}
-                        </span>{" "}
-                        — {JOB_DETAIL[job]}
-                      </li>
-                    ))}
+                    <li>
+                      <strong className="text-[var(--color-text)]">Kills and K/D</strong> — tested
+                      three times; they are a base-cleaner stat, not a general one
+                    </li>
+                    <li>
+                      <strong className="text-[var(--color-text)]">Sentry kills</strong> — marks
+                      who picks up a sentry, not who played well
+                    </li>
+                    <li>
+                      <strong className="text-[var(--color-text)]">ELO, TrueSkill, score</strong> —
+                      all downstream of winning
+                    </li>
+                    <li>
+                      <strong className="text-[var(--color-text)]">Winning</strong> — in, but only
+                      25%, because a result says more about the team draw than about you
+                    </li>
                   </ul>
                 </div>
+
                 <div>
                   <h4 className="font-semibold text-[var(--color-text)] mb-1">
-                    Why not doing a job costs nothing
+                    The one thing to remember
                   </h4>
                   <p>
-                    Every part of the rating counts how much you did per minute, so doing none of
-                    something scores zero rather than below average. A capper is not marked down
-                    for base cleans he never made, because he was in the enemy base — which is the
-                    job. It also means a player who switches role mid-match is credited for both
-                    halves instead of being judged against specialists at each.
+                    It measures what you produced, not how good you are. It is checked for
+                    consistency — the board says the same thing about you from one half of the
+                    month to the other. It cannot be checked against winning, because in a league
+                    this balanced, win rates are indistinguishable from coin flips.
                   </p>
-                </div>
-                <div>
-                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
-                    Why no role is worth more
-                  </h4>
-                  <p>
-                    Each stat is divided by its own spread, so a return and a base clean count
-                    comparably rather than base cleans dominating because the number is bigger.
-                    The weights are then tuned until the median capper, returner, base cleaner and
-                    support player all score the same — role fairness is imposed, not hoped for.
-                    Nobody is classified when they are ranked; the roles only appear in that
-                    offline calibration.
-                  </p>
-                </div>
-                <div>
-                  <h4 className="font-semibold text-[var(--color-text)] mb-1">What it does not do</h4>
-                  <p>
-                    W/L is in, at 25% — a player can win without piling up numbers, and
-                    production alone cannot see that. But it is kept small deliberately. Team
-                    draws swing individual games hard: the stronger side takes 76% of the most
-                    lopsided matches. Across a season that evens out, leaving win rates that are
-                    statistically indistinguishable from chance. So the other 75% measures the
-                    half of the game the draw cannot equalise, and the board is checked for
-                    consistency rather than against results.
+                  <p className="mt-2">
+                    So it is a fair, stable record of output. It is not a ranking of who is best,
+                    and it cannot be.
                   </p>
                 </div>
               </div>

@@ -1,15 +1,37 @@
 "use client"
 
 import { useState, useEffect } from "react"
+import dynamic from "next/dynamic"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ThemeSelector } from "@/components/theme-selector"
 import { AccountMenu } from "@/components/account-menu"
 import { SegmentedRail, type Segment } from "@/components/segmented-rail"
-import { MastheadLogo3D } from "@/components/masthead-logo-3d"
 import { themes, applyTheme, type ThemeName } from "@/lib/themes"
 import { useToast } from "@/hooks/use-toast"
 import { History, BarChart3, Users, Film, Scale } from "lucide-react"
+
+// Lazy, and load-bearing rather than tidiness. The logo pulls in three +
+// @react-three/fiber + drei — ~950 KB raw, ~250 KB gzipped — and SiteHeader is
+// rendered by app/(main)/layout.tsx, so a static import puts the whole 3D stack
+// on the hydration-critical path of EVERY page in the group, text-only ones
+// included. Measured by building it both ways: the homepage's eager JS goes
+// 2,005,009 -> 1,033,678 bytes raw (567,226 -> 310,278 gzipped) on this one
+// change. 45% of it was the 3D library sitting behind a 44px logo.
+//
+// The 3D viewer on profile pages has always been behind dynamic() for exactly
+// this reason (components/profile-model-panel.tsx). The masthead is the one
+// place that reintroduced the cost, a level up where it hits everything.
+//
+// ssr:false with a null fallback costs nothing: MastheadLogo3D already returns
+// null until its signed URLs resolve, so the bordered box is empty at first
+// paint either way, and the box is a fixed 44px — no layout shift, no new empty
+// state. The only real change is that the emblem arrives slightly later on a
+// cold cache, at idle priority instead of competing with the page's own JS.
+const MastheadLogo3D = dynamic(
+  () => import("@/components/masthead-logo-3d").then((m) => m.MastheadLogo3D),
+  { ssr: false, loading: () => null },
+)
 
 // Shared masthead + nav for the main site pages. Each former tab is now its own
 // route, so nav items are plain links and the active state comes from the URL —

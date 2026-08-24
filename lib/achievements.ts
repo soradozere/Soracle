@@ -342,6 +342,9 @@ export interface KillPairRow {
   killer_player_id: string
   victim_player_id: string
   kills: number
+  /** Returns this killer made against this victim — i.e. times the victim was
+   *  caught carrying. Optional: only readers that ask for the column get it. */
+  rets?: number
 }
 
 /**

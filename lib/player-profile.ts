@@ -1,6 +1,7 @@
 import { createClient } from "@/lib/supabase/client"
 import { rankBy, rankByName } from "./rank-order"
 import { killDeathRatio } from "./kd"
+import { CARRY_FLOOR_FRACTION } from "./cap-conversion"
 import { applyMatchElo, seedFromTier } from "@/lib/elo"
 import { BADGE_PRIORITY } from "@/lib/badge-meta"
 import {
@@ -249,7 +250,7 @@ function fetchMatchData(): Promise<{ matches: ProfileMatch[]; stats: StatRow[]; 
     ),
     fetchAllRows<KillPairRow>(
       "match_kills",
-      "match_id, killer_player_id, victim_player_id, kills",
+      "match_id, killer_player_id, victim_player_id, kills, rets",
     ),
     fetchAllRows<StatRow>(
       "match_stats",
@@ -382,7 +383,23 @@ interface MonthlyHonours {
   key: string
   champion: BoardPlace | null
   top5: BoardPlace[]
-  topCapper: { name: string; captures: number } | null
+  /** Best CAP CONVERSION that month — caps as a share of resolved flag runs, the
+   *  same measure as =caps and the Stats page. Null for any month without kill-
+   *  matrix data, which is every month before Aug 2026 and cannot be backfilled. */
+  /**
+   * Best capper that month, by the best measure the month's data supports.
+   *
+   * `basis: "conversion"` — caps as a share of resolved flag runs, the same
+   * measure as =caps and the Stats page. Needs match_kills (from 9 Aug 2026).
+   * `basis: "caps"` — raw cap total, the old measure, kept as the fallback for
+   * every month predating the kill matrix. Those months cannot be rescored (the
+   * CSV era never recorded who returned whom), and dropping the badge from them
+   * would retroactively strip awards players had already earned.
+   */
+  topCapper:
+    | { name: string; basis: "conversion"; conversion: number; captures: number; carries: number }
+    | { name: string; basis: "caps"; captures: number }
+    | null
   topKD: { name: string; kd: number } | null
 }
 
@@ -453,6 +470,7 @@ function computeMonthlyHonours(
   stats: StatRow[],
   nameById: Map<string, string>,
   tierByName: Map<string, number>,
+  killPairs: KillPairRow[] = [],
 ): MonthlyHonours[] {
   const currentKey = monthKey(new Date().toISOString())
 
@@ -532,10 +550,59 @@ function computeMonthlyHonours(
       }
     }
 
-    const bestCaps = Array.from(caps.entries())
-      .filter(([, total]) => total > 0)
-      .sort(rankBy(([name]) => name, (a, b) => b[1] - a[1]))[0]
-    const topCapper = bestCaps ? { name: bestCaps[0], captures: bestCaps[1] } : null
+    // Cap conversion, not raw cap totals. Most-caps rewarded whoever played the
+    // most, and the community's complaint about =caps applied here too. This
+    // mirrors lib/cap-conversion.ts exactly: a run counts only once it RESOLVES
+    // (you scored, or an enemy returned it off you), and the floor is 30% of the
+    // leader's resolved runs so two caps in three runs can't take it.
+    //
+    // Needs match_kills, so it is silently absent before Aug 2026 rather than
+    // wrong. That history cannot be recovered — the CSV era never recorded who
+    // returned whom — so those months simply have no capper badge.
+    const matchIdsThisMonth = new Set(monthMatches.map((m) => m.id))
+    const monthKillPairs = killPairs.filter((k) => matchIdsThisMonth.has(k.match_id))
+    let topCapper: MonthlyHonours["topCapper"] = null
+    if (monthKillPairs.length > 0) {
+      const matrixMatches = new Set(monthKillPairs.map((k) => k.match_id))
+      const conv = new Map<string, { caps: number; caught: number }>()
+      for (const row of stats) {
+        if (!matrixMatches.has(row.match_id)) continue
+        const name = nameById.get(row.player_id)
+        if (!name) continue
+        const rec = conv.get(name) ?? { caps: 0, caught: 0 }
+        rec.caps += row.captures ?? 0
+        conv.set(name, rec)
+      }
+      for (const k of monthKillPairs) {
+        const name = nameById.get(k.victim_player_id)
+        if (!name) continue
+        const rec = conv.get(name) ?? { caps: 0, caught: 0 }
+        rec.caught += k.rets ?? 0
+        conv.set(name, rec)
+      }
+      const rows = Array.from(conv.entries())
+        .map(([name, r]) => ({ name, captures: r.caps, carries: r.caps + r.caught }))
+        .filter((r) => r.carries > 0)
+      const topCarries = rows.reduce((max, r) => Math.max(max, r.carries), 0)
+      const floor = topCarries * CARRY_FLOOR_FRACTION
+      const best = rows
+        .filter((r) => r.carries >= floor)
+        .map((r) => ({ ...r, conversion: (r.captures / r.carries) * 100 }))
+        .sort(rankBy((r) => r.name, (a, b) => b.conversion - a.conversion))[0]
+      if (best) topCapper = { ...best, basis: "conversion" as const }
+    }
+
+    // No kill matrix for this month: fall back to cap totals rather than
+    // awarding nothing. Same floor the other honours use, which top-capper
+    // never had — its only filter was `total > 0`, so a single big game could
+    // have taken it. Verified against the record: adding the floor changes no
+    // historical winner.
+    if (!topCapper) {
+      const bestCaps = Array.from(caps.entries())
+        .filter(([name, total]) => total > 0 && (records.get(name)?.played ?? 0) >= minGames)
+        .sort(rankBy(([name]) => name, (a, b) => b[1] - a[1]))[0]
+      if (bestCaps) topCapper = { name: bestCaps[0], basis: "caps", captures: bestCaps[1] }
+    }
 
     // K/D needs a floor too, or someone who played one clean match takes it.
     const minStatMatches = Math.max(2, Math.ceil(statMatchCount * MONTHLY_MIN_FRACTION))
@@ -580,7 +647,13 @@ function badgesFor(name: string, honours: MonthlyHonours[]): ProfileBadge[] {
   })
   // Star Player is deliberately NOT collected here: it's a single "current star
   // player" title, awarded live in loadPlayerProfile, not one badge per month.
-  const capper = collect((h) => (h.topCapper?.name === name ? `${h.topCapper.captures} caps` : null))
+  const capper = collect((h) =>
+    h.topCapper?.name === name
+      ? h.topCapper.basis === "conversion"
+        ? `${h.topCapper.conversion.toFixed(1)}% conversion · ${h.topCapper.captures} caps`
+        : `${h.topCapper.captures} caps`
+      : null,
+  )
   const kd = collect((h) => (h.topKD?.name === name ? `${h.topKD.kd.toFixed(2)} K/D` : null))
 
   // Order here is cosmetic (chips render in this order); prestige ordering for
@@ -927,7 +1000,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
   )
   const achievements = computeAchievements(achSeq, secretViewsFor(player.id, secretHolders))
 
-  const honours = computeMonthlyHonours(playable, stats, nameById, tierByName)
+  const honours = computeMonthlyHonours(playable, stats, nameById, tierByName, killPairs)
 
   // Monthly badges + any all-time record this player currently holds, ordered by
   // prestige (BADGE_PRIORITY) so the chip row matches the Player Cards.
@@ -979,12 +1052,12 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
  * badge are absent from the map.
  */
 export async function loadPlayerBadges(players: Player[]): Promise<Record<string, BadgeId[]>> {
-  const { matches, stats } = await fetchMatchData()
+  const { matches, stats, killPairs } = await fetchMatchData()
 
   const nameById = new Map(players.map((p) => [p.id, p.name]))
   const tierByName = new Map(players.map((p) => [p.name, p.tierValue]))
   const playable = matches.filter((m) => m.red_team?.length && m.blue_team?.length)
-  const honours = computeMonthlyHonours(playable, stats, nameById, tierByName)
+  const honours = computeMonthlyHonours(playable, stats, nameById, tierByName, killPairs)
 
   const earned: Record<BadgeId, Set<string>> = {
     champion: new Set(),
