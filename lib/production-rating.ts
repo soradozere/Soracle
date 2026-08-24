@@ -46,7 +46,7 @@
  *
  * WHERE THE PRICES COME FROM
  *
- * Sam ranked the stats by value, most to least: capture, return, BC kill, MINE GRAB,
+ * Sora ranked the stats by value, most to least: capture, return, BC kill, MINE GRAB,
  * assist, flag grab, mine kill/return, flag hold. That ordering is a judgement about
  * JK2 and is taken as given -- it cannot be derived here, because the only objective
  * arbiter (does it win games) has no signal in a league this balanced.
@@ -68,7 +68,7 @@
  * Read as price-per-event it buries captures at 3.8% of the board while BC kills
  * take 35.5%, purely because base cleans happen 16 times a game against a capture's
  * 0.87. Read as share-of-the-rating it puts captures at 22.8%, which is what the
- * ranking plainly means. The magnitudes are then tuned -- STRICTLY WITHIN Sam's
+ * ranking plainly means. The magnitudes are then tuned -- STRICTLY WITHIN Sora's
  * ordering, never reordering it -- until every role group's median player scores
  * the same:
  *
@@ -158,6 +158,16 @@ export interface ProductionRow {
    * like "Cap 88". Display only — scoring never uses these.
    */
   jobRatings: Record<Job, number>
+  /**
+   * Whether the player did enough of each job for its rating to mean anything.
+   *
+   * A player who never plays support still gets a Support NUMBER, because the column
+   * is standardised — and a number below 50 reads as a mark against them even though
+   * doing none of a job costs exactly nothing in the scoring. Sora misread it that way
+   * within a day of the board going up, so the UI shows a dash instead when this is
+   * false. Display only.
+   */
+  jobPlayed: Record<Job, boolean>
   /** The single job that contributed most, for display. Not used in scoring. */
   topJob: Job
   games: number
@@ -187,19 +197,68 @@ export interface ProductionBoard {
 }
 
 /**
+ * WHAT AN ASSIST IS (investigated 24 Aug 2026, because it looked like a bug)
+ *
+ * Assists correlate 0.95 with returns per minute across players, which looked like
+ * the same act being priced twice. It is not. Measured:
+ *
+ *   my assists vs MY OWN captures ........... r = -0.21   (negative)
+ *   my assists vs MY TEAMMATES' captures .... r = +0.46
+ *   team assists vs team CAPTURES ........... r =  0.83, ~1.25 assists per capture
+ *   team assists vs team RETURNS ............ r =  0.44
+ *
+ * So an assist is a CAPTURE assist -- you helped someone else score, which is why it
+ * runs negative against your own captures. The count on a team is set by how many
+ * caps that team made; who collects them is mostly the players also returning, which
+ * is where the 0.95 came from. Co-occurrence, not duplication.
+ *
+ * They are also load-bearing. Removing them collapses the returner group and takes
+ * the role gap from 19% to 33%. Moving them from the Return job to the Cap job
+ * changes no rankings at all -- only which column displays them -- so they are left
+ * with the returners who actually earn them.
+ */
+
+/**
+ * RETURNS WERE UNDER-PRICED (corrected 24 Aug 2026)
+ *
+ * Sora noticed a returner main sitting well below the cappers, and it was real. The
+ * returner group's median was 14% below cap and base — the constrained tuner could
+ * not lift it further without breaking his stat ordering, so it stopped short.
+ *
+ * Multiplying the Return job (returns and assists) by 1.3 costs nothing measurable
+ * and fixes it:
+ *
+ *   current ......... reliability 0.83, role gap 15%, returner median 14% low
+ *   x1.3 ............ reliability 0.83, role gap 15%, returner median  4% low
+ *   x1.6 ............ reliability 0.83, role gap 22%  (overshoots — returners
+ *                     then out-earn cappers, 9.2 against 8.5)
+ *
+ * Sora's ordering still holds after the change: capture 24.6% of the board, return
+ * 21.8%, BC kill 14.5%, mine grab 13.9%, assist 10.6%, flag grab 6.5%.
+ *
+ * WHAT THIS DOES NOT FIX, and cannot: the best returner is only 22% better than the
+ * second-best, while the best capper is 77% better than his nearest rival and the
+ * best base cleaner 57%. Everyone returns about 8 times a game, so returning is a
+ * compressed skill — there is less room at the top of it. That is a property of the
+ * game, not of the pricing, and no weighting changes it. A pure returner is never
+ * PENALISED (doing none of a job scores zero, never negative), but a player who
+ * returns and also caps does genuinely earn from two jobs.
+ */
+
+/**
  * What one of each event is worth, with a capture set to 100.
  *
- * The ORDER is Sam's ranking and must not be reshuffled. The magnitudes were tuned
+ * The ORDER is Sora's ranking and must not be reshuffled. The magnitudes were tuned
  * within that order for role fairness — see the header. `mineGrabs` is one price
  * covering both own-base and enemy-base grabs (the same act, opposite ends of the
  * map); `mineKillRet` likewise covers mine kills and mine returns.
  */
 const PRICES = {
   caps: 100,
-  returns: 8.118,
+  returns: 10.553,
   clears: 3.556,
   mineGrabs: 5.061,
-  assists: 27.288,
+  assists: 35.474,
   grabs: 2.576,
   mineKillRet: 4.045,
   hold: 1.959,
@@ -208,7 +267,7 @@ const PRICES = {
 /**
  * How much of the spread in the final rating comes from W/L rather than production.
  *
- * Sam asked for it: a player can win without piling up numbers, and production alone
+ * Sora asked for it: a player can win without piling up numbers, and production alone
  * cannot see that. It is deliberately a minority share -- the Wins board is already
  * 100% W/L -- and it is applied to a player's win rate over the whole period, not
  * per match.
@@ -219,7 +278,7 @@ const PRICES = {
  *
  *   0%  ... reliability 0.87, role gap 11%
  *   15% ... reliability 0.85, role gap 13%
- *   25% ... reliability 0.83, role gap 15%   (SHIPPED, Sam's call)
+ *   25% ... reliability 0.83, role gap 15%   (SHIPPED, Sora's call)
  *   30% ... reliability 0.81, role gap 16%
  *
  * Lowering this number improves both figures; raising it degrades both. It is the
@@ -263,11 +322,44 @@ const PRICE_OF: Record<Counter, number> = {
   mineReturns: PRICES.mineKillRet,
 }
 
+/**
+ * How much production moves per point of opponent strength.
+ *
+ * Measured within players (each player's own average removed, so it is not just
+ * "good players meet good players") over Jun-Aug 2026: -1.021 production points per
+ * point of opponent strength, estimated across a per-match opponent-strength range
+ * of sd 0.507, so it is identified over a real spread rather than extrapolated.
+ *
+ * Sora raised this: a player whose lobbies are consistently weaker is flattered by
+ * the raw numbers. That is true and measurable -- ben faces the weakest opposition
+ * of all 32 players (7.65 against a pool average of 8.11), worth about 5% of his
+ * production.
+ *
+ * It is applied at 1x the measured slope, not more. Reliability is flat at every
+ * strength tested (0.826 unadjusted, 0.827 at 1x, 0.824 at 2x, 0.827 at 3x), so
+ * there is no evidence for a bigger correction, and a bigger one would be inventing
+ * a number. Note the slope cannot speak to lobbies far outside the observed range --
+ * whether a player would be truly decimated in an elite lobby is beyond what this
+ * data can say.
+ *
+ * Season-long it changes little, because schedule luck largely averages out: the
+ * spread of players' average opponent strength is sd 0.137 against sd 1.614 for
+ * production itself, about a ninth. On August it moved nobody more than one place.
+ * It is here because it is correct and free, not because it reorders the board.
+ */
+const OPPONENT_SLOPE = -1.021
+
 /** A match needs this many scoreboard rows before it counts as statted. */
 const MIN_ROWS_FOR_STATTED_MATCH = 8
 
 const T_MEAN = 50
 const T_SPREAD = 12
+
+/**
+ * Below this share of the pool average for a job, the player is treated as not
+ * having played it and the column shows a dash rather than a number.
+ */
+const JOB_PLAYED_FRACTION = 0.3
 
 const n = (v: number | null | undefined) => v ?? 0
 const minutesOf = (r: ProductionStatRow) => Math.max(n(r.time_played), 1)
@@ -378,6 +470,48 @@ export function computeProductionBoard(
   }
   if (pool.length === 0) return empty
 
+  // Pass 1: raw production per scoreboard row, and each player's average, so the
+  // strength of a side can be measured from what its players usually produce.
+  const rawOf = (r: ProductionStatRow) => {
+    const counts = countsOf(r)
+    const mins = minutesOf(r)
+    return COUNTERS.reduce((sum, c) => sum + PRICE_OF[c] * (counts[c] / mins), 0)
+  }
+  const career = new Map<string, { n: number; sum: number }>()
+  for (const rs of rowsByPlayer.values()) {
+    for (const r of rs) {
+      const key = r.player_id
+      const e = career.get(key) ?? { n: 0, sum: 0 }
+      e.n++
+      e.sum += rawOf(r)
+      career.set(key, e)
+    }
+  }
+  /**
+   * A player's usual production EXCLUDING the match being judged, so a strong
+   * performance cannot inflate the very opposition rating it is measured against.
+   */
+  const usualOf = (r: ProductionStatRow) => {
+    const e = career.get(r.player_id)
+    if (!e || e.n < 2) return null
+    return (e.sum - rawOf(r)) / (e.n - 1)
+  }
+
+  // Pass 2: opponent strength per row — the mean usual production of the other side.
+  const oppOf = new Map<string, number>()
+  for (const id of stattedIds) {
+    const side = rowsByMatch.get(id) ?? []
+    for (const r of side) {
+      const others = side.filter((x) => (x.team ?? "") !== (r.team ?? ""))
+      const usual = others.map(usualOf).filter((v): v is number => v != null)
+      if (usual.length > 0) {
+        oppOf.set(`${r.match_id}|${r.player_id}`, usual.reduce((a, b) => a + b, 0) / usual.length)
+      }
+    }
+  }
+  const allOpp = [...oppOf.values()]
+  const poolOpp = allOpp.length > 0 ? allOpp.reduce((a, b) => a + b, 0) / allOpp.length : 0
+
   const scored = pool.map(([name, rs]) => {
     // Each match is one observation, averaged evenly: a 20-minute appearance and a
     // 60-minute one both describe a rate, so neither should outvote the other.
@@ -385,8 +519,20 @@ export function computeProductionBoard(
     for (const r of rs) {
       const counts = countsOf(r)
       const mins = minutesOf(r)
+      const raw = rawOf(r)
+
+      // Strength of schedule. Facing a stronger side suppresses production, so what
+      // was produced against one is worth more. Spread across the jobs in proportion
+      // to where the production came from, which keeps the jobs summing to the value
+      // and keeps every one of them non-negative.
+      const opp = oppOf.get(`${r.match_id}|${r.player_id}`)
+      const shift = opp == null ? 0 : -OPPONENT_SLOPE * (opp - poolOpp)
+      // Clamped so a single lopsided lobby cannot swing a match by more than half,
+      // and can never drive a row's production below zero.
+      const factor = raw > 0 ? Math.min(1.5, Math.max(0.5, (raw + shift) / raw)) : 1
+
       for (const counter of COUNTERS) {
-        jobs[JOB_OF[counter]] += (PRICE_OF[counter] * (counts[counter] / mins)) / rs.length
+        jobs[JOB_OF[counter]] += (factor * PRICE_OF[counter] * (counts[counter] / mins)) / rs.length
       }
     }
     const value = jobs.cap + jobs.base + jobs.returns + jobs.support
@@ -432,6 +578,10 @@ export function computeProductionBoard(
     }
   }
 
+  const jobMean = Object.fromEntries(
+    JOBS.map((job) => [job, scored.reduce((t, s) => t + s.jobs[job], 0) / scored.length]),
+  ) as Record<Job, number>
+
   const rows: ProductionRow[] = withWin.map((s) => {
     const rec = record.get(s.name)
     return {
@@ -446,6 +596,9 @@ export function computeProductionBoard(
         Math.round(T_MEAN + (T_SPREAD * (s.jobs[job] - jobScale[job].mean)) / jobScale[job].sd),
       ]),
     ) as Record<Job, number>,
+    jobPlayed: Object.fromEntries(
+      JOBS.map((job) => [job, s.jobs[job] >= jobMean[job] * JOB_PLAYED_FRACTION]),
+    ) as Record<Job, boolean>,
     topJob: s.topJob,
     games: s.rs.length,
     minutes: Math.round(sumOf(s.rs, minutesOf)),
