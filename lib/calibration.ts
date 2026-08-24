@@ -51,13 +51,20 @@ export async function readAutoCalibrationEnabledAt(supabase: SupabaseClient): Pr
  * The engine.
  *
  * Design signed off 21 Aug 2026. One signal only: actual vs expected win rate,
- * the same maths the admin panel's Rank Suggestions tool has always shown —
- * expected win probability is the team's share of the match's snapshot tier sum,
- * and only games played AT THE PLAYER'S CURRENT TIER count. That last filter is
- * doing double duty: it is also the admin-override protection. Any tier change,
- * human or auto, makes older games stop counting, so a hand-set tier stands
- * until the player has produced MIN_GAMES of fresh evidence against it, and the
- * engine can never ping-pong with an admin.
+ * the same maths the admin panel's Rank Suggestions tool shows — expected win
+ * probability is the team's share of the match's snapshot tier sum, and only
+ * games played SINCE THE PLAYER'S LAST TIER CHANGE, AT THEIR CURRENT TIER,
+ * count.
+ *
+ * That pair of filters is the admin-override protection: any tier change, human
+ * or auto, makes older games stop counting, so a hand-set tier stands until the
+ * player has produced MIN_GAMES of fresh evidence against it, and the engine can
+ * never ping-pong with an admin. It takes both to hold. The snapshot-tier check
+ * alone is blind to a player who was moved off a tier and later moved back —
+ * the tier number reads the same on both spells, so the games that earned the
+ * demotion would return as evidence against it. The reset timestamp alone is
+ * blind to a move that never reached tier_changes, since that write is
+ * best-effort.
  *
  * Deliberately NOT used: ELO, TrueSkill, win rate boards (month-scale split-half
  * reliability 0.13 / −0.22 / 0.03 — noise), per-stat performance and the Impact
@@ -120,12 +127,17 @@ export type TierMove = {
  * `matches` may arrive in any order; evaluation walks newest-first so the
  * WINDOW_CAP keeps recent form. Draws are skipped outright: a draw is evidence
  * about neither over- nor under-performance, and counting it as a loss for both
- * sides (as the suggestions panel does) quietly biases everyone downward.
+ * sides quietly biases everyone downward.
+ *
+ * `lastTierChangeAt` maps a player to when their tier last moved (ISO, from
+ * tier_changes). Pass an empty map only where no such history exists — a player
+ * missing from it is evaluated over their whole visible record.
  */
 export function computeTierMoves(
   matches: CalibrationMatch[],
   currentTiers: Map<string, number>,
   candidates: string[],
+  lastTierChangeAt: Map<string, string>,
   opts: typeof CALIBRATION = CALIBRATION,
 ): TierMove[] {
   const newestFirst = [...matches].sort((a, b) => b.created_at.localeCompare(a.created_at))
@@ -135,6 +147,12 @@ export function computeTierMoves(
     const currentTier = currentTiers.get(name)
     if (currentTier === undefined) continue
 
+    // When the player was last moved. A malformed timestamp parses to NaN and
+    // is treated as "no reset on record" — the snapshot check below still
+    // stands, so a bad row costs coverage, never a wrongly-excluded game.
+    const changedAt = lastTierChangeAt.get(name)
+    const resetAt = changedAt ? Date.parse(changedAt) : Number.NaN
+
     let games = 0
     let wins = 0
     let expectedSum = 0
@@ -143,6 +161,16 @@ export function computeTierMoves(
       if (games >= opts.WINDOW_CAP) break
       if (!match.red_tiers || !match.blue_tiers) continue
       if (match.red_score === match.blue_score) continue
+
+      // Nothing from before the player's last tier change counts. The snapshot
+      // check below cannot see this on its own: a player demoted off a tier and
+      // later returned to it carries the SAME tier number both times, so their
+      // pre-demotion games would sail back in as fresh evidence and undo the
+      // very move that was made. Both filters are kept because neither covers
+      // the other — tier_changes writes are best-effort, so a move can go
+      // unlogged, and the snapshot check is what still holds the line when it
+      // does.
+      if (!Number.isNaN(resetAt) && Date.parse(match.created_at) < resetAt) continue
 
       const onRed = match.red_team.indexOf(name)
       const onBlue = onRed === -1 ? match.blue_team.indexOf(name) : -1
@@ -187,6 +215,30 @@ export function computeTierMoves(
  * player is the most that can matter; 300 recent matches is months of play. */
 const RUNNER_MATCH_FETCH = 300
 
+type PlayerRow = { id: string; name: string; tier_value: number }
+type TierChangeRow = { player_id: string; changed_at: string }
+
+/**
+ * Newest tier change per player, keyed by name — the "evidence resets here"
+ * boundary computeTierMoves takes.
+ *
+ * Order-independent by construction: it compares timestamps rather than
+ * trusting the caller to sort, so no query's ORDER BY is load-bearing here.
+ * Joined through player_id rather than the denormalised player_name, so a
+ * rename can never orphan a player's reset.
+ */
+function lastTierChangeByName(players: PlayerRow[], changes: TierChangeRow[]): Map<string, string> {
+  const nameById = new Map(players.map((p) => [p.id, p.name]))
+  const latest = new Map<string, string>()
+  for (const change of changes) {
+    const name = nameById.get(change.player_id)
+    if (!name) continue
+    const seen = latest.get(name)
+    if (!seen || Date.parse(change.changed_at) > Date.parse(seen)) latest.set(name, change.changed_at)
+  }
+  return latest
+}
+
 /**
  * The save-path runner: evaluate the participants of a just-saved match and
  * apply any moves. Gated on the admin switch (fail closed) and further scoped
@@ -204,7 +256,11 @@ export async function runAutoCalibrationSafely(
     const enabledAt = await readAutoCalibrationEnabledAt(service)
     if (!enabledAt) return []
 
-    const [{ data: players, error: playersError }, { data: matches, error: matchesError }] = await Promise.all([
+    const [
+      { data: players, error: playersError },
+      { data: matches, error: matchesError },
+      { data: tierChanges, error: tierChangesError },
+    ] = await Promise.all([
       service.from("players").select("id, name, tier_value"),
       service
         .from("matches")
@@ -214,13 +270,26 @@ export async function runAutoCalibrationSafely(
         .gte("created_at", enabledAt)
         .order("created_at", { ascending: false })
         .limit(RUNNER_MATCH_FETCH),
+      // Only changes since the switch was enabled can matter: the match fetch
+      // above is bounded by the same moment, so an older reset excludes nothing
+      // that is here anyway. `hidden` is deliberately not filtered — it hides a
+      // row from the public changelog, it does not un-happen the tier move.
+      service.from("tier_changes").select("player_id, changed_at").gte("changed_at", enabledAt),
     ])
-    if (playersError || matchesError || !players) return []
+    // Reading the reset log is not optional: without it the evidence window
+    // silently reverts to counting games from before a demotion. Fail closed,
+    // as with the switch itself.
+    if (playersError || matchesError || tierChangesError || !players) return []
 
     const tiers = new Map(players.map((p) => [p.name as string, p.tier_value as number]))
     const ids = new Map(players.map((p) => [p.name as string, p.id as string]))
 
-    const moves = computeTierMoves((matches ?? []) as CalibrationMatch[], tiers, matchPlayers)
+    const moves = computeTierMoves(
+      (matches ?? []) as CalibrationMatch[],
+      tiers,
+      matchPlayers,
+      lastTierChangeByName(players as PlayerRow[], tierChanges ?? []),
+    )
 
     for (const move of moves) {
       const id = ids.get(move.name)

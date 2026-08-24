@@ -19,8 +19,17 @@ function evenMatch(subjectTier: number, redWins: boolean, index: number): Calibr
 
 const series = (results: boolean[], tier = 5) => results.map((w, i) => evenMatch(tier, w, i))
 
-const run = (matches: CalibrationMatch[], tier = 5, candidates = ["subject"]) =>
-  computeTierMoves(matches, new Map([["subject", tier]]), candidates)
+/** The timestamp evenMatch(_, _, index) carries. A fractional index lands
+ * between two matches, which is where a tier change gets placed to split a
+ * series into "before the reset" and "after it". */
+const at = (index: number) => new Date(Date.UTC(2026, 7, 1, 12, 0, 0) - index * 3_600_000).toISOString()
+
+const run = (
+  matches: CalibrationMatch[],
+  tier = 5,
+  candidates = ["subject"],
+  lastTierChangeAt = new Map<string, string>(),
+) => computeTierMoves(matches, new Map([["subject", tier]]), candidates, lastTierChangeAt)
 
 describe("computeTierMoves", () => {
   it("promotes after ten straight wins against even expectations", () => {
@@ -63,6 +72,45 @@ describe("computeTierMoves", () => {
     expect(moves).toHaveLength(0)
   })
 
+  it("ignores games played before the player's last tier change — the evidence reset", () => {
+    // The shape that motivated this filter: a long spell at tier 8, a demotion
+    // to 7, then a return to 8. Fifteen wins all carry snapshot tier 8, but
+    // only the two newest were played after the player came back. The thirteen
+    // that earned the demotion are spent — they cannot be evidence against it a
+    // second time, so the player is two games into a fresh window and holds.
+    const moves = run(series(Array(15).fill(true), 8), 8, ["subject"], new Map([["subject", at(1.5)]]))
+    expect(moves).toHaveLength(0)
+  })
+
+  it("counts games played at or after the tier change", () => {
+    // The reset lands exactly on the oldest game of the ten: that game and
+    // everything newer is fresh evidence, so the window is full and the move
+    // stands. Guards the filter against over-reaching into games it should keep.
+    const moves = run(series(Array(10).fill(true), 8), 8, ["subject"], new Map([["subject", at(9)]]))
+    expect(moves).toHaveLength(1)
+    expect(moves[0]).toMatchObject({ from: 8, to: 9, games: 10 })
+  })
+
+  it("judges a player who has never been moved on their whole record", () => {
+    // Absent from the reset map means "no tier change on record", which must
+    // read as no lower bound — not as an empty window.
+    const moves = run(series(Array(10).fill(true), 8), 8, ["subject"], new Map())
+    expect(moves).toHaveLength(1)
+    expect(moves[0].games).toBe(10)
+  })
+
+  it("applies each player's own reset, not a shared one", () => {
+    // subject came back to tier 5 an hour ago; b1 has never moved. The same
+    // fifteen matches are a spent record for one and a full window for the other.
+    const matches = series(Array(15).fill(true))
+    const tiers = new Map([
+      ["subject", 5],
+      ["b1", 5],
+    ])
+    const moves = computeTierMoves(matches, tiers, ["subject", "b1"], new Map([["subject", at(1.5)]]))
+    expect(moves.map((m) => m.name)).toEqual(["b1"])
+  })
+
   it("skips draws entirely", () => {
     const matches = series(Array(10).fill(true))
     const draw = evenMatch(5, true, 10)
@@ -79,7 +127,7 @@ describe("computeTierMoves", () => {
       m.blue_tiers = [5, 5, 5, 5, 5, 5]
       return m
     })
-    const moves = computeTierMoves(matches, new Map([["subject", 10]]), ["subject"])
+    const moves = computeTierMoves(matches, new Map([["subject", 10]]), ["subject"], new Map())
     expect(moves).toHaveLength(0)
   })
 
@@ -100,7 +148,7 @@ describe("computeTierMoves", () => {
       ["subject", 5],
       ["b1", 5],
     ])
-    const moves = computeTierMoves(matches, tiers, ["b1"])
+    const moves = computeTierMoves(matches, tiers, ["b1"], new Map())
     // b1 lost all ten (they were on blue) — they demote; subject is not evaluated.
     expect(moves.map((m) => m.name)).toEqual(["b1"])
   })
