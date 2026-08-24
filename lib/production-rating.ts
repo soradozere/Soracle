@@ -209,6 +209,33 @@ export interface ProductionBoard {
  */
 
 /**
+ * RETURNS WERE UNDER-PRICED (corrected 24 Aug 2026)
+ *
+ * Sam noticed a returner main sitting well below the cappers, and it was real. The
+ * returner group's median was 14% below cap and base — the constrained tuner could
+ * not lift it further without breaking his stat ordering, so it stopped short.
+ *
+ * Multiplying the Return job (returns and assists) by 1.3 costs nothing measurable
+ * and fixes it:
+ *
+ *   current ......... reliability 0.83, role gap 15%, returner median 14% low
+ *   x1.3 ............ reliability 0.83, role gap 15%, returner median  4% low
+ *   x1.6 ............ reliability 0.83, role gap 22%  (overshoots — returners
+ *                     then out-earn cappers, 9.2 against 8.5)
+ *
+ * Sam's ordering still holds after the change: capture 24.6% of the board, return
+ * 21.8%, BC kill 14.5%, mine grab 13.9%, assist 10.6%, flag grab 6.5%.
+ *
+ * WHAT THIS DOES NOT FIX, and cannot: the best returner is only 22% better than the
+ * second-best, while the best capper is 77% better than his nearest rival and the
+ * best base cleaner 57%. Everyone returns about 8 times a game, so returning is a
+ * compressed skill — there is less room at the top of it. That is a property of the
+ * game, not of the pricing, and no weighting changes it. A pure returner is never
+ * PENALISED (doing none of a job scores zero, never negative), but a player who
+ * returns and also caps does genuinely earn from two jobs.
+ */
+
+/**
  * What one of each event is worth, with a capture set to 100.
  *
  * The ORDER is Sam's ranking and must not be reshuffled. The magnitudes were tuned
@@ -218,10 +245,10 @@ export interface ProductionBoard {
  */
 const PRICES = {
   caps: 100,
-  returns: 8.118,
+  returns: 10.553,
   clears: 3.556,
   mineGrabs: 5.061,
-  assists: 27.288,
+  assists: 35.474,
   grabs: 2.576,
   mineKillRet: 4.045,
   hold: 1.959,
