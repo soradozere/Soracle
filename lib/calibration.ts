@@ -239,6 +239,66 @@ function lastTierChangeByName(players: PlayerRow[], changes: TierChangeRow[]): M
   return latest
 }
 
+export type CalibrationInputs = {
+  matches: CalibrationMatch[]
+  currentTiers: Map<string, number>
+  lastTierChangeAt: Map<string, string>
+  idByName: Map<string, string>
+}
+
+/**
+ * Everything computeTierMoves needs, read in one round trip. Shared so the
+ * save-path runner and the admin panel's preview cannot drift apart: they ran
+ * separate hand-rolled versions of this query and of the maths for months, and
+ * disagreed on draws, the window and duplicate names by the end of it.
+ *
+ * `since` bounds both the match history and the reset log — pass the switch's
+ * last enable to see exactly what the engine would act on, or null to read the
+ * most recent matches with no lower bound. Bounding the two together is what
+ * keeps them consistent: a reset older than the oldest match in scope cannot
+ * exclude anything that is in scope.
+ *
+ * Throws rather than returning a partial read: calibrating on half the evidence
+ * is worse than not calibrating. Both callers already catch.
+ */
+export async function fetchCalibrationInputs(
+  supabase: SupabaseClient,
+  since: string | null,
+): Promise<CalibrationInputs> {
+  let matchQuery = supabase
+    .from("matches")
+    .select("red_team, blue_team, red_tiers, blue_tiers, red_score, blue_score, created_at")
+    .not("red_tiers", "is", null)
+    .not("blue_tiers", "is", null)
+    .order("created_at", { ascending: false })
+    .limit(RUNNER_MATCH_FETCH)
+  // `hidden` is deliberately not filtered — it hides a row from the public
+  // changelog, it does not un-happen the tier move.
+  let changeQuery = supabase.from("tier_changes").select("player_id, changed_at")
+  if (since) {
+    matchQuery = matchQuery.gte("created_at", since)
+    changeQuery = changeQuery.gte("changed_at", since)
+  }
+
+  const [
+    { data: players, error: playersError },
+    { data: matches, error: matchesError },
+    { data: tierChanges, error: tierChangesError },
+  ] = await Promise.all([supabase.from("players").select("id, name, tier_value"), matchQuery, changeQuery])
+
+  const failure = playersError || matchesError || tierChangesError
+  if (failure) throw new Error(failure.message)
+  if (!players) throw new Error("calibration: players returned no rows")
+
+  const roster = players as PlayerRow[]
+  return {
+    matches: (matches ?? []) as CalibrationMatch[],
+    currentTiers: new Map(roster.map((p) => [p.name, p.tier_value])),
+    lastTierChangeAt: lastTierChangeByName(roster, (tierChanges ?? []) as TierChangeRow[]),
+    idByName: new Map(roster.map((p) => [p.name, p.id])),
+  }
+}
+
 /**
  * The save-path runner: evaluate the participants of a just-saved match and
  * apply any moves. Gated on the admin switch (fail closed) and further scoped
@@ -256,43 +316,11 @@ export async function runAutoCalibrationSafely(
     const enabledAt = await readAutoCalibrationEnabledAt(service)
     if (!enabledAt) return []
 
-    const [
-      { data: players, error: playersError },
-      { data: matches, error: matchesError },
-      { data: tierChanges, error: tierChangesError },
-    ] = await Promise.all([
-      service.from("players").select("id, name, tier_value"),
-      service
-        .from("matches")
-        .select("red_team, blue_team, red_tiers, blue_tiers, red_score, blue_score, created_at")
-        .not("red_tiers", "is", null)
-        .not("blue_tiers", "is", null)
-        .gte("created_at", enabledAt)
-        .order("created_at", { ascending: false })
-        .limit(RUNNER_MATCH_FETCH),
-      // Only changes since the switch was enabled can matter: the match fetch
-      // above is bounded by the same moment, so an older reset excludes nothing
-      // that is here anyway. `hidden` is deliberately not filtered — it hides a
-      // row from the public changelog, it does not un-happen the tier move.
-      service.from("tier_changes").select("player_id, changed_at").gte("changed_at", enabledAt),
-    ])
-    // Reading the reset log is not optional: without it the evidence window
-    // silently reverts to counting games from before a demotion. Fail closed,
-    // as with the switch itself.
-    if (playersError || matchesError || tierChangesError || !players) return []
-
-    const tiers = new Map(players.map((p) => [p.name as string, p.tier_value as number]))
-    const ids = new Map(players.map((p) => [p.name as string, p.id as string]))
-
-    const moves = computeTierMoves(
-      (matches ?? []) as CalibrationMatch[],
-      tiers,
-      matchPlayers,
-      lastTierChangeByName(players as PlayerRow[], tierChanges ?? []),
-    )
+    const inputs = await fetchCalibrationInputs(service, enabledAt)
+    const moves = computeTierMoves(inputs.matches, inputs.currentTiers, matchPlayers, inputs.lastTierChangeAt)
 
     for (const move of moves) {
-      const id = ids.get(move.name)
+      const id = inputs.idByName.get(move.name)
       if (!id) continue
       const { error: updateError } = await service.from("players").update({ tier_value: move.to }).eq("id", id)
       if (updateError) {
