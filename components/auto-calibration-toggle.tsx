@@ -4,6 +4,7 @@ import { useState, useTransition } from "react"
 import { Loader2 } from "lucide-react"
 import { Switch } from "@/components/ui/switch"
 import { setAutoCalibration } from "@/app/admin/calibration-actions"
+import { announceAutoCalibrationChanged } from "@/lib/calibration-events"
 
 // On/off switch for the seasonal tier auto-calibrator. The server page reads the
 // current value and passes it in, so the control renders in the right state with
@@ -21,7 +22,10 @@ export function AutoCalibrationToggle({ initialEnabled }: { initialEnabled: bool
       if (!result.success) {
         setEnabled(!next)
         setError(result.error)
+        return
       }
+      // Only on success: a rolled-back toggle changed nothing to recompute.
+      announceAutoCalibrationChanged()
     })
   }
 

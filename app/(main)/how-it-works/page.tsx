@@ -179,10 +179,11 @@ export default function HowItWorksPage() {
               <li className="flex items-start gap-3">
                 <span className="text-primary font-mono font-bold">•</span>
                 <div>
-                  <strong className="text-text-bright">Only games at your current tier count</strong>
+                  <strong className="text-text-bright">Only games since you were last moved count</strong>
                   <p className="text-sm text-text-dim mt-1">
                     Get moved — by the system or an admin — and your record starts fresh. You need at least 10
-                    games at the new tier before you can move again.
+                    games at the new tier before you can move again. Coming back to a tier you held before starts
+                    a new record too; the games that moved you off it are spent.
                   </p>
                 </div>
               </li>
