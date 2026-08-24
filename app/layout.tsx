@@ -30,7 +30,7 @@ const orbitron = Orbitron({
 
 // Masthead-title hover effect, Orbitron -> AurekBesh (see MastheadTitle in
 // components/site-header.tsx). A fan font (Boba Fonts, freeware/personal-use)
-// supplied by Sam from his Downloads folder — worth a licence check.
+// supplied by Sora — worth a licence check.
 //
 // Its pairing, StarJediHollow, was tried as the title's resting face and
 // dropped for looking bad; Orbitron (above) stayed the default instead. Its
