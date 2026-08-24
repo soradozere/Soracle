@@ -331,14 +331,18 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
               <div className="space-y-4 text-sm text-[var(--color-text-dim)]">
                 <div>
                   <h4 className="font-semibold text-[var(--color-text)] mb-1">
-                    A possible bug: assists might be paid twice
+                    Resolved: assists are not paid twice
                   </h4>
                   <p>
-                    Assists track returns almost exactly — they move together 0.95 out of 1
-                    across players — yet both are priced separately and both sit in the Return
-                    job. If they are the same act counted twice, returners are over-credited by
-                    roughly a tenth of the board. Returners are currently the lowest-rated group,
-                    so fixing this would push them <em>down</em>, not up.
+                    This was listed as a possible bug and has now been checked. Assists move
+                    almost in lockstep with returns across players, which looked like the same
+                    act being counted twice. It is not: an assist is a <em>capture</em> assist —
+                    you helped someone else score. It runs slightly <em>negative</em> against
+                    your own captures, and a team&apos;s assist count tracks that team&apos;s
+                    captures at 0.83 (about 1.25 assists per capture) against 0.44 for returns.
+                    Returners collect most of them because they are the ones in the middle of the
+                    map making it happen, which is where the resemblance came from. Removing
+                    assists makes the board markedly less fair, not more.
                   </p>
                 </div>
                 <div>

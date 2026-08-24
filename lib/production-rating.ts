@@ -187,6 +187,28 @@ export interface ProductionBoard {
 }
 
 /**
+ * WHAT AN ASSIST IS (investigated 24 Aug 2026, because it looked like a bug)
+ *
+ * Assists correlate 0.95 with returns per minute across players, which looked like
+ * the same act being priced twice. It is not. Measured:
+ *
+ *   my assists vs MY OWN captures ........... r = -0.21   (negative)
+ *   my assists vs MY TEAMMATES' captures .... r = +0.46
+ *   team assists vs team CAPTURES ........... r =  0.83, ~1.25 assists per capture
+ *   team assists vs team RETURNS ............ r =  0.44
+ *
+ * So an assist is a CAPTURE assist -- you helped someone else score, which is why it
+ * runs negative against your own captures. The count on a team is set by how many
+ * caps that team made; who collects them is mostly the players also returning, which
+ * is where the 0.95 came from. Co-occurrence, not duplication.
+ *
+ * They are also load-bearing. Removing them collapses the returner group and takes
+ * the role gap from 19% to 33%. Moving them from the Return job to the Cap job
+ * changes no rankings at all -- only which column displays them -- so they are left
+ * with the returners who actually earn them.
+ */
+
+/**
  * What one of each event is worth, with a capture set to 100.
  *
  * The ORDER is Sam's ranking and must not be reshuffled. The magnitudes were tuned
