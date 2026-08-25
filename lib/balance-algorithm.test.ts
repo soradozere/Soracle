@@ -290,6 +290,45 @@ describe("tied top tier and elite-chaser spread", () => {
   })
 })
 
+describe("elite-capper monopoly", () => {
+  // A real 12-player roster (April 2026 match), stress-tested against CURRENT
+  // ratings during the 25 Aug 2026 audit of the elite-capper-stacking bug that
+  // surfaced live 24 Aug (cheese + original). Before the fix, every one of the
+  // three suggested options put the lobby's two elite (8+) cappers, cooky and
+  // suvix, on the same team -- CONCENTRATION_WEIGHT's quadratic term (300,
+  // ≈1200 for a 2-v-0 split) was cheap enough for the search to buy the
+  // monopoly with role-balance gains elsewhere. MONOPOLY_PENALTY (flat, 8000)
+  // fixes it: Perfect Balance and Fair Fight both split them; only the
+  // deliberately role-blind Off-Role option still allows it, which is correct
+  // -- Off-Role exists specifically for nights when role ratings carry no
+  // signal, and MONOPOLY_PENALTY (like CONCENTRATION_WEIGHT) is a role term.
+  const eliteCapperLobby = [
+    mk("cooky", 9, 8, 9, 0, 0, 0),
+    mk("suvix", 8, 8, 0, 0, 0, 0),
+    mk("luke", 6, 6, 0, 0, 7, 5),
+    mk("giraffe", 6, 0, 0, 6, 8, 6),
+    mk("viktor", 5, 5, 0, 0, 5, 0),
+    mk("yuki", 6, 0, 0, 7, 8, 0),
+    mk("shax", 7, 7, 0, 0, 0, 6),
+    mk("Interlude", 9, 0, 0, 0, 10, 10),
+    mk("cheese", 8, 4, 9, 9, 0, 0),
+    mk("phoenix", 7, 7, 0, 0, 0, 8),
+    mk("jin", 7, 6, 7, 8, 6, 7),
+    mk("vee", 4, 0, 0, 4, 4, 4),
+  ]
+
+  it("splits the lobby's two elite cappers in every role-aware option", () => {
+    const options = balanceTeamsWithOptions(
+      eliteCapperLobby.map((p) => p.name),
+      eliteCapperLobby,
+    )
+    for (const option of options) {
+      if (option.label === "Off-Role") continue
+      expect(sameTeam(option, "cooky", "suvix")).toBe(false)
+    }
+  })
+})
+
 describe("crown-value ties must not disarm runner-up protection", () => {
   // X is the sole best chaser (10) and shares the capper crown. Z is the
   // second-best chaser and is stacked onto X's team, leaving the opposition no
