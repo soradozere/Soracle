@@ -7,9 +7,9 @@ import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { getPlayerSession, requireFullAdmin } from "@/lib/player-role"
 import { createNameResolver, normalizeName } from "@/lib/name-match"
-import { fetchAliasesForBot, fetchPlayersForBot } from "@/lib/bot-api"
+import { fetchAliasesForBot, fetchNwhIdsForBot, fetchPlayersForBot } from "@/lib/bot-api"
 import { classifyTeam, countDistinctPlayers } from "@/lib/scoreboard-csv"
-import { extractKillMatrix, isJsonScoreboard, parseScoreboardFile } from "@/lib/scoreboard-json"
+import { extractKillMatrix, extractNwhIds, isJsonScoreboard, parseScoreboardFile } from "@/lib/scoreboard-json"
 import { computeCapConversion } from "@/lib/cap-conversion"
 import { computeReturnerRate } from "@/lib/returner-rate"
 import { notifyAchievementUnlocks } from "@/lib/achievement-notify"
@@ -685,11 +685,15 @@ export async function createPendingFromUpload(formData: FormData) {
     // Suggest a player for every in-game name up front, exactly as the bot route
     // does, so the review screen opens with the same head start.
     const admin = createServiceClient()
-    const [players, aliases] = await Promise.all([fetchPlayersForBot(), fetchAliasesForBot()])
-    const resolver = createNameResolver(players, aliases)
+    const [players, aliases, nwhMappings] = await Promise.all([
+      fetchPlayersForBot(),
+      fetchAliasesForBot(),
+      fetchNwhIdsForBot(),
+    ])
+    const resolver = createNameResolver(players, aliases, nwhMappings)
     const rows = summary.rows.map((row) => {
       const ign = (row["NAME-CLEAN"] ?? "").trim()
-      const match = resolver.resolve(ign)
+      const match = resolver.resolve(ign, row["NWH-ID"] || undefined)
       return {
         in_game_name: ign,
         team: classifyTeam(row),
@@ -852,6 +856,68 @@ async function learnAliasesFromApproval(
   }
 }
 
+// Persist confirmed nwh_id -> player_id mappings from an approved match.
+// Mirrors learnAliasesFromApproval's shape and saveKillMatrix's guard/name-join
+// pattern. Non-fatal: the match is already logged by the time this runs.
+//
+// Conflict policy: if nwh_id already maps to a DIFFERENT player_id, skip and
+// warn — never overwrite. A player could be namefaked into a wrong mapping by
+// an admin's mis-click, so this only self-corrects for the "first time we've
+// seen this nwh_id" case, not a silent overwrite of an existing mapping.
+async function learnNwhIdsFromApproval(
+  supabase: SupabaseClient,
+  file: File,
+  matchStats: Array<Record<string, unknown>>,
+) {
+  try {
+    if (!isJsonScoreboard(file.name)) return
+    const nwhByName = extractNwhIds(await file.text(), file.name)
+    if (!nwhByName || Object.keys(nwhByName).length === 0) return
+
+    // NAME-CLEAN → player_id, skipping any name claimed by two different rows —
+    // same idByName pattern saveKillMatrix uses for the kill matrix.
+    const idByName = new Map<string, string | null>()
+    for (const s of matchStats) {
+      const name = typeof s.in_game_name === "string" ? s.in_game_name.trim() : ""
+      const pid = typeof s.player_id === "string" ? s.player_id : null
+      if (!name || !pid) continue
+      idByName.set(name, idByName.has(name) && idByName.get(name) !== pid ? null : pid)
+    }
+
+    const candidates: Array<{ player_id: string; nwh_id: string }> = []
+    for (const [name, nwhId] of Object.entries(nwhByName)) {
+      const playerId = idByName.get(name)
+      if (playerId) candidates.push({ player_id: playerId, nwh_id: nwhId })
+    }
+    if (candidates.length === 0) return
+
+    const { data: existing } = await supabase.from("player_nwh_ids").select("player_id, nwh_id")
+    const existingByNwh = new Map((existing ?? []).map((r) => [r.nwh_id as string, r.player_id as string]))
+
+    const toInsert = candidates.filter((c) => {
+      const cur = existingByNwh.get(c.nwh_id)
+      if (cur === undefined) return true // new nwh_id
+      if (cur === c.player_id) return false // no-op, already correct
+      console.warn(
+        `nwh_id ${c.nwh_id} already maps to player ${cur}; this approval suggested ${c.player_id} — skipped, not overwritten.`,
+      )
+      return false
+    })
+    if (toInsert.length === 0) return
+
+    const { error } = await supabase.from("player_nwh_ids").insert(toInsert)
+    if (error) {
+      // A batch conflict shouldn't drop the rest — retry row by row, ignoring dups.
+      for (const row of toInsert) {
+        const { error: rowError } = await supabase.from("player_nwh_ids").insert(row)
+        if (rowError) console.warn(`Skipped learning nwh_id "${row.nwh_id}": ${rowError.message}`)
+      }
+    }
+  } catch (err) {
+    console.warn(`Match: nwh ids not learned —`, err)
+  }
+}
+
 // Approve a pending match: log it via the shared core, mark the row approved, learn
 // aliases from any corrected mappings, and purge the pending CSV. FormData carries
 // `pending_id`, the `file`, and the same JSON `payload` as logMatchWithStats.
@@ -909,6 +975,9 @@ export async function approvePendingMatch(formData: FormData) {
 
     // 3. Learn aliases from corrected mappings (non-fatal).
     await learnAliasesFromApproval(admin, payload.match_stats)
+
+    // 3b. Learn confirmed nwh_id mappings from this approval (non-fatal).
+    await learnNwhIdsFromApproval(admin, file, payload.match_stats)
 
     // 4. Purge the pending CSV — it now lives in match-csvs (best effort).
     try {

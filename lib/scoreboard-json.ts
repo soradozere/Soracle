@@ -38,6 +38,7 @@ interface JsonPlayerEntry {
   killTypes?: Record<string, number>
   guid?: string
   killed?: JsonKillEdge[]
+  nwhIdInfo?: { nwhId: string; likelyPlayer: string } | null
 }
 
 interface JsonScoreboard {
@@ -110,6 +111,13 @@ export function parseScoreboardJsonText(
     const row: CsvRow = { ...entry.csvData }
     // See the note above: TELE only ever appears as a killTypes key.
     row["TELE-KILLS"] = String(entry.killTypes?.TELE ?? 0)
+    // nwhId is TomArrow's persistent per-player identity, injected as a
+    // pseudo-column (mirrors TELE-KILLS above) so name-match's resolver can
+    // read it through the same CsvRow[] every downstream caller already
+    // handles. Absent (bot slot / first connection) becomes "", which
+    // resolve() treats as "no nwhId" — same falsy-string convention the rest
+    // of this pipeline uses.
+    row["NWH-ID"] = entry.nwhIdInfo?.nwhId ?? ""
     rows.push(row)
   }
   if (rows.length === 0) {
@@ -243,4 +251,39 @@ export function extractKillMatrix(text: string, filename: string): KillMatrix | 
     }
   }
   return { nameByGuid, edges }
+}
+
+/**
+ * Pull TomArrow's persistent per-player identity out of a JSON scoreboard,
+ * keyed by NAME-CLEAN — the same join key extractKillMatrix and
+ * learnAliasesFromApproval already use against match_stats.
+ *
+ * `nwhIdInfo` is `{ nwhId, likelyPlayer } | null` per player entry. Only
+ * `nwhId` is trustworthy here — `likelyPlayer` is TomArrow's own guess and is
+ * never surfaced by this function. `nwhIdInfo: null` (bot slots, first-time
+ * connections) is skipped, not an error.
+ *
+ * Returns null for a CSV or anything unparseable, same contract as
+ * extractKillMatrix: absence is normal, not an error.
+ */
+export function extractNwhIds(text: string, filename: string): Record<string, string> | null {
+  if (!isJsonScoreboard(filename)) return null
+  let parsed: JsonScoreboard
+  try {
+    parsed = JSON.parse(text) as JsonScoreboard
+  } catch {
+    return null
+  }
+  const entries = parsed.playerData
+  if (!Array.isArray(entries)) return null
+
+  const nwhByName: Record<string, string> = {}
+  for (const e of entries) {
+    const name = e?.csvData?.["NAME-CLEAN"]
+    const nwhId = e?.nwhIdInfo?.nwhId
+    if (typeof name === "string" && name.trim() && typeof nwhId === "string" && nwhId) {
+      nwhByName[name.trim()] = nwhId
+    }
+  }
+  return nwhByName
 }
