@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { Search, Trophy, ArrowRight } from "lucide-react"
 import { RARITY_META, type Rarity } from "@/lib/achievement-meta"
+import { rarityColor } from "@/lib/achievement-pages"
 import { RARITY_ORDER, RARITY_POINTS } from "@/lib/achievement-score"
 import { slug } from "@/lib/achievement-format"
 import { SegmentedRail } from "@/components/segmented-rail"
@@ -46,11 +47,11 @@ const ONE_OF_ONES = SECRET_ACHIEVEMENTS.length
 // Five real crests for the CTA's fan, one per rarity step, each in its own
 // rarity colour — the ladder in miniature.
 const CTA_CRESTS = [
-  { icon: "galactic-republic", color: RARITY_META.common.color },
-  { icon: "rebel-alliance", color: RARITY_META.rare.color },
-  { icon: "sith-eternal", color: RARITY_META.epic.color },
-  { icon: "mandalorian-crest", color: RARITY_META.legendary.color },
-  { icon: "lord-revan", color: RARITY_META.oneofone.color },
+  { icon: "galactic-republic", color: rarityColor("common") },
+  { icon: "rebel-alliance", color: rarityColor("rare") },
+  { icon: "sith-eternal", color: rarityColor("epic") },
+  { icon: "mandalorian-crest", color: rarityColor("legendary") },
+  { icon: "lord-revan", color: rarityColor("oneofone") },
 ]
 const CTA_WATERMARK = "rebel-alliance-jedi-order"
 
@@ -75,7 +76,7 @@ const SORTS: { key: SortKey; label: string }[] = [
 // crest: the accent means one thing this way, and an untitled row showing "—"
 // in a neutral grey is honest about there being nothing to show.
 const accentFor = (row: BoardRow) =>
-  row.equippedTitle ? RARITY_META[row.equippedTitle.rarity].color : "#3d4855"
+  row.equippedTitle ? rarityColor(row.equippedTitle.rarity) : "#3d4855"
 
 // Rank 1-3 get medal colours; everyone else stays quiet so the top of the board
 // reads instantly without turning the whole list into a rainbow.
@@ -105,7 +106,10 @@ function Avatar({ row }: { row: BoardRow }) {
         alt=""
         onError={() => setFailed(true)}
         className="w-11 h-11 rounded-full object-cover shrink-0"
-        style={{ border: `2px solid ${accent}`, boxShadow: `0 0 12px ${accent}40` }}
+        style={{
+          border: `2px solid ${accent}`,
+          boxShadow: `0 0 12px color-mix(in srgb, ${accent} 25%, transparent)`,
+        }}
       />
     )
   }
@@ -117,8 +121,8 @@ function Avatar({ row }: { row: BoardRow }) {
       className="w-11 h-11 rounded-full shrink-0 flex items-center justify-center font-bold text-base"
       style={{
         border: `2px solid ${accent}`,
-        boxShadow: `0 0 12px ${accent}40`,
-        backgroundColor: `${accent}1a`,
+        boxShadow: `0 0 12px color-mix(in srgb, ${accent} 25%, transparent)`,
+        backgroundColor: `color-mix(in srgb, ${accent} 10%, transparent)`,
         color: accent,
         fontFamily: "var(--font-orbitron)",
       }}
@@ -162,9 +166,9 @@ function RarityBar({ row }: { row: BoardRow }) {
           title={`${row.rarityCounts[r]} × ${RARITY_META[r].label} (${RARITY_POINTS[r]} pts each)`}
           className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded tabular-nums"
           style={{
-            color: RARITY_META[r].color,
-            backgroundColor: `${RARITY_META[r].color}1a`,
-            border: `1px solid ${RARITY_META[r].color}55`,
+            color: rarityColor(r),
+            backgroundColor: `color-mix(in srgb, ${rarityColor(r)} 10%, transparent)`,
+            border: `1px solid color-mix(in srgb, ${rarityColor(r)} 33%, transparent)`,
           }}
         >
           {row.rarityCounts[r]}
@@ -346,7 +350,7 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
                     accent). Coloured by the title's own rarity. */}
                 <span
                   className="pl-title"
-                  style={{ color: row.equippedTitle ? RARITY_META[row.equippedTitle.rarity].color : "var(--color-text-dim)" }}
+                  style={{ color: row.equippedTitle ? rarityColor(row.equippedTitle.rarity) : "var(--color-text-dim)" }}
                   title={row.equippedTitle?.title ?? undefined}
                 >
                   {row.equippedTitle?.title ?? "—"}
@@ -384,7 +388,7 @@ export function PlayersIndex({ rows }: { rows: BoardRow[] }) {
       <p className="pl-key">
         Score weighting:{" "}
         {RARITY_ORDER.map((r) => (
-          <span key={r} style={{ color: RARITY_META[r].color }}>
+          <span key={r} style={{ color: rarityColor(r) }}>
             {RARITY_META[r].label} {RARITY_POINTS[r]}
           </span>
         )).reduce<React.ReactNode[]>((out, el, i) => (i ? [...out, " · ", el] : [el]), [])}

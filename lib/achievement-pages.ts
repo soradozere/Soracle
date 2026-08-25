@@ -170,4 +170,21 @@ export function displayTitle(view: AchievementView, roman: (n: number) => string
 }
 
 export const rarityLabel = (r: Rarity) => RARITY_META[r].label
-export const rarityColor = (r: Rarity) => RARITY_META[r].color
+
+/*
+ * A rarity colour for rendering in the browser. Resolves to --rarity-* from
+ * globals.css, which Cloud City restates — see the note on RARITY_COLOR_LIGHT
+ * in lib/achievement-meta.ts for why four of the six colours are unreadable on
+ * a light ground.
+ *
+ * This returns a var(), not a hex, so it CANNOT take a hex-alpha suffix:
+ * `${rarityColor(r)}99` produces invalid CSS that silently drops the whole
+ * declaration. Use color-mix(in srgb, ... N%, transparent) instead.
+ *
+ * Anything rendering OUTSIDE the browser must keep reading RARITY_META
+ * directly, where a real hex still lives: the Discord embed colour
+ * (lib/achievement-format.ts) and the OG share card
+ * (app/api/achievement-image/[id]/route.tsx) both do, and a CSS variable
+ * would resolve to nothing in either.
+ */
+export const rarityColor = (r: Rarity) => `var(--rarity-${r})`

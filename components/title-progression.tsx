@@ -1,6 +1,7 @@
 "use client"
 
 import { RARITY_META } from "@/lib/achievement-meta"
+import { rarityColor } from "@/lib/achievement-pages"
 import { progressFor, type TitleLadder } from "@/lib/titles"
 
 // Two progression bars on the profile: the month's seasonal ladder and the
@@ -19,7 +20,7 @@ function Ladder({ ladder, value, caption }: { ladder: TitleLadder; value: number
   // Same rule for which tiers actually get a node/label: a hidden one only
   // renders once it's been cleared.
   const visibleTiers = ladder.tiers.filter((t) => !t.hidden || value >= t.threshold)
-  const accent = p.current ? RARITY_META[p.current.rarity].color : "#3d4855"
+  const accent = p.current ? rarityColor(p.current.rarity) : "#3d4855"
 
   return (
     <div className="tp-ladder">
@@ -41,12 +42,12 @@ function Ladder({ ladder, value, caption }: { ladder: TitleLadder; value: number
       </div>
 
       <div className="tp-track">
-        <div className="tp-fill" style={{ width: `${p.pct * 100}%`, background: accent, boxShadow: `0 0 10px ${accent}80` }} />
+        <div className="tp-fill" style={{ width: `${p.pct * 100}%`, background: accent, boxShadow: `0 0 10px color-mix(in srgb, ${accent} 50%, transparent)` }} />
         {/* Tier markers sit at their true position on the track, so the spacing
             shows how the thresholds actually escalate rather than evenly. */}
         {visibleTiers.map((t) => {
           const got = value >= t.threshold
-          const c = RARITY_META[t.rarity].color
+          const c = rarityColor(t.rarity)
           return (
             <span
               key={t.id}
@@ -65,7 +66,7 @@ function Ladder({ ladder, value, caption }: { ladder: TitleLadder; value: number
             <span
               key={t.id}
               className={`tp-tick ${got ? "is-got" : ""}`}
-              style={{ left: `${(t.threshold / top) * 100}%`, color: got ? RARITY_META[t.rarity].color : "#5a6472" }}
+              style={{ left: `${(t.threshold / top) * 100}%`, color: got ? rarityColor(t.rarity) : "#5a6472" }}
             >
               {t.title}
             </span>

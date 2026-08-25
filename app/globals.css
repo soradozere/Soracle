@@ -492,6 +492,47 @@ html[data-theme="cloud-city"] {
   --glass-tint: 0.1;
 }
 
+/* ===========================================================================
+   Rarity colours, as variables so the light theme can restate them.
+
+   The palette in lib/achievement-meta.ts is dark-theme-first, and measured
+   against Cloud City's rendered surface four of six colours failed WCAG's 3.0
+   floor for non-text UI — mythic at 1.06 was the same luminance as the ground,
+   i.e. invisible. The values below mirror RARITY_META (dark) and
+   RARITY_COLOR_LIGHT (Cloud City); keep the two files in step.
+
+   Only the places a rarity colour lands on the PAGE need these. Crests don't:
+   .ach-bodyfill paints its own dark gradient under every theme, so a crest's
+   colour always sits on dark and the original palette is correct there.
+   =========================================================================== */
+:root {
+  --rarity-common: #3ddc84;
+  --rarity-rare: #2f81f7;
+  --rarity-epic: #a855f7;
+  --rarity-legendary: #f5c542;
+  --rarity-mythic: #eaeeff;
+  --rarity-oneofone: #ff2fb9;
+}
+
+html[data-theme="cloud-city"] {
+  --rarity-common: #1b633b;
+  --rarity-rare: #215aad;
+  --rarity-epic: #763cad;
+  --rarity-legendary: #6e591e;
+  --rarity-mythic: #525359;
+  --rarity-oneofone: #b32182;
+}
+
+/* Every --rarity-* above is read only from JS inline styles, which the CSS
+   minifier cannot see — left unreferenced they get pruned out of the build
+   entirely and every var() resolves to nothing. This rule is what keeps them
+   alive; it is never rendered. Don't delete it. */
+.rarity-vars-keepalive {
+  color: var(--rarity-common);
+  border-color: var(--rarity-rare) var(--rarity-epic) var(--rarity-legendary) var(--rarity-mythic);
+  background-color: var(--rarity-oneofone);
+}
+
 /* Profile pages under a full-palette theme: wallpaper art and glyph rain are
    busier than the site starfield, so the panels carry more fill (the matching
    blur raise sits with .glass-panel below). Must live out here with the other
