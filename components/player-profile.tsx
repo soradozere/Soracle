@@ -37,6 +37,7 @@ import {
 } from "@/lib/titles"
 import { scoreFromViews } from "@/lib/achievement-score"
 import { RARITY_META } from "@/lib/achievement-meta"
+import { rarityColor } from "@/lib/achievement-pages"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   DropdownMenu,
@@ -681,7 +682,7 @@ function EditProfileDialog({
                 <SelectItem value="none">No title</SelectItem>
                 {titleOptions.map((t) => (
                   <SelectItem key={t.id} value={t.id}>
-                    <span style={{ color: RARITY_META[t.rarity].color }}>{t.title}</span>
+                    <span style={{ color: rarityColor(t.rarity) }}>{t.title}</span>
                     <span className="text-[#8892a0] text-xs ml-2">{t.source}</span>
                   </SelectItem>
                 ))}
@@ -1386,9 +1387,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
               <div
                 className="mt-2 text-sm font-bold tracking-wide"
                 style={{
-                  color: RARITY_META[equippedTitle.rarity].color,
+                  color: rarityColor(equippedTitle.rarity),
                   fontFamily: "var(--font-orbitron)",
-                  textShadow: `0 0 12px ${RARITY_META[equippedTitle.rarity].color}66`,
+                  textShadow: `0 0 12px color-mix(in srgb, ${rarityColor(equippedTitle.rarity)} 40%, transparent)`,
                 }}
                 title={`${equippedTitle.title} — ${equippedTitle.source}`}
               >

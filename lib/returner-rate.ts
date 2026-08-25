@@ -64,7 +64,7 @@ export interface ReturnerRate {
   gameFloor: number
 }
 
-interface StatRow {
+export interface StatRow {
   player_id: string
   match_id: string
   team: string | null
@@ -104,7 +104,7 @@ async function fetchAll<T>(
  * hand-rebuilt 8 Aug 2026 recovery CSV carries kills and returns but no mine
  * data, and there only the flag-hold term separates anyone.
  */
-function pickReturners(rows: StatRow[]): StatRow[] {
+export function pickReturners(rows: StatRow[]): StatRow[] {
   const isRed = (r: StatRow) => (r.team ?? "").toLowerCase() === "red"
   const homeMines = (r: StatRow) => (isRed(r) ? r.mine_grabs_red : r.mine_grabs_blue) ?? 0
   const awayMines = (r: StatRow) => (isRed(r) ? r.mine_grabs_blue : r.mine_grabs_red) ?? 0
@@ -144,25 +144,20 @@ function pickReturners(rows: StatRow[]): StatRow[] {
   return sorted.slice(0, end)
 }
 
-export async function computeReturnerRate(
-  supabase: SupabaseClient,
-  nameById: Map<string, string>,
-  /** Restrict to these matches (the site is month-scoped). Empty means none. */
-  matchIds?: string[],
-): Promise<ReturnerRate> {
-  if (matchIds?.length === 0) return { rows: [], gameFloor: 0 }
-
-  const stats = await fetchAll<StatRow>(() => {
-    const q = supabase
-      .from("match_stats")
-      .select(
-        "player_id, match_id, team, returns, time_played, flag_hold_ms, mine_grabs_red, mine_grabs_blue",
-      )
-    // Explicit order is required, not cosmetic: fetchAll pages with .range(),
-    // and a range over an unordered query can skip or repeat rows across page
-    // boundaries. It also pins the row order that downstream bucketing sees.
-    return (matchIds ? q.in("match_id", matchIds) : q).order("player_id").order("match_id")
-  })
+/**
+ * Build the returner-rate board from already-fetched match_stats rows. Buckets
+ * into (match, team) sides, picks each side's returners, aggregates their
+ * returns/minutes, and applies the relative game floor.
+ *
+ * Relative floor, matching the other monthly qualifiers: a fixed game count
+ * would be meaningless in a month with four matches and trivial in one with
+ * sixty. Players keep only about a third of their games after role filtering,
+ * so this is measured against returner games, not games played.
+ *
+ * Pulled out of computeReturnerRate as the pure half of the split: this takes
+ * plain rows and does no I/O, so it's the part worth unit testing directly.
+ */
+export function aggregateReturnerRates(stats: StatRow[], nameById: Map<string, string>): ReturnerRate {
   if (stats.length === 0) return { rows: [], gameFloor: 0 }
 
   // One bucket per (match, team) — roles are only meaningful within a side.
@@ -205,10 +200,6 @@ export async function computeReturnerRate(
       perMinute: a.returns / a.minutes,
     }))
 
-  // Relative floor, matching the other monthly qualifiers: a fixed game count
-  // would be meaningless in a month with four matches and trivial in one with
-  // sixty. Players keep only about a third of their games after role filtering,
-  // so this is measured against returner games, not games played.
   const topGames = all.reduce((max, r) => Math.max(max, r.games), 0)
   const gameFloor = Math.ceil(topGames * RETURNER_GAME_FLOOR_FRACTION)
 
@@ -217,4 +208,27 @@ export async function computeReturnerRate(
     .sort(rankByName((a, b) => b.perMinute - a.perMinute || b.games - a.games))
 
   return { rows, gameFloor }
+}
+
+export async function computeReturnerRate(
+  supabase: SupabaseClient,
+  nameById: Map<string, string>,
+  /** Restrict to these matches (the site is month-scoped). Empty means none. */
+  matchIds?: string[],
+): Promise<ReturnerRate> {
+  if (matchIds?.length === 0) return { rows: [], gameFloor: 0 }
+
+  const stats = await fetchAll<StatRow>(() => {
+    const q = supabase
+      .from("match_stats")
+      .select(
+        "player_id, match_id, team, returns, time_played, flag_hold_ms, mine_grabs_red, mine_grabs_blue",
+      )
+    // Explicit order is required, not cosmetic: fetchAll pages with .range(),
+    // and a range over an unordered query can skip or repeat rows across page
+    // boundaries. It also pins the row order that downstream bucketing sees.
+    return (matchIds ? q.in("match_id", matchIds) : q).order("player_id").order("match_id")
+  })
+
+  return aggregateReturnerRates(stats, nameById)
 }

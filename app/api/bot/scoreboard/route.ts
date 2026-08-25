@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import { fetchAliasesForBot, fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
+import { fetchAliasesForBot, fetchNwhIdsForBot, fetchPlayersForBot, requireBotAuth } from "@/lib/bot-api"
 import { createServiceClient } from "@/lib/supabase/admin"
 import {
   classifyTeam,
@@ -91,19 +91,20 @@ export async function POST(request: Request) {
     }
   }
 
-  // Resolve every in-game name to a suggested player (alias-aware).
-  let players, aliases
+  // Resolve every in-game name to a suggested player (alias- and nwh-aware).
+  let players, aliases, nwhMappings
   try {
     players = await fetchPlayersForBot()
     aliases = await fetchAliasesForBot()
+    nwhMappings = await fetchNwhIdsForBot()
   } catch (error) {
     console.error(error)
     return NextResponse.json({ error: "failed to load roster" }, { status: 500 })
   }
-  const resolver = createNameResolver(players, aliases)
+  const resolver = createNameResolver(players, aliases, nwhMappings)
   const rows = summary.rows.map((row: CsvRow) => {
     const ign = (row["NAME-CLEAN"] ?? "").trim()
-    const match = resolver.resolve(ign)
+    const match = resolver.resolve(ign, row["NWH-ID"] || undefined)
     return {
       in_game_name: ign,
       team: classifyTeam(row),

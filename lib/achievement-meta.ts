@@ -32,6 +32,44 @@ export const RARITY_META: Record<Rarity, { label: string; color: string; order: 
   oneofone: { label: "One of One", color: "#ff2fb9", order: 6 },
 }
 
+/*
+ * Light-theme variants of the above, for Cloud City — the one light theme.
+ *
+ * The palette above is dark-theme-first, and measured live against Cloud City's
+ * rendered surface (#eee7d9) four of the six failed WCAG's 3.0 floor for
+ * non-text UI: mythic 1.06, legendary 1.32, common 1.45, one-of-one 2.68 (rare
+ * 3.05 and epic 3.22 only scraped it). Mythic at 1.06 is the same luminance as
+ * the background — literally invisible, which is what surfaced this.
+ *
+ * Each is its own hue mixed toward black until it clears 4.5 (AA text), so hue
+ * identity survives even though value doesn't: 45% for common/legendary, 70%
+ * for rare/epic/one-of-one, 35% for mythic.
+ *
+ * Mythic is the one real compromise. It is *designed* as pearl-white ("a cold
+ * fire", see components/achievement-crest.tsx), and there is no readable
+ * pearl on cream — so on light it necessarily reads as slate. Pearl to
+ * platinum is the intent; if that ever looks wrong the answer is a different
+ * treatment for mythic on light, not a lighter grey, which just returns to
+ * being invisible.
+ *
+ * NOT consumed directly by components — these feed the --rarity-* CSS
+ * variables in globals.css, which is what the theme actually switches on. Two
+ * consumers deliberately stay on the dark-theme hex because they render with
+ * no theme context at all: the Discord embed colour (lib/achievement-format.ts)
+ * and the OG share card (app/api/achievement-image/[id]/route.tsx).
+ *
+ * Crests are unaffected and were left alone: .ach-bodyfill paints its own dark
+ * gradient regardless of theme, so a crest's colour never sits on the page.
+ */
+export const RARITY_COLOR_LIGHT: Record<Rarity, string> = {
+  common: "#1b633b",
+  rare: "#215aad",
+  epic: "#763cad",
+  legendary: "#6e591e",
+  mythic: "#525359",
+  oneofone: "#b32182",
+}
+
 // The per-match scoreboard fields achievements read. A subset of match_stats,
 // mirrored by the expanded fetch in lib/player-profile.ts.
 export interface AchStat {

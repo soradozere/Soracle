@@ -53,6 +53,17 @@ export interface CapConversion {
   carryFloor: number
 }
 
+export interface KillRow {
+  match_id: string
+  victim_player_id: string
+  rets: number
+}
+
+export interface CaptureStatRow {
+  player_id: string
+  captures: number | null
+}
+
 const PAGE_SIZE = 1000
 
 /**
@@ -82,8 +93,9 @@ async function fetchAll<T>(
 }
 
 /**
- * Build the conversion board. Returns every player with at least one resolved
- * run, sorted best-first, already filtered to those clearing the carry floor.
+ * Build the conversion board from already-fetched rows. Returns every player
+ * with at least one resolved run, sorted best-first, already filtered to
+ * those clearing the carry floor.
  *
  * The floor is relative — 30% of the leader's resolved runs — rather than an
  * absolute count, matching the existing monthly qualifiers and, unlike a fixed
@@ -92,48 +104,18 @@ async function fetchAll<T>(
  * two caps in thirty runs has a perfectly real conversion rate, and a floor on
  * cap volume would throw them out for not being a capper main — the very bias
  * this stat exists to remove.
+ *
+ * Pulled out of computeCapConversion as the pure half of the split: this takes
+ * plain rows and does no I/O, so it's the part worth unit testing directly.
  */
-export async function computeCapConversion(
-  supabase: SupabaseClient,
+export function aggregateCapConversion(
+  kills: KillRow[],
+  stats: CaptureStatRow[],
   nameById: Map<string, string>,
-  /**
-   * Restrict to these matches. The site's Reports tab is month-scoped and passes
-   * the month's ids so the card matches every other card beside it; the bot omits
-   * it and gets the whole (short) history. Passing an empty array means "no
-   * matches", not "all" — a month with no kill-matrix data must come back empty
-   * rather than silently widening to all time.
-   */
-  matchIds?: string[],
-): Promise<CapConversion> {
-  if (matchIds?.length === 0) return { rows: [], matchCount: 0, carryFloor: 0 }
-
-  const kills = await fetchAll<{ match_id: string; victim_player_id: string; rets: number }>(
-    () => {
-      const q = supabase.from("match_kills").select("match_id, victim_player_id, rets")
-      // Ordered because of the paging below, not for presentation: PostgREST
-      // .range() over an unordered query has no stable row order between pages,
-      // so rows can be skipped or repeated at a page boundary — which here would
-      // silently under- or over-count someone's returns.
-      return (matchIds ? q.in("match_id", matchIds) : q)
-        .order("match_id")
-        .order("victim_player_id")
-    },
-  )
+): CapConversion {
   if (kills.length === 0) return { rows: [], matchCount: 0, carryFloor: 0 }
 
   const coveredIds = [...new Set(kills.map((k) => k.match_id))]
-
-  // Captures come from the same matches only. Counting a player's whole career
-  // of caps against a partial history of returns would invent conversion rates
-  // well over 100%.
-  const stats = await fetchAll<{ player_id: string; captures: number | null }>(() =>
-    supabase
-      .from("match_stats")
-      .select("player_id, captures")
-      .in("match_id", coveredIds)
-      .order("player_id")
-      .order("match_id"),
-  )
 
   const caught = new Map<string, number>()
   for (const k of kills) {
@@ -168,4 +150,47 @@ export async function computeCapConversion(
     .sort(rankByName((a, b) => b.conversion - a.conversion || b.carries - a.carries))
 
   return { rows, matchCount: coveredIds.length, carryFloor }
+}
+
+export async function computeCapConversion(
+  supabase: SupabaseClient,
+  nameById: Map<string, string>,
+  /**
+   * Restrict to these matches. The site's Reports tab is month-scoped and passes
+   * the month's ids so the card matches every other card beside it; the bot omits
+   * it and gets the whole (short) history. Passing an empty array means "no
+   * matches", not "all" — a month with no kill-matrix data must come back empty
+   * rather than silently widening to all time.
+   */
+  matchIds?: string[],
+): Promise<CapConversion> {
+  if (matchIds?.length === 0) return { rows: [], matchCount: 0, carryFloor: 0 }
+
+  const kills = await fetchAll<KillRow>(() => {
+    const q = supabase.from("match_kills").select("match_id, victim_player_id, rets")
+    // Ordered because of the paging below, not for presentation: PostgREST
+    // .range() over an unordered query has no stable row order between pages,
+    // so rows can be skipped or repeated at a page boundary — which here would
+    // silently under- or over-count someone's returns.
+    return (matchIds ? q.in("match_id", matchIds) : q)
+      .order("match_id")
+      .order("victim_player_id")
+  })
+  if (kills.length === 0) return { rows: [], matchCount: 0, carryFloor: 0 }
+
+  const coveredIds = [...new Set(kills.map((k) => k.match_id))]
+
+  // Captures come from the same matches only. Counting a player's whole career
+  // of caps against a partial history of returns would invent conversion rates
+  // well over 100%.
+  const stats = await fetchAll<CaptureStatRow>(() =>
+    supabase
+      .from("match_stats")
+      .select("player_id, captures")
+      .in("match_id", coveredIds)
+      .order("player_id")
+      .order("match_id"),
+  )
+
+  return aggregateCapConversion(kills, stats, nameById)
 }

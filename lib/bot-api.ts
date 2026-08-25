@@ -2,7 +2,7 @@ import type { NextResponse } from "next/server"
 import { requireBearer } from "@/lib/bearer-auth"
 import { createClient } from "@/lib/supabase/server"
 import { mapDbPlayer } from "@/lib/fetch-players-db"
-import type { PlayerAlias } from "@/lib/name-match"
+import type { NwhMapping, PlayerAlias } from "@/lib/name-match"
 import type { Player } from "@/lib/types"
 
 /**
@@ -43,6 +43,22 @@ export async function fetchAliasesForBot(): Promise<PlayerAlias[]> {
 
   if (error) {
     throw new Error(`Failed to fetch player aliases from database: ${error.message}`)
+  }
+
+  return data ?? []
+}
+
+/**
+ * Confirmed nwh_id -> player_id mappings for server-side name resolution (the
+ * bot ingest endpoint). Public-readable via the player_nwh_ids_select_all RLS
+ * policy, so the anon-backed server client suffices. Throws on query failure.
+ */
+export async function fetchNwhIdsForBot(): Promise<NwhMapping[]> {
+  const supabase = await createClient()
+  const { data, error } = await supabase.from("player_nwh_ids").select("player_id, nwh_id")
+
+  if (error) {
+    throw new Error(`Failed to fetch nwh ids from database: ${error.message}`)
   }
 
   return data ?? []

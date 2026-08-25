@@ -1,5 +1,5 @@
 import { createClient } from "@/lib/supabase/client"
-import type { PlayerAlias } from "./name-match"
+import type { NwhMapping, PlayerAlias } from "./name-match"
 import type { Player } from "./types"
 
 // Number of days of inactivity before a player is considered inactive
@@ -61,6 +61,25 @@ export async function fetchAliasesFromDB(): Promise<PlayerAlias[]> {
     return data ?? []
   } catch (error) {
     console.error("Failed to fetch player aliases from database:", error)
+    return []
+  }
+}
+
+// Confirmed nwh_id -> player_id mappings for client-side name resolution (the
+// CSV review modal). Public-readable via the player_nwh_ids_select_all RLS
+// policy. Returns [] on failure so name matching degrades to name-only
+// rather than breaking.
+export async function fetchNwhIdsFromDB(): Promise<NwhMapping[]> {
+  try {
+    const supabase = createClient()
+    const { data, error } = await supabase.from("player_nwh_ids").select("player_id, nwh_id")
+    if (error) {
+      console.error("Failed to fetch nwh ids from database:", error)
+      return []
+    }
+    return data ?? []
+  } catch (error) {
+    console.error("Failed to fetch nwh ids from database:", error)
     return []
   }
 }

@@ -96,7 +96,7 @@ export function AchievementDetail({
         <div>
           <p className="ach-eyebrow">{CATEGORY_LABEL[category]}</p>
           <h1 className="ach-title">{view.title}</h1>
-          <p className="text-[#8892a0] max-w-[56ch]">{view.condition}</p>
+          <p className="text-[var(--color-text-dim)] max-w-[56ch]">{view.condition}</p>
           <p className="ach-statline">
             <b>{holderCount}</b> {holderCount === 1 ? "player holds" : "players hold"} this
             {tiered ? (
@@ -178,14 +178,14 @@ export function AchievementDetail({
 }
 
 const DETAIL_CSS = `
-.ach-back{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:#8892a0;text-decoration:none;margin-bottom:18px}
+.ach-back{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--color-text-dim);text-decoration:none;margin-bottom:18px}
 .ach-back:hover{color:#66fcf1}
 .ach-head{display:flex;gap:28px;align-items:center;flex-wrap:wrap;padding:8px 0 4px}
 .ach-eyebrow{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:#66fcf1;font-weight:800;margin:0 0 6px}
-.ach-title{font-family:var(--font-orbitron),sans-serif;font-size:clamp(22px,4vw,30px);letter-spacing:.05em;text-transform:uppercase;font-weight:800;color:#e6edf3;margin:0 0 6px;text-wrap:balance}
-.ach-statline{margin-top:12px;font-size:13px;color:#8892a0}
-.ach-statline b{color:#e6edf3;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
-.ach-h2{font-family:var(--font-orbitron),sans-serif;font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:#8892a0;font-weight:800;margin:34px 0 10px}
+.ach-title{font-family:var(--font-orbitron),sans-serif;font-size:clamp(22px,4vw,30px);letter-spacing:.05em;text-transform:uppercase;font-weight:800;color:var(--color-text-bright);margin:0 0 6px;text-wrap:balance}
+.ach-statline{margin-top:12px;font-size:13px;color:var(--color-text-dim)}
+.ach-statline b{color:var(--color-text-bright);font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+.ach-h2{font-family:var(--font-orbitron),sans-serif;font-size:13px;letter-spacing:.16em;text-transform:uppercase;color:var(--color-text-dim);font-weight:800;margin:34px 0 10px}
 
 .ach-tw{overflow-x:auto;border:1px solid color-mix(in srgb, var(--color-border) 72%, var(--color-background));border-radius:8px;background:color-mix(in srgb, var(--color-surface) 62%, var(--color-background))}
 .ach-table{border-collapse:collapse;width:100%;font-size:13px;min-width:420px}
@@ -200,6 +200,12 @@ const DETAIL_CSS = `
 .ach-dim{color:var(--color-text-dim)}
 .ach-empty{text-align:center;color:var(--color-text-dim);padding:22px;border:1px dashed color-mix(in srgb, var(--color-border) 72%, var(--color-background));border-radius:8px;font-size:13px;margin:0}
 .ach-pill{font-size:10px;font-weight:800;letter-spacing:.06em;padding:2px 9px;border-radius:999px;border:1px solid var(--rc);color:color-mix(in srgb,var(--rc) 82%,#fff);white-space:nowrap}
+/* Lifting the label toward #fff is what makes it read on a dark ground, and
+   exactly what kills it on a light one: on Cloud City it dragged the rarity
+   colours back down to 3.3-3.8 contrast, undoing most of what the light
+   palette bought. There the raw --rc is already tuned for cream, so use it
+   as-is. */
+html[data-theme="cloud-city"] .ach-pill{color:var(--rc)}
 
 .ach-rank-block{margin-bottom:16px}
 .ach-rank-head{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:0 2px 8px}
