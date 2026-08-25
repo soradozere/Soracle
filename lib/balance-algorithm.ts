@@ -33,6 +33,16 @@ const CONFIG = {
     ELITE_THRESHOLD: 8, // a capper rated 8+ is elite and scarce
     TOP_2_WEIGHT: 2.5, // balance each team's top-2 capper pool
     CONCENTRATION_WEIGHT: 300, // squared diff in elite-capper COUNT per team (2-v-0 ≈ 1200)
+    // Flat, constraint-level top-up on CONCENTRATION_WEIGHT for the worst case
+    // specifically: one team holding EVERY elite capper in the lobby (2+ total).
+    // Surfaced live 24 Aug 2026 (cheese + original stacked) — at 1200,
+    // CONCENTRATION_WEIGHT alone is cheap enough for the search to buy a full
+    // monopoly by paying for it with role-balance gains elsewhere, the same
+    // trade-away shape the tie/anchor family (#164/#170/#172/#173) already
+    // fixed for other rules. This does not replace CONCENTRATION_WEIGHT — the
+    // quadratic still grades partial imbalances (3-v-1, 4-v-2); this only fires
+    // on the all-or-nothing case, at constraint level so it can't be traded.
+    MONOPOLY_PENALTY: 8000,
   },
   // Mirror of the capper concentration rule for returners, added after a live game
   // (22 Aug 2026) where the recommendation put the lobby's only two chase-9s on one
@@ -41,6 +51,10 @@ const CONFIG = {
   chase: {
     ELITE_THRESHOLD: 8,
     CONCENTRATION_WEIGHT: 300, // squared diff in elite-chaser COUNT per team (2-v-0 ≈ 1200)
+    // Same sibling risk as capper.MONOPOLY_PENALTY, same fix -- this rule is
+    // structurally identical and only two days older, so it hasn't been
+    // battle-tested any longer than the capper one that just failed live.
+    MONOPOLY_PENALTY: 8000,
   },
   // Capper and Chase are the two critical roles. The capper terms above split the elite
   // cappers across teams, but nothing stops the single best capper and the single best
@@ -196,6 +210,16 @@ function bottomClusterPenalty(team1: Player[], team2: Player[]): number {
   return penalty
 }
 
+// Flat top-up for the worst case of an elite-role concentration count: one team holding
+// EVERY elite player in that role (2+ total elite in the lobby). See CONFIG.capper /
+// CONFIG.chase MONOPOLY_PENALTY for why the graduated CONCENTRATION_WEIGHT term alone
+// isn't enough to stop this case specifically.
+function monopolyPenalty(count1: number, count2: number, penalty: number): number {
+  const total = count1 + count2
+  if (total < 2) return 0
+  return count1 === total || count2 === total ? penalty : 0
+}
+
 // Best-capper / best-chaser separation — keep one team from owning BOTH pivotal duel
 // roles. Shared by the tier and ELO evaluators, which differ only in penalty scale.
 //
@@ -328,6 +352,7 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const eliteCappers1 = team1.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
   const eliteCappers2 = team2.filter((p) => p.roles.Capper >= CONFIG.capper.ELITE_THRESHOLD).length
   score += Math.pow(eliteCappers1 - eliteCappers2, 2) * CONFIG.capper.CONCENTRATION_WEIGHT
+  score += monopolyPenalty(eliteCappers1, eliteCappers2, CONFIG.capper.MONOPOLY_PENALTY)
 
   // Elite-chaser concentration — see CONFIG.chase. The crown-pair rule below can be
   // excused by a capper-value tie on the other team, so without this count the two
@@ -335,6 +360,7 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const eliteChasers1 = team1.filter((p) => p.roles.Chase >= CONFIG.chase.ELITE_THRESHOLD).length
   const eliteChasers2 = team2.filter((p) => p.roles.Chase >= CONFIG.chase.ELITE_THRESHOLD).length
   score += Math.pow(eliteChasers1 - eliteChasers2, 2) * CONFIG.chase.CONCENTRATION_WEIGHT
+  score += monopolyPenalty(eliteChasers1, eliteChasers2, CONFIG.chase.MONOPOLY_PENALTY)
 
   // 3c. Best-capper / best-chaser separation. See capperChaseSplitPenalty.
   score += capperChaseSplitPenalty(
