@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { Emblem } from "@/components/emblem"
 import { CtfVideoCard } from "@/components/ctf-video-card"
+import { DecodingTitle } from "@/components/decoding-title"
 
 export const metadata: Metadata = {
   title: "CTF 101 — JK2 Capture the Flag",
@@ -74,7 +75,8 @@ const BEATS = [
   {
     n: "Beat 02",
     title: "Clear",
-    body: "Support has already grabbed the mines and posted the pad, so there's a live exit rather than a trap.",
+    body:
+      "Support has already grabbed the mines and is fighting the enemy camp returner, so there's a live exit rather than a trap.",
   },
   {
     n: "Beat 03",
@@ -139,14 +141,10 @@ export default function Ctf101Page() {
           <span className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#66fcf1]">New Player Guide</span>
           <span className="h-px w-6 bg-[#45a29e]" />
         </div>
-        <h1
-          className="text-4xl md:text-6xl font-extrabold glow-text mb-4 text-balance"
-          style={{ fontFamily: "var(--font-orbitron)" }}
-        >
-          Twelve players. Two flags.
-          <br />
-          Everyone has a job.
-        </h1>
+        <DecodingTitle
+          lines={["Twelve players. Two flags.", "Everyone has a job."]}
+          className="text-4xl md:text-6xl font-extrabold glow-text mb-4 text-balance font-[family-name:var(--font-orbitron)]"
+        />
         <p className="max-w-2xl mx-auto text-[#8892a0] text-sm md:text-base leading-relaxed">
           JK2 CTF is a 6v6 gamemode, with a community-made set of rules and structures. We don&apos;t use force
           powers, just lightsabers, strafehopping, and the resources laying around CTF_Yavin. Most people lose their
