@@ -16,7 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Check, ChevronsUpDown, Loader2, Maximize2, RotateCcw } from "lucide-react"
 import { cn } from "@/lib/utils"
-import { fetchAliasesFromDB, fetchPlayersFromDB } from "@/lib/fetch-players-db"
+import { fetchAliasesFromDB, fetchNwhIdsFromDB, fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import {
   buildMatchStat,
   classifyTeam,
@@ -26,7 +26,7 @@ import {
   type ParseSummary,
   type TeamClass,
 } from "@/lib/scoreboard-csv"
-import { createNameResolver, type PlayerAlias } from "@/lib/name-match"
+import { createNameResolver, type NwhMapping, type PlayerAlias } from "@/lib/name-match"
 import type { CsvMatchData, MatchStatInsert, Player } from "@/lib/types"
 
 // The scoreboard review UI — team assignment, in-game-name → player mapping,
@@ -299,9 +299,10 @@ export function ScoreboardReview({
 }: ScoreboardReviewProps) {
   const [matchType, setMatchType] = useState<"manual" | "algorithm">("manual")
 
-  // Soracle players + known aliases, fetched once per mount.
+  // Soracle players + known aliases + confirmed nwh mappings, fetched once per mount.
   const [players, setPlayers] = useState<Player[]>([])
   const [aliases, setAliases] = useState<PlayerAlias[]>([])
+  const [nwhMappings, setNwhMappings] = useState<NwhMapping[]>([])
   const [playersLoading, setPlayersLoading] = useState(false)
   const [playersLoaded, setPlayersLoaded] = useState(false)
 
@@ -332,10 +333,11 @@ export function ScoreboardReview({
   useEffect(() => {
     if (playersLoaded || playersLoading) return
     setPlayersLoading(true)
-    Promise.all([fetchPlayersFromDB(), fetchAliasesFromDB()])
-      .then(([p, a]) => {
+    Promise.all([fetchPlayersFromDB(), fetchAliasesFromDB(), fetchNwhIdsFromDB()])
+      .then(([p, a, n]) => {
         setPlayers(p)
         setAliases(a)
+        setNwhMappings(n)
         setPlayersLoaded(true)
       })
       .finally(() => setPlayersLoading(false))
@@ -346,8 +348,12 @@ export function ScoreboardReview({
     [players],
   )
 
-  // Single alias-aware name resolver, rebuilt only when the roster/aliases change.
-  const resolver = useMemo(() => createNameResolver(players, aliases), [players, aliases])
+  // Single alias- and nwh-aware name resolver, rebuilt only when the roster/
+  // aliases/nwh mappings change.
+  const resolver = useMemo(
+    () => createNameResolver(players, aliases, nwhMappings),
+    [players, aliases, nwhMappings],
+  )
 
   // Sort rows: Red first, then Blue, then unexpected teams — Caps descending within each group.
   const sortedRows = useMemo(() => {
@@ -369,7 +375,7 @@ export function ScoreboardReview({
     const mapping: Record<number, string | null> = {}
     const auto: Record<number, string> = {}
     sortedRows.forEach(({ row }, i) => {
-      const match = resolver.resolve(row["NAME-CLEAN"] ?? "")
+      const match = resolver.resolve(row["NAME-CLEAN"] ?? "", row["NWH-ID"] || undefined)
       if (match) {
         mapping[i] = match.playerId
         auto[i] = match.playerId

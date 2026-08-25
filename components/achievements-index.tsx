@@ -53,7 +53,7 @@ function FeedRow({ item }: { item: FeedItem }) {
         <span
           className="ach-feed-ico"
           aria-hidden
-          style={{ filter: `drop-shadow(0 0 5px ${color}99)` }}
+          style={{ filter: `drop-shadow(0 0 5px color-mix(in srgb, ${color} 60%, transparent))` }}
         >
           <i style={{ WebkitMask: mask, mask, backgroundColor: color }} />
         </span>

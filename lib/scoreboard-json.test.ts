@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { parseScoreboardJsonText } from "./scoreboard-json"
+import { extractNwhIds, parseScoreboardJsonText } from "./scoreboard-json"
 import { REQUIRED_COLUMNS } from "./scoreboard-csv"
 
 // A minimal-but-valid csvData object: every required column present with a
@@ -57,5 +57,54 @@ describe("parseScoreboardJsonText — empty playerData entries", () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
     expect(result.summary.rows).toHaveLength(2)
+  })
+})
+
+/*
+ * nwhId is TomArrow's persistent per-player identity — present per real
+ * exports as `nwhIdInfo: { nwhId, likelyPlayer } | null` on each playerData
+ * entry, null for spectators and bot slots. Injected as a pseudo-column
+ * (mirrors TELE-KILLS) so name-match's resolver can read it through the same
+ * CsvRow[] every caller already handles.
+ */
+describe("parseScoreboardJsonText — NWH-ID pseudo-column", () => {
+  it("injects nwhId as a pseudo-column when present", () => {
+    const text = scoreboard([
+      { ...realPlayer("original", "Red"), nwhIdInfo: { nwhId: "69a9f70e", likelyPlayer: "original" } },
+    ])
+    const result = parseScoreboardJsonText(text, "test.json")
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.summary.rows[0]["NWH-ID"]).toBe("69a9f70e")
+  })
+
+  it("falls back to an empty string when nwhIdInfo is null", () => {
+    const text = scoreboard([{ ...realPlayer("Padawan", "Blue"), nwhIdInfo: null }])
+    const result = parseScoreboardJsonText(text, "test.json")
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.summary.rows[0]["NWH-ID"]).toBe("")
+  })
+})
+
+describe("extractNwhIds", () => {
+  it("keys nwhId by NAME-CLEAN, skipping null entries", () => {
+    const text = scoreboard([
+      { ...realPlayer("original", "Red"), nwhIdInfo: { nwhId: "69a9f70e", likelyPlayer: "original" } },
+      { ...realPlayer("R32", "Blue"), nwhIdInfo: { nwhId: "69aa28d6", likelyPlayer: "vee" } },
+      { ...realPlayer("Padawan", "Blue"), nwhIdInfo: null },
+    ])
+    expect(extractNwhIds(text, "test.json")).toEqual({
+      original: "69a9f70e",
+      R32: "69aa28d6",
+    })
+  })
+
+  it("returns null for a CSV filename — a JSON-only feature", () => {
+    expect(extractNwhIds("irrelevant", "test.csv")).toBeNull()
+  })
+
+  it("returns null for unparseable JSON", () => {
+    expect(extractNwhIds("not json", "test.json")).toBeNull()
   })
 })

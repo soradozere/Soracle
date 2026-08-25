@@ -7,6 +7,7 @@ import { loadPlayerBadges, playerSlug, type BadgeId } from "@/lib/player-profile
 import { BADGE_META } from "@/lib/badge-meta"
 import { BadgeIcon } from "@/components/badge-icon"
 import { RARITY_META, type Rarity } from "@/lib/achievement-meta"
+import { rarityColor } from "@/lib/achievement-pages"
 import type { PlayerRow } from "@/lib/achievements-server"
 
 // Badges are only knowable client-side (lib/player-profile.ts builds its own
@@ -15,7 +16,7 @@ import type { PlayerRow } from "@/lib/achievements-server"
 // the badge chips pop in once the client-side pass resolves. Same non-blocking
 // shape as the balancer's Player Cards.
 
-const crestAccentFor = (row: PlayerRow) => (row.best ? RARITY_META[row.best].color : "#3d4855")
+const crestAccentFor = (row: PlayerRow) => (row.best ? rarityColor(row.best) : "#3d4855")
 
 function Avatar({ row }: { row: PlayerRow }) {
   const accent = crestAccentFor(row)
@@ -28,7 +29,10 @@ function Avatar({ row }: { row: PlayerRow }) {
         alt=""
         onError={() => setFailed(true)}
         className="w-12 h-12 rounded-full object-cover shrink-0"
-        style={{ border: `2px solid ${accent}`, boxShadow: `0 0 12px ${accent}40` }}
+        style={{
+          border: `2px solid ${accent}`,
+          boxShadow: `0 0 12px color-mix(in srgb, ${accent} 25%, transparent)`,
+        }}
       />
     )
   }
@@ -37,8 +41,8 @@ function Avatar({ row }: { row: PlayerRow }) {
       className="w-12 h-12 rounded-full shrink-0 flex items-center justify-center font-bold text-base"
       style={{
         border: `2px solid ${accent}`,
-        boxShadow: `0 0 12px ${accent}40`,
-        backgroundColor: `${accent}1a`,
+        boxShadow: `0 0 12px color-mix(in srgb, ${accent} 25%, transparent)`,
+        backgroundColor: `color-mix(in srgb, ${accent} 10%, transparent)`,
         color: accent,
         fontFamily: "var(--font-orbitron)",
       }}
@@ -107,7 +111,7 @@ export function HomeActivePlayers({ players }: { players: ActivePlayerRow[] }) {
               {row.equippedTitle && (
                 <div
                   className="text-[11px] truncate font-semibold"
-                  style={{ color: RARITY_META[row.equippedTitle.rarity].color }}
+                  style={{ color: rarityColor(row.equippedTitle.rarity) }}
                 >
                   {row.equippedTitle.title}
                 </div>

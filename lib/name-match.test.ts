@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { createNameResolver, normalizeName, type PlayerAlias } from "./name-match"
+import { createNameResolver, normalizeName, type NwhMapping, type PlayerAlias } from "./name-match"
 import type { Player } from "./types"
 
 /*
@@ -113,5 +113,43 @@ describe("createNameResolver", () => {
     const hit = r.resolve("<THREE> rex")
     // Never resolves via the ambiguous normalised key.
     expect(hit?.method).not.toBe("normalized")
+  })
+})
+
+/*
+ * nwhId is TomArrow's persistent per-player identity, confirmed once by an
+ * admin and stored in player_nwh_ids from then on. It exists specifically
+ * for the case name matching cannot ever solve: a real match row with
+ * "CRAZY HORSECOCK FIGHTER" nwhIdInfo -> the player "original" (verified
+ * against a real approved match while planning this feature) -- no amount
+ * of fuzzy matching gets from that name to the right person.
+ */
+describe("nwh identity", () => {
+  it("resolves via a confirmed nwh mapping even when the name matches nobody", () => {
+    const nwh: NwhMapping[] = [{ player_id: "p-original", nwh_id: "69a9f70e" }]
+    const r = createNameResolver(ROSTER, [], nwh)
+    expect(r.resolve("CRAZY HORSECOCK FIGHTER", "69a9f70e")).toEqual({
+      playerId: "p-original",
+      method: "nwh",
+    })
+  })
+
+  it("sits in front of name matching, not behind it", () => {
+    // "sora" would resolve exactly via the name alone -- the nwh mapping here
+    // deliberately points at a DIFFERENT player, so this only passes if nwh
+    // is checked first.
+    const nwh: NwhMapping[] = [{ player_id: "p-original", nwh_id: "deadbeef" }]
+    const r = createNameResolver(ROSTER, [], nwh)
+    expect(r.resolve("sora", "deadbeef")).toEqual({ playerId: "p-original", method: "nwh" })
+  })
+
+  it("falls through to name matching when nwhId is absent or unrecognized", () => {
+    const nwh: NwhMapping[] = [{ player_id: "p-original", nwh_id: "69a9f70e" }]
+    const r = createNameResolver(ROSTER, [], nwh)
+    // No nwhId at all -- the common case, since nwhIdInfo is null for
+    // spectators and anyone never previously confirmed.
+    expect(r.resolve("sora")).toEqual({ playerId: "p-sora", method: "exact" })
+    // An nwhId that isn't in the confirmed table yet.
+    expect(r.resolve("sora", "never-seen-before")).toEqual({ playerId: "p-sora", method: "exact" })
   })
 })

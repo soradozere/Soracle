@@ -2,10 +2,12 @@
 //
 // JK2 players show up on the scoreboard with clan tags ("{FoU} Original"),
 // engine colour codes ("^1Ewok"), odd casing and spacing, and sometimes a
-// completely different name from one night to the next. This module layers four
+// completely different name from one night to the next. This module layers five
 // strategies, strongest first, so the importer auto-fills as much as it safely
 // can and leaves the rest for an admin:
 //
+//   0. nwh        — the scoreboard's persistent per-player id (see player_nwh_ids)
+//                   matches a confirmed mapping, regardless of display name
 //   1. exact      — the raw name equals a player's Soracle name
 //   2. alias      — the raw name equals a known alias (see player_aliases)
 //   3. normalized — clan-tag / colour-code / case / whitespace folded name
@@ -30,7 +32,12 @@ export interface PlayerAlias {
   alias: string
 }
 
-export type MatchMethod = "exact" | "alias" | "normalized" | "fuzzy"
+export interface NwhMapping {
+  player_id: string
+  nwh_id: string
+}
+
+export type MatchMethod = "nwh" | "exact" | "alias" | "normalized" | "fuzzy"
 
 export interface NameMatch {
   playerId: string
@@ -63,22 +70,27 @@ export function normalizeName(raw: string): string {
 }
 
 export interface NameResolver {
-  resolve(rawName: string): NameMatch | null
+  resolve(rawName: string, nwhId?: string): NameMatch | null
 }
 
-// Build a resolver over the current roster (and optional known aliases). The
-// maps are built once per call; create one resolver and reuse it across all rows
-// of a scoreboard. When two players normalize to the same key, the key is left
-// out rather than resolving ambiguously.
+// Build a resolver over the current roster (and optional known aliases /
+// confirmed nwh mappings). The maps are built once per call; create one
+// resolver and reuse it across all rows of a scoreboard. When two players
+// normalize to the same key, the key is left out rather than resolving
+// ambiguously.
 export function createNameResolver(
   players: Player[],
   aliases: PlayerAlias[] = [],
+  nwhMappings: NwhMapping[] = [],
 ): NameResolver {
   const exactByName = new Map<string, string>()
   for (const p of players) exactByName.set(p.name.trim(), p.id)
 
   const exactByAlias = new Map<string, string>()
   for (const a of aliases) exactByAlias.set(a.alias.trim(), a.player_id)
+
+  const playerIdByNwhId = new Map<string, string>()
+  for (const m of nwhMappings) playerIdByNwhId.set(m.nwh_id, m.player_id)
 
   // Normalized lookup, shared by player names and aliases. Track ambiguity so a
   // key that two different players claim is dropped instead of guessed.
@@ -106,7 +118,17 @@ export function createNameResolver(
   })
 
   return {
-    resolve(rawName: string): NameMatch | null {
+    resolve(rawName: string, nwhId?: string): NameMatch | null {
+      // Checked first, ahead of every name-based strategy below: a confirmed
+      // nwh mapping identifies the real player even when the display name is
+      // unrecognizable (JK2 players fake names constantly). Falls through to
+      // name matching when nwhId is absent or unrecognized — nwhIdInfo is
+      // null for spectators and anyone never previously confirmed.
+      if (nwhId) {
+        const nwhHit = playerIdByNwhId.get(nwhId)
+        if (nwhHit) return { playerId: nwhHit, method: "nwh" }
+      }
+
       const name = (rawName ?? "").trim()
       if (!name) return null
 
