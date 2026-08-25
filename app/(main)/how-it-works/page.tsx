@@ -1,12 +1,17 @@
 import type { Metadata } from "next"
+import Link from "next/link"
 
 export const metadata: Metadata = {
   title: "How It Works — JK2 Capture the Flag",
-  description:
-    "How ratings, the 6v6 team balancer, and auto-calibration work together for a competitive JK2 CTF queue.",
+  description: "How the 6v6 team balancer builds two even teams out of a twelve-player lobby, and what it grades.",
 }
 
 // Fully static explainer — the only main page with no client JS of its own.
+//
+// Scope: this page is about the BALANCER. The game-side material it used to
+// carry — what the five roles do, and how auto-calibration moves your tier —
+// moved to /ctf-101, which is the player-facing guide. Anything here should be
+// answering "how did the queue build these teams", not "how do I play".
 export default function HowItWorksPage() {
   return (
     <div className="container mx-auto px-4 py-8 max-w-4xl relative z-10">
@@ -31,7 +36,11 @@ export default function HowItWorksPage() {
               Support. Admins set these to start. A tier 8 Capper and a tier 8 Chaser have similar competitive
               impact (same tier) but fill completely different needs on a team (different role profiles). The
               balancer uses tier as the primary balance metric and roles as the composition metric. From there,
-              your tier moves based on your results — see Auto-Calibration below.
+              your tier moves based on your results —{" "}
+              <Link href="/ctf-101#climb" className="text-primary hover:underline">
+                how you climb is covered in CTF 101
+              </Link>
+              .
             </p>
           </section>
 
@@ -168,111 +177,15 @@ export default function HowItWorksPage() {
           </section>
 
           <section>
-            <h3 className="text-xl font-bold text-text-bright mb-3">Auto-Calibration: How You Climb</h3>
-            <p className="leading-relaxed mb-4">
-              Your tier is not set-and-forget. After every logged match, the system checks all 12 players in it:
-              your actual win rate versus what your tier predicted. Every match records the tiers both teams had
-              when it was played, so it knows what was expected of you — win roughly your team&apos;s share of
-              games. Consistently beat that expectation and you rank up. Consistently fall short and you rank down.
+            <h3 className="text-xl font-bold text-text-bright mb-3">The Roles Being Balanced</h3>
+            <p className="leading-relaxed">
+              Every player carries a rating in five roles — Capper, Chase, Camp, Base Cleaner and Support — and the
+              checks above are mostly about spreading those across both teams.{" "}
+              <Link href="/ctf-101#roles" className="text-primary hover:underline">
+                CTF 101 explains what each role actually does
+              </Link>
+              , including which habits separate a good one from a bad one.
             </p>
-            <ul className="space-y-3">
-              <li className="flex items-start gap-3">
-                <span className="text-primary font-mono font-bold">•</span>
-                <div>
-                  <strong className="text-text-bright">Only games since you were last moved count</strong>
-                  <p className="text-sm text-text-dim mt-1">
-                    Get moved — by the system or an admin — and your record starts fresh. You need at least 10
-                    games at the new tier before you can move again. Coming back to a tier you held before starts
-                    a new record too; the games that moved you off it are spent.
-                  </p>
-                </div>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="text-primary font-mono font-bold">•</span>
-                <div>
-                  <strong className="text-text-bright">Only your last 15 games count</strong>
-                  <p className="text-sm text-text-dim mt-1">It measures current form, not your entire history.</p>
-                </div>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="text-primary font-mono font-bold">•</span>
-                <div>
-                  <strong className="text-text-bright">The gap has to be real</strong>
-                  <p className="text-sm text-text-dim mt-1">
-                    Roughly a 7-3 stretch when 5-5 was expected. One lucky night moves nobody.
-                  </p>
-                </div>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="text-primary font-mono font-bold">•</span>
-                <div>
-                  <strong className="text-text-bright">One tier at a time</strong>
-                  <p className="text-sm text-text-dim mt-1">
-                    Moves are ±1 per evaluation, anywhere from tier 1 to tier 10. A genuinely mis-ranked player gets
-                    there in hops, re-proving themselves at each level.
-                  </p>
-                </div>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="text-primary font-mono font-bold">•</span>
-                <div>
-                  <strong className="text-text-bright">Every move is public</strong>
-                  <p className="text-sm text-text-dim mt-1">
-                    Auto-moves show up in the tier changelog on the Stats page, marked AUTO. Nothing happens
-                    silently.
-                  </p>
-                </div>
-              </li>
-              <li className="flex items-start gap-3">
-                <span className="text-primary font-mono font-bold">•</span>
-                <div>
-                  <strong className="text-text-bright">Admins still have the final say</strong>
-                  <p className="text-sm text-text-dim mt-1">
-                    An admin can change any tier by hand at any time. A hand-set tier stands until fresh games
-                    prove it wrong.
-                  </p>
-                </div>
-              </li>
-            </ul>
-            <p className="leading-relaxed mt-4">
-              To climb: play games, and win more than your tier says you should. That&apos;s the whole system.
-            </p>
-          </section>
-
-          <section>
-            <h3 className="text-xl font-bold text-text-bright mb-3">Role System</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="bg-background p-3 rounded-md border border-border">
-                <span className="inline-block px-2 py-1 bg-[#62d6e8] text-background text-xs font-bold rounded mb-2">
-                  CAP
-                </span>
-                <p className="text-sm">Capper - Flag carrier, evasion and speed specialist</p>
-              </div>
-              <div className="bg-background p-3 rounded-md border border-border">
-                <span className="inline-block px-2 py-1 bg-[#27ae60] text-background text-xs font-bold rounded mb-2">
-                  CHA
-                </span>
-                <p className="text-sm">Chase returner - Pursues enemy flag carrier</p>
-              </div>
-              <div className="bg-background p-3 rounded-md border border-border">
-                <span className="inline-block px-2 py-1 bg-[#45a29e] text-background text-xs font-bold rounded mb-2">
-                  CAM
-                </span>
-                <p className="text-sm">Camp returner - blocks off enemy capper and protects base hallways</p>
-              </div>
-              <div className="bg-background p-3 rounded-md border border-border">
-                <span className="inline-block px-2 py-1 bg-[#9b59b6] text-background text-xs font-bold rounded mb-2">
-                  BC
-                </span>
-                <p className="text-sm">Base Cleaner - Base control specialist</p>
-              </div>
-              <div className="bg-background p-3 rounded-md border border-border col-span-full">
-                <span className="inline-block px-2 py-1 bg-[#f39c12] text-background text-xs font-bold rounded mb-2">
-                  SUP
-                </span>
-                <p className="text-sm">Support - Flexible utility player</p>
-              </div>
-            </div>
           </section>
 
           <section>
