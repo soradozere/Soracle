@@ -514,7 +514,20 @@ html[data-theme="cloud-city"] {
   --rarity-oneofone: #ff2fb9;
 }
 
-html[data-theme="cloud-city"] {
+/* Keyed on the GROUND the colour lands on, not on the site theme, because those
+   two come apart on profile pages. A profile repaints the page to its OWNER's
+   palette by writing --color-* inline on <html> and setting data-profile-mode;
+   it never touches data-theme, which stays on the VIEWER's site theme. So
+   keying the light values on [data-theme="cloud-city"] alone put light rarity
+   colours on a dark profile — the same invisibility this fixes, inverted, and
+   worse (mythic ~1.2 on a Void profile). data-profile-mode is the honest key:
+   when a profile is open it describes the actual ground, and it is absent
+   everywhere else. The [data-profile-mode="light"] arm also closes the
+   symmetric gap that predates this: the Bespin and Geometry profile themes are
+   light grounds that were getting dark-theme rarity colours under any dark
+   site theme. */
+html[data-theme="cloud-city"]:not([data-profile-mode="dark"]),
+html[data-profile-mode="light"] {
   --rarity-common: #1b633b;
   --rarity-rare: #215aad;
   --rarity-epic: #763cad;
