@@ -5,6 +5,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog'
 import { XIcon } from 'lucide-react'
 
 import { cn } from '@/lib/utils'
+import { markDialogOpen, markDialogClosed } from '@/lib/dialog-open-events'
 
 function Dialog({
   ...props
@@ -54,6 +55,14 @@ function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
+  // Content only mounts while a dialog is open (and through its close
+  // animation), which is exactly the window background-particles.tsx needs to
+  // know about -- see lib/dialog-open-events.ts for why.
+  React.useEffect(() => {
+    markDialogOpen()
+    return markDialogClosed
+  }, [])
+
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
