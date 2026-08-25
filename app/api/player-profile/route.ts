@@ -129,6 +129,17 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unknown action animation" }, { status: 400 })
   }
 
+  // Read avatar_url before overwriting it. Of everything written below it is
+  // the only column the cached ledger reads, so it alone decides whether the
+  // HISTORY_TAG invalidation at the end is worth paying for — see the note
+  // there. One narrow select, against a route that already runs several.
+  const { data: before } = await supabase
+    .from("players")
+    .select("avatar_url")
+    .eq("id", playerId)
+    .maybeSingle()
+  const avatarChanged = (before?.avatar_url ?? null) !== avatar_url
+
   const { error } = await supabase
     .from("players")
     .update({
@@ -153,12 +164,25 @@ export async function POST(request: Request) {
    * own elsewhere and are unaffected; the board's "title" column is the top
    * crest name derived from match history, not players.title.
    *
+   * So a save that left avatar_url alone was invalidating ~54 prerendered
+   * pages (/, /achievements, /players, and the 51 crest pages, all on
+   * revalidate = 3600) for nothing -- and measured 25 Aug 2026, 63 of 84
+   * players have no avatar at all, so for most people that was every save.
+   * Hence the gate.
+   *
+   * THE COUPLING IS SILENT, so change both sides together: this is only
+   * correct while avatar_url remains the only profile-writable column in
+   * fetchHistoryRows' players select ("id, name, created_at, tier_value,
+   * avatar_url, manually_inactive"). Add a field written above to that select
+   * and this quietly stops invalidating for it -- no error, just a board that
+   * goes stale for up to an hour.
+   *
    * revalidateTag, not updateTag: this is a Route Handler, and updateTag
    * throws outright outside a Server Action. "max" is the profile the
    * deprecation warning asks for when no read-your-own-writes guarantee is
    * needed -- nothing here reads the ledger back before responding.
    */
-  revalidateTag(HISTORY_TAG, "max")
+  if (avatarChanged) revalidateTag(HISTORY_TAG, "max")
 
   return NextResponse.json({ ok: true })
 }

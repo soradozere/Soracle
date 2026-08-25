@@ -160,6 +160,13 @@ async function fetchHistoryRowsUncached(): Promise<RawHistory> {
     fetchAll<KillPairRow>(supabase, "match_kills", "match_id, killer_player_id, victim_player_id, kills"),
     // tier_value / avatar_url / manually_inactive ride along for the /players
     // board: same row, same round-trip, and the achievement passes ignore them.
+    //
+    // ADDING A COLUMN HERE IS NOT FREE. app/api/player-profile/route.ts only
+    // invalidates HISTORY_TAG when avatar_url changes, on the grounds that it
+    // is the sole profile-writable column in this list. Add another one the
+    // profile save writes (model, saber, skin, profile_theme, title, either
+    // animation, spotlight_url) and that gate silently stops firing for it --
+    // no error, just a stale board until the next revalidate. Update both.
     fetchAll<RawPlayerRow>(
       supabase,
       "players",
