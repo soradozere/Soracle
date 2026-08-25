@@ -84,6 +84,19 @@ export function TierListView({
     }
 
     filteredPlayers.forEach((player) => {
+      // A tier outside 1-10 has no bucket above, and pushing into `undefined`
+      // throws — which took the whole Tier List down for every visitor on
+      // 25 Aug 2026, when a newly-added player was left at the column default
+      // of 0. Skipping the row keeps one bad record from blanking the page.
+      //
+      // This is a backstop, not the fix: the save form rejects an out-of-range
+      // tier (components/player-management-table.tsx). But it cannot be the
+      // ONLY guard, because entry is genuinely not a single door — the admin
+      // CSV import writes tier_value as `Number.parseInt(value) || 0` with no
+      // validation (app/admin/actions.ts), the column has no CHECK constraint,
+      // and Sora edits players by hand in Supabase. Anything that renders a
+      // fixed set of tier buckets has to tolerate a row outside them.
+      if (!active[player.tierValue] || !inactive[player.tierValue]) return
       if (isPlayerInactive(player)) {
         inactive[player.tierValue].push(player)
         count++

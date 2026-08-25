@@ -133,6 +133,23 @@ export async function uploadCSV(formData: FormData) {
       return { success: false, error: "No valid players found in CSV" }
     }
 
+    // Tier must land in 1-10, the same range the roster form enforces. Worth a
+    // hard reject rather than a coerced value: the parse above is
+    // `Number.parseInt(value) || 0`, so a blank or non-numeric "Tier rank" cell
+    // silently becomes 0 — and a tier-0 player has no bucket in the Tier List,
+    // which took that page down for every visitor on 25 Aug 2026. Failing the
+    // upload with the offending name is far easier to act on than a page that
+    // renders blank a day later.
+    for (const player of players) {
+      const tier = player.tier_value as number
+      if (typeof tier !== "number" || !Number.isInteger(tier) || tier < 1 || tier > 10) {
+        return {
+          success: false,
+          error: `Invalid tier "${tier}" for player ${player.name} — must be a whole number between 1 and 10.`,
+        }
+      }
+    }
+
     // Validate Discord ID format and enforce uniqueness across all players in the file.
     const seenDiscordIds = new Map<string, string>()
     for (const player of players) {
