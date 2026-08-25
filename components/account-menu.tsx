@@ -30,32 +30,33 @@ export function AccountMenu() {
 
   useEffect(() => {
     let active = true
-    fetch("/api/player-auth/me")
-      .then((r) => r.json())
-      .then((data) => {
-        if (!active) return
-        setPlayer(data.playerId ? { name: data.name, avatarUrl: data.avatarUrl ?? null } : null)
-        setLoaded(true)
-      })
-      .catch(() => active && setLoaded(true))
-    return () => {
-      active = false
-    }
-  }, [])
 
-  useEffect(() => {
-    let active = true
-    checkIsAdmin().then(async (admin) => {
+    async function run() {
+      const me = await fetch("/api/player-auth/me")
+        .then((r) => r.json())
+        .catch(() => ({ playerId: null }))
       if (!active) return
-      if (admin) {
-        setIsAdmin(true)
-        setAdminHref("/admin")
+      setPlayer(me.playerId ? { name: me.name, avatarUrl: me.avatarUrl ?? null } : null)
+      setLoaded(true)
+
+      // Full admin: either a Supabase Auth admin, or (since this player's own
+      // /api/player-auth/me response already carries it) a player login
+      // promoted to full_admin — scripts/044_add_player_admin_roles.sql.
+      if ((await checkIsAdmin()) || me.role === "full_admin") {
+        if (active) {
+          setIsAdmin(true)
+          setAdminHref("/admin")
+        }
         return
       }
+
       // Match admins (captains) get no panel — their entry point is /logout.
-      const captain = await checkCanLogMatches()
-      if (active && captain) setAdminHref("/logout")
-    })
+      if ((await checkCanLogMatches()) || me.role === "captain") {
+        if (active) setAdminHref("/logout")
+      }
+    }
+
+    run()
     return () => {
       active = false
     }

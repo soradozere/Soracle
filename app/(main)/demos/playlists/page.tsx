@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import { listPlaylists } from "@/lib/demos-server"
-import { createClient } from "@/lib/supabase/server"
+import { requireFullAdmin } from "@/lib/player-role"
 import { PlaylistIndex } from "@/components/demo-playlists"
 
 export const metadata: Metadata = {
@@ -9,11 +9,8 @@ export const metadata: Metadata = {
 }
 
 export default async function PlaylistsPage() {
-  const [playlists, supabase] = await Promise.all([listPlaylists(), createClient()])
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  const isAdmin = user ? (await supabase.rpc("is_admin")).data === true : false
+  const [playlists, authz] = await Promise.all([listPlaylists(), requireFullAdmin()])
+  const isAdmin = authz.ok
 
   return (
     <main className="mx-auto max-w-5xl px-4 py-8">

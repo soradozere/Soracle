@@ -18,5 +18,16 @@ export async function GET() {
     .maybeSingle()
   if (!player) return NextResponse.json({ playerId: null })
 
-  return NextResponse.json({ playerId: player.id, name: player.name, avatarUrl: player.avatar_url })
+  const { data: creds } = await supabase
+    .from("player_credentials")
+    .select("role")
+    .eq("player_id", playerId)
+    .maybeSingle()
+
+  return NextResponse.json({
+    playerId: player.id,
+    name: player.name,
+    avatarUrl: player.avatar_url,
+    role: creds?.role ?? "player",
+  })
 }

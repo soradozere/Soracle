@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { getMatches, deleteMatch, updateMatchDate, updateMatchType, getMatchStats } from "@/app/admin/actions"
 import { createClient } from "@/lib/supabase/client"
-import { checkCanLogMatches } from "@/lib/is-admin"
+import { checkCanManage } from "@/lib/is-admin"
 import { Trophy, Clock, Trash2, Pencil, Check, X, BarChart3, ChevronDown, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -154,7 +154,7 @@ export function MatchHistoryTab() {
 
   useEffect(() => {
     // Match-management gate: full admins OR match admins (captains).
-    checkCanLogMatches().then(setCanManage)
+    checkCanManage().then(setCanManage)
 
     loadMatches().finally(() => setLoading(false))
     // eslint-disable-next-line react-hooks/exhaustive-deps

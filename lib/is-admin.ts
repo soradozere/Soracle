@@ -51,3 +51,42 @@ export async function checkCanLogMatches(): Promise<boolean> {
     return false
   }
 }
+
+// A player's role, if their player-login session has been promoted to
+// captain/full_admin (scripts/044_add_player_admin_roles.sql). null if
+// there's no player session, the fetch fails, or they're an unpromoted
+// "player". Client-side helper, so it goes through the API route rather than
+// querying player_credentials directly (which has no RLS and is
+// service-role-only by design).
+async function fetchPlayerRole(): Promise<"player" | "captain" | "full_admin" | null> {
+  try {
+    const res = await fetch("/api/player-auth/me")
+    if (!res.ok) return null
+    const data = await res.json()
+    return data.playerId ? (data.role ?? "player") : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Full-admin parity check that also recognizes a player login promoted to
+ * full_admin, not just a Supabase Auth admin. Prefer this over checkIsAdmin()
+ * for any UI gate on admin-only controls added after the roles feature
+ * shipped, so promoted players see the same controls you do.
+ */
+export async function checkIsFullAdmin(): Promise<boolean> {
+  if (await checkIsAdmin()) return true
+  return (await fetchPlayerRole()) === "full_admin"
+}
+
+/**
+ * checkCanLogMatches(), extended to also recognize a player login promoted to
+ * captain or full_admin. Prefer this over checkCanLogMatches() for any new
+ * match-management UI gate.
+ */
+export async function checkCanManage(): Promise<boolean> {
+  if (await checkCanLogMatches()) return true
+  const role = await fetchPlayerRole()
+  return role === "captain" || role === "full_admin"
+}

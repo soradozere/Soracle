@@ -5,6 +5,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { updateTag } from "next/cache"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
+import { getPlayerSession, requireFullAdmin } from "@/lib/player-role"
 import { createNameResolver, normalizeName } from "@/lib/name-match"
 import { fetchAliasesForBot, fetchPlayersForBot } from "@/lib/bot-api"
 import { classifyTeam, countDistinctPlayers } from "@/lib/scoreboard-csv"
@@ -19,34 +20,44 @@ import { HISTORY_TAG, computeAchievementLedger, computeStreakRecord, type Ledger
 const PENDING_BUCKET = "pending-scoreboards"
 
 // Authorize a match-management action: the caller must be a full admin OR a match
-// admin (can_log_matches()). On success the writes are performed with the
-// service-role client, so match admins never need direct table grants — they can
-// do exactly what these actions allow and nothing more. Returns the user id.
+// admin (can_log_matches()), OR a player login promoted to captain/full_admin
+// (scripts/044_add_player_admin_roles.sql). On success the writes are performed
+// with the service-role client, so match admins never need direct table grants —
+// they can do exactly what these actions allow and nothing more. Exactly one of
+// userId/playerId is set on success, so callers can attribute the action to the
+// right identity.
 async function requireMatchManager(): Promise<
-  { ok: true; userId: string } | { ok: false; error: string }
+  { ok: true; userId: string | null; playerId: string | null } | { ok: false; error: string }
 > {
   const supabase = await createClient()
   const {
     data: { user },
   } = await supabase.auth.getUser()
-  if (!user) return { ok: false, error: "Unauthorized - please sign in" }
 
-  const { data: allowed, error } = await supabase.rpc("can_log_matches")
-  if (!error) {
-    return allowed === true
-      ? { ok: true, userId: user.id }
-      : { ok: false, error: "Not authorized to manage matches" }
+  if (user) {
+    const { data: allowed, error } = await supabase.rpc("can_log_matches")
+    if (!error) {
+      if (allowed === true) return { ok: true, userId: user.id, playerId: null }
+    } else {
+      // Fallback if can_log_matches() isn't present yet (migration 013 not applied):
+      // keep full admins working so a deploy can't outrun the migration.
+      const { data: isAdmin } = await supabase.rpc("is_admin")
+      if (isAdmin === true) return { ok: true, userId: user.id, playerId: null }
+    }
   }
 
-  // Fallback if can_log_matches() isn't present yet (migration 013 not applied):
-  // keep full admins working so a deploy can't outrun the migration.
-  const { data: isAdmin } = await supabase.rpc("is_admin")
-  return isAdmin === true
-    ? { ok: true, userId: user.id }
-    : { ok: false, error: "Not authorized to manage matches" }
+  const player = await getPlayerSession()
+  if (player && (player.role === "captain" || player.role === "full_admin")) {
+    return { ok: true, userId: null, playerId: player.id }
+  }
+
+  return { ok: false, error: "Not authorized to manage matches" }
 }
 
 export async function uploadCSV(formData: FormData) {
+  const authz = await requireFullAdmin()
+  if (!authz.ok) return { success: false, error: authz.error }
+
   const file = formData.get("file") as File
 
   if (!file) {
@@ -140,7 +151,7 @@ export async function uploadCSV(formData: FormData) {
       }
     }
 
-    const supabase = await createClient()
+    const supabase = createServiceClient()
 
     // Snapshot current players (by name) BEFORE writing, so we can (a) diff old ->
     // new tiers for the changelog and (b) reuse each existing player's real id.
@@ -886,6 +897,7 @@ export async function approvePendingMatch(formData: FormData) {
         status: "approved",
         match_id: result.matchId,
         reviewed_by: authz.userId,
+        reviewed_by_player_id: authz.playerId,
         reviewed_at: new Date().toISOString(),
       })
       .eq("id", pendingId)
@@ -931,7 +943,12 @@ export async function rejectPendingMatch(pendingId: string) {
 
     const { error } = await admin
       .from("pending_matches")
-      .update({ status: "rejected", reviewed_by: authz.userId, reviewed_at: new Date().toISOString() })
+      .update({
+        status: "rejected",
+        reviewed_by: authz.userId,
+        reviewed_by_player_id: authz.playerId,
+        reviewed_at: new Date().toISOString(),
+      })
       .eq("id", pendingId)
     if (error) return { success: false, error: error.message }
 

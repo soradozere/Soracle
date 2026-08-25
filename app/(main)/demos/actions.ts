@@ -6,6 +6,7 @@ import { DEMO_FEED_TAG, type DemoMoment } from "@/lib/demos-server"
 import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
+import { requireFullAdmin } from "@/lib/player-role"
 import { titleIssue } from "@/lib/demo-title"
 import { normaliseTags } from "@/lib/demo-tags"
 import { maskSlurs } from "@/lib/profanity"
@@ -60,8 +61,8 @@ async function resolveUploader(): Promise<
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return { ok: false, error: "You need to be logged in to upload a demo." }
-  const { data: isAdmin } = await supabase.rpc("is_admin")
-  if (!isAdmin) return { ok: false, error: "Not authorized." }
+  const authz = await requireFullAdmin()
+  if (!authz.ok) return { ok: false, error: "Not authorized." }
   return { ok: true, playerId: null, source: "admin" }
 }
 
@@ -196,13 +197,8 @@ export async function finishDemoUpload(storagePath: string, formData: FormData):
 }
 
 async function requireAdmin(): Promise<{ ok: true } | { ok: false; error: string }> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return { ok: false, error: "Not authorized." }
-  const { data: isAdmin } = await supabase.rpc("is_admin")
-  return isAdmin ? { ok: true } : { ok: false, error: "Not authorized." }
+  const authz = await requireFullAdmin()
+  return authz.ok ? { ok: true } : { ok: false, error: "Not authorized." }
 }
 
 /**
