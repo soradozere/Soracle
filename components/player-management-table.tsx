@@ -151,6 +151,18 @@ export function PlayerManagementTable() {
       return
     }
 
+    // A tier outside 1-10 (0 included) has no bucket in the Tier List view and
+    // crashes it for every visitor -- block it here rather than at render time.
+    const tier = editingPlayer.tier_value
+    if (!tier || tier < 1 || tier > 10) {
+      toast({
+        title: "Invalid tier",
+        description: "Tier must be between 1 and 10 — not 0.",
+        variant: "destructive",
+      })
+      return
+    }
+
     const { ids: discordIds, invalid } = parseDiscordIds(discordInput)
     if (invalid.length > 0) {
       toast({
