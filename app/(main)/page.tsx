@@ -152,17 +152,21 @@ export default async function HomePage() {
             does the same job of separating "go do something" from "go look at
             something" without a second line. */}
         <div className="flex flex-wrap items-center justify-center gap-3 mt-8">
-          {/* Was "Open the Team Balancer" — the balancer itself is one click away
-              in the nav rail, but nothing on the homepage explained the ratings,
-              the balance rules, or auto-calibration to a new or returning player.
-              This is the front door to that explanation now. */}
+          {/* Was "Open the Team Balancer", then "How It Works". The balancer is
+              one click away in the nav rail, and nothing on the homepage taught
+              a new player the game itself — the roles, how a capture actually
+              plays out, how their tier moves. CTF 101 is that, and this is its
+              only entry point: it is deliberately NOT in the nav rail, so the
+              rail stays a list of places you go rather than things you read.
+              /how-it-works still exists for the balancer specifically, linked
+              from the balancer panel and from CTF 101. */}
           <Link
-            href="/how-it-works"
+            href="/ctf-101"
             style={{ backgroundColor: "var(--color-primary)", color: "var(--color-background)" }}
             className="px-6 py-2.5 font-bold rounded-md transition-all text-sm hover-glow inline-flex items-center gap-2"
           >
             <BookOpen className="w-4 h-4" />
-            How It Works
+            CTF 101
           </Link>
           <Link
             href="/stats"
