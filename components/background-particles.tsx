@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useRef, forwardRef, useImperativeHandle } from "react"
+import { DIALOG_OPEN_CHANGED, isAnyDialogOpen } from "@/lib/dialog-open-events"
 
 interface Star {
   x: number
@@ -1331,8 +1332,17 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
     // loop while hidden, and clear the sky before restarting so nothing survives
     // the gap. The spawn clock is rebased too, or the first frame back would fire
     // immediately on a stale timestamp.
-    const handleVisibility = () => {
-      if (document.hidden) {
+    //
+    // A dialog being open pauses it the same way, for a different reason: a
+    // dialog's translucent, blurred surface re-samples whatever this canvas just
+    // painted on every frame IT is visible, and a continuously repainting canvas
+    // underneath is exactly the kind of moving target that has, once already,
+    // bled through a translucent surface elsewhere on this page (see the
+    // `will-change` comment below) — caught live as a dialog occasionally
+    // rendering with no visible background at all. See lib/dialog-open-events.ts.
+    const shouldPause = () => document.hidden || isAnyDialogOpen()
+    const syncPauseState = () => {
+      if (shouldPause()) {
         if (animationFrameIdRef.current) cancelAnimationFrame(animationFrameIdRef.current)
         animationFrameIdRef.current = undefined
         return
@@ -1342,13 +1352,15 @@ export const BackgroundParticles = forwardRef<BackgroundParticlesRef>((props, re
       lastFrameMs = performance.now()
       if (animationFrameIdRef.current === undefined) animate()
     }
-    document.addEventListener("visibilitychange", handleVisibility)
+    document.addEventListener("visibilitychange", syncPauseState)
+    window.addEventListener(DIALOG_OPEN_CHANGED, syncPauseState)
 
-    animate()
+    if (!shouldPause()) animate()
 
     return () => {
       window.removeEventListener("resize", resizeCanvas)
-      document.removeEventListener("visibilitychange", handleVisibility)
+      document.removeEventListener("visibilitychange", syncPauseState)
+      window.removeEventListener(DIALOG_OPEN_CHANGED, syncPauseState)
       observer.disconnect()
       if (animationFrameIdRef.current) {
         cancelAnimationFrame(animationFrameIdRef.current)
