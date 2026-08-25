@@ -129,16 +129,18 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unknown action animation" }, { status: 400 })
   }
 
-  // Read avatar_url before overwriting it. Of everything written below it is
-  // the only column the cached ledger reads, so it alone decides whether the
-  // HISTORY_TAG invalidation at the end is worth paying for — see the note
-  // there. One narrow select, against a route that already runs several.
+  // Read the cache-relevant columns before overwriting them: of everything
+  // written below, these are the ones a HISTORY_TAG-cached page actually
+  // renders, so they alone decide whether the invalidation at the end is worth
+  // paying for. See the note there for the full list and how it was derived.
+  // One narrow select, against a route that already runs several.
   const { data: before } = await supabase
     .from("players")
-    .select("avatar_url")
+    .select("avatar_url, title")
     .eq("id", playerId)
     .maybeSingle()
-  const avatarChanged = (before?.avatar_url ?? null) !== avatar_url
+  const cacheRelevantChanged =
+    (before?.avatar_url ?? null) !== avatar_url || (before?.title ?? null) !== titleId
 
   const { error } = await supabase
     .from("players")
@@ -157,32 +159,43 @@ export async function POST(request: Request) {
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
   /*
-   * Of everything written above, avatar_url is the one the cached achievement
-   * ledger reads (see HISTORY_TAG in achievements-server.ts) -- it rides along
-   * in the same row fetch to feed the /players board's avatars. The rest
-   * (model, saber, skin, theme, animations, equipped title) are read on their
-   * own elsewhere and are unaffected; the board's "title" column is the top
-   * crest name derived from match history, not players.title.
+   * Of the nine columns written above, exactly TWO are rendered by a page
+   * cached under HISTORY_TAG, and they are read by two DIFFERENT queries --
+   * which is the trap here:
+   *   - avatar_url, via fetchHistoryRows' players select
+   *     ("id, name, created_at, tier_value, avatar_url, manually_inactive")
+   *     in lib/achievements-server.ts, feeding the /players board's avatars;
+   *   - title, via resolveEquippedTitles' OWN select ("id, title") in
+   *     lib/titles-server.ts, called by app/(main)/players/page.tsx and
+   *     app/(main)/page.tsx to render the Title column and the homepage's
+   *     active-players list.
+   * The rest (model, saber, skin, profile_theme, both animations,
+   * spotlight_url) are read only on /player/[slug], which is dynamic, so they
+   * never invalidate anything.
    *
-   * So a save that left avatar_url alone was invalidating ~54 prerendered
-   * pages (/, /achievements, /players, and the 51 crest pages, all on
-   * revalidate = 3600) for nothing -- and measured 25 Aug 2026, 63 of 84
-   * players have no avatar at all, so for most people that was every save.
-   * Hence the gate.
+   * A first version of this gate watched avatar_url ONLY, on the strength of
+   * an older comment here claiming the board's Title column was the top crest
+   * name rather than players.title. That was factually wrong -- see
+   * components/players-index.tsx, whose own comment says the column shows the
+   * equipped profile title -- and it meant equipping a title silently stopped
+   * refreshing both boards for up to an hour. Verify against the actual
+   * queries, not against this comment.
    *
-   * THE COUPLING IS SILENT, so change both sides together: this is only
-   * correct while avatar_url remains the only profile-writable column in
-   * fetchHistoryRows' players select ("id, name, created_at, tier_value,
-   * avatar_url, manually_inactive"). Add a field written above to that select
-   * and this quietly stops invalidating for it -- no error, just a board that
-   * goes stale for up to an hour.
+   * The gate still pays for itself: a save that touches neither column was
+   * invalidating ~54 prerendered pages (/, /achievements, /players, and the 51
+   * crest pages) for nothing, and measured 25 Aug 2026, 63 of 84 players have
+   * no avatar at all.
+   *
+   * THE COUPLING IS SILENT, so change both sides together: add a column
+   * written above to EITHER select and this quietly stops invalidating for it
+   * -- no error, just a board that goes stale for up to an hour.
    *
    * revalidateTag, not updateTag: this is a Route Handler, and updateTag
    * throws outright outside a Server Action. "max" is the profile the
    * deprecation warning asks for when no read-your-own-writes guarantee is
    * needed -- nothing here reads the ledger back before responding.
    */
-  if (avatarChanged) revalidateTag(HISTORY_TAG, "max")
+  if (cacheRelevantChanged) revalidateTag(HISTORY_TAG, "max")
 
   return NextResponse.json({ ok: true })
 }
