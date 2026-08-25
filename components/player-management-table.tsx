@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/dialog"
 import { useToast } from "@/hooks/use-toast"
 import { CSVUpload } from "@/components/csv-upload"
+import { createPlayer, updatePlayerRecord, deletePlayerRecord } from "@/app/admin/player-actions"
 
 interface Player {
   id: string
@@ -65,22 +66,32 @@ export function PlayerManagementTable() {
   // is showing for, the plaintext (shown once, never re-fetchable), and
   // whether it's mid-request.
   const [passwordFor, setPasswordFor] = useState<Player | null>(null)
+  // False while the "Reset password?" confirmation step is showing — the
+  // generate request only fires after the admin confirms, so a stray click
+  // on the row button can't silently invalidate someone's login.
+  const [passwordConfirmed, setPasswordConfirmed] = useState(false)
   const [generatedPassword, setGeneratedPassword] = useState<string | null>(null)
   const [generatingPassword, setGeneratingPassword] = useState(false)
   const [copied, setCopied] = useState(false)
   const { toast } = useToast()
   const supabase = createClient()
 
-  async function generatePasswordFor(player: Player) {
+  function openPasswordDialog(player: Player) {
     setPasswordFor(player)
+    setPasswordConfirmed(false)
     setGeneratedPassword(null)
     setCopied(false)
+  }
+
+  async function confirmGeneratePassword() {
+    if (!passwordFor) return
+    setPasswordConfirmed(true)
     setGeneratingPassword(true)
     try {
       const res = await fetch("/api/player-auth/password", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ playerId: player.id }),
+        body: JSON.stringify({ playerId: passwordFor.id }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -182,43 +193,38 @@ export function PlayerManagementTable() {
     }
 
     if (isAdding) {
-      const { data, error } = await supabase.from("players").insert(playerData).select().single()
+      const result = await createPlayer(playerData)
 
-      if (error) {
+      if (!result.success) {
         toast({
           title: "Error",
-          description: error.message,
+          description: result.error,
           variant: "destructive",
         })
         return
       }
 
-      setPlayers((prev) => [...prev, data].sort((a, b) => a.name.localeCompare(b.name)))
+      setPlayers((prev) => [...prev, result.data as unknown as Player].sort((a, b) => a.name.localeCompare(b.name)))
       toast({
         title: "Success",
         description: "Player added successfully",
       })
     } else {
-      const { error } = await supabase.from("players").update(playerData).eq("id", editingId)
+      const originalPlayer = players.find((p) => p.id === editingId)
+      const tierChange =
+        originalPlayer && originalPlayer.tier_value !== editingPlayer.tier_value
+          ? { previousTier: originalPlayer.tier_value, newTier: editingPlayer.tier_value || 0 }
+          : null
 
-      if (error) {
+      const result = await updatePlayerRecord(editingId as string, playerData, tierChange)
+
+      if (!result.success) {
         toast({
           title: "Error",
-          description: error.message,
+          description: result.error,
           variant: "destructive",
         })
         return
-      }
-
-      // Log tier change if tier was updated
-      const originalPlayer = players.find(p => p.id === editingId)
-      if (originalPlayer && originalPlayer.tier_value !== editingPlayer.tier_value) {
-        await supabase.from("tier_changes").insert({
-          player_id: editingId,
-          player_name: editingPlayer.name || originalPlayer.name,
-          previous_tier: originalPlayer.tier_value,
-          new_tier: editingPlayer.tier_value || 0,
-        })
       }
 
       setPlayers((prev) =>
@@ -236,12 +242,12 @@ export function PlayerManagementTable() {
   async function deletePlayer(id: string) {
     if (!confirm("Are you sure you want to delete this player?")) return
 
-    const { error } = await supabase.from("players").delete().eq("id", id)
+    const result = await deletePlayerRecord(id)
 
-    if (error) {
+    if (!result.success) {
       toast({
         title: "Error",
-        description: error.message,
+        description: result.error,
         variant: "destructive",
       })
       return
@@ -745,7 +751,7 @@ export function PlayerManagementTable() {
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => generatePasswordFor(player)}
+                      onClick={() => openPasswordDialog(player)}
                       disabled={editingId !== null || isAdding}
                       title="Generate or reset this player's login password"
                     >
@@ -792,36 +798,59 @@ export function PlayerManagementTable() {
 
       <Dialog open={passwordFor !== null} onOpenChange={(open) => !open && setPasswordFor(null)}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Login password — {passwordFor?.name}</DialogTitle>
-            <DialogDescription>
-              Shown once. Send it to {passwordFor?.name} directly — reopening this dialog generates a new one instead.
-            </DialogDescription>
-          </DialogHeader>
-          {generatingPassword ? (
-            <p className="text-sm text-muted-foreground py-4">Generating…</p>
-          ) : generatedPassword ? (
-            <div className="flex items-center gap-2 py-2">
-              <code className="flex-1 rounded-md border bg-muted px-3 py-2 text-lg tracking-wider">
-                {generatedPassword}
-              </code>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  navigator.clipboard.writeText(generatedPassword)
-                  setCopied(true)
-                }}
-              >
-                {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-              </Button>
-            </div>
-          ) : null}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPasswordFor(null)}>
-              Done
-            </Button>
-          </DialogFooter>
+          {!passwordConfirmed ? (
+            <>
+              <DialogHeader>
+                <DialogTitle>Reset password?</DialogTitle>
+                <DialogDescription>
+                  This immediately invalidates {passwordFor?.name}&apos;s current password. They&apos;ll need the new
+                  one to log in again.
+                </DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setPasswordFor(null)}>
+                  Cancel
+                </Button>
+                <Button variant="destructive" onClick={confirmGeneratePassword}>
+                  Reset password
+                </Button>
+              </DialogFooter>
+            </>
+          ) : (
+            <>
+              <DialogHeader>
+                <DialogTitle>Login password — {passwordFor?.name}</DialogTitle>
+                <DialogDescription>
+                  Shown once. Send it to {passwordFor?.name} directly — reopening this dialog generates a new one
+                  instead.
+                </DialogDescription>
+              </DialogHeader>
+              {generatingPassword ? (
+                <p className="text-sm text-muted-foreground py-4">Generating…</p>
+              ) : generatedPassword ? (
+                <div className="flex items-center gap-2 py-2">
+                  <code className="flex-1 rounded-md border bg-muted px-3 py-2 text-lg tracking-wider">
+                    {generatedPassword}
+                  </code>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      navigator.clipboard.writeText(generatedPassword)
+                      setCopied(true)
+                    }}
+                  >
+                    {copied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+              ) : null}
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setPasswordFor(null)}>
+                  Done
+                </Button>
+              </DialogFooter>
+            </>
+          )}
         </DialogContent>
       </Dialog>
     </div>

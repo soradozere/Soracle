@@ -15,7 +15,7 @@ import { balanceTeamsWithOptions, balanceTeamsCompetitive, balanceTeamsByElo } f
 import { computeMonthlyEloMap } from "@/lib/elo"
 import { loadPlayerBadges, type BadgeId } from "@/lib/player-profile"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
-import { checkIsAdmin } from "@/lib/is-admin"
+import { checkIsFullAdmin } from "@/lib/is-admin"
 import type { Player, BalanceOption, BalanceHistoryEntry } from "@/lib/types"
 import { Users, Zap, Shuffle, X, Trophy, Grid3x3, UserX, TrendingUp, HelpCircle } from "lucide-react"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -84,7 +84,7 @@ export default function TeamBalancer() {
   // Admin gate for the hidden "Balance by ELO" mode — checks the server-side allowlist
   // (RLS-enforced), matching the Reports tab's check.
   useEffect(() => {
-    checkIsAdmin().then(setIsAdmin)
+    checkIsFullAdmin().then(setIsAdmin)
   }, [])
 
   const filteredPlayers = useMemo(() => {

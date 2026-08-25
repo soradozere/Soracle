@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation"
 import { createClient } from "@/lib/supabase/server"
+import { requireFullAdminPage } from "@/lib/player-role"
 import { PlayerManagementTable } from "@/components/player-management-table"
 import { AdminMatchLog } from "@/components/admin-match-log"
 import { RankSuggestions } from "@/components/rank-suggestions"
@@ -12,38 +12,19 @@ import Link from "next/link"
 import { LogOut, Home, Settings, Youtube } from "lucide-react"
 
 export default async function AdminPage() {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser()
-
-  if (error || !user) {
-    redirect("/auth/login")
-  }
-
-  // Full-admin only. Match admins (captains) can sign in but must not reach the
+  // Full-admin only (a Supabase Auth admin, or a player login promoted to
+  // full_admin). Match admins (captains) can sign in but must not reach the
   // admin panel — bounce them to the main app (their tools live on Match History).
-  const { data: isAdmin } = await supabase.rpc("is_admin")
-  if (isAdmin !== true) {
-    redirect("/")
-  }
+  const { label } = await requireFullAdminPage()
 
+  const supabase = await createClient()
   const autoCalibration = await readAutoCalibrationEnabled(supabase)
-
-  async function handleLogout() {
-    "use server"
-    const supabase = await createClient()
-    await supabase.auth.signOut()
-    redirect("/auth/login")
-  }
 
   return (
     <div className="min-h-screen" style={{ background: "var(--color-background)" }}>
       <AdminHeader
         title="Admin Panel"
-        subtitle={`JK2 Capture the Flag · signed in as ${user.email}`}
+        subtitle={`JK2 Capture the Flag · signed in as ${label}`}
         actions={
           <>
             <ExportDataButton />
@@ -66,12 +47,12 @@ export default async function AdminPage() {
                 Back to Site
               </Button>
             </Link>
-            <form action={handleLogout}>
-              <Button variant="outline" size="sm" type="submit">
+            <Link href="/logout">
+              <Button variant="outline" size="sm">
                 <LogOut className="h-4 w-4 mr-2" />
                 Logout
               </Button>
-            </form>
+            </Link>
           </>
         }
       />

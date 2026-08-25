@@ -1,29 +1,15 @@
-import { redirect } from "next/navigation"
-import { createClient } from "@/lib/supabase/server"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
 import { PasswordChangeForm } from "@/components/password-change-form"
 import { FeaturedVideoAdmin } from "@/components/featured-video-admin"
+import { AdminRoles } from "@/components/admin-roles"
 import { AdminHeader, AdminSection } from "@/components/admin-header"
+import { requireFullAdminPage } from "@/lib/player-role"
 
 export default async function SettingsPage() {
-  const supabase = await createClient()
-
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser()
-
-  if (error || !user) {
-    redirect("/auth/login")
-  }
-
   // Full-admin only (match admins have no business in settings).
-  const { data: isAdmin } = await supabase.rpc("is_admin")
-  if (isAdmin !== true) {
-    redirect("/")
-  }
+  const { label, userId } = await requireFullAdminPage()
 
   return (
     <div className="min-h-screen" style={{ background: "var(--color-background)" }}>
@@ -48,20 +34,31 @@ export default async function SettingsPage() {
           <FeaturedVideoAdmin />
         </AdminSection>
 
-        <AdminSection title="Change Password">
-          <PasswordChangeForm />
+        <AdminSection
+          title="Roles"
+          description="Give a player Full Admin (same access as this account) or Captains (approve/log/edit matches) directly on their existing login — no separate account needed."
+        >
+          <AdminRoles />
         </AdminSection>
+
+        {userId && (
+          <AdminSection title="Change Password">
+            <PasswordChangeForm />
+          </AdminSection>
+        )}
 
         <AdminSection title="Account Information">
           <div className="space-y-2 text-sm">
             <div>
-              <span style={{ color: "var(--color-text-dim)" }}>Email:</span>{" "}
-              <span className="font-medium">{user.email}</span>
+              <span style={{ color: "var(--color-text-dim)" }}>{userId ? "Email" : "Player login"}:</span>{" "}
+              <span className="font-medium">{label}</span>
             </div>
-            <div>
-              <span style={{ color: "var(--color-text-dim)" }}>User ID:</span>{" "}
-              <span className="font-mono text-xs">{user.id}</span>
-            </div>
+            {userId && (
+              <div>
+                <span style={{ color: "var(--color-text-dim)" }}>User ID:</span>{" "}
+                <span className="font-mono text-xs">{userId}</span>
+              </div>
+            )}
           </div>
         </AdminSection>
       </main>

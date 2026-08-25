@@ -1,8 +1,7 @@
-import { redirect } from "next/navigation"
 import Link from "next/link"
 import { ArrowLeft } from "lucide-react"
-import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
+import { requireFullAdminPage } from "@/lib/player-role"
 import { signedRenderUrl, downloadRenderUrl, headRender } from "@/lib/r2-renders"
 import { RenderQueue, type RenderJob } from "@/components/render-queue"
 import { publishedToday } from "./actions"
@@ -21,15 +20,7 @@ export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 export default async function AdminRendersPage() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser()
-  if (error || !user) redirect("/auth/login")
-
-  const { data: isAdmin } = await supabase.rpc("is_admin")
-  if (isAdmin !== true) redirect("/")
+  await requireFullAdminPage()
 
   const db = createServiceClient()
   const { data: rows } = await db

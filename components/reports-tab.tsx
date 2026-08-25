@@ -25,7 +25,7 @@ export { RankMedal }
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import type { Player } from "@/lib/types"
 import { createClient } from "@/lib/supabase/client"
-import { checkIsAdmin } from "@/lib/is-admin"
+import { checkIsFullAdmin } from "@/lib/is-admin"
 import { TierChangelog } from "@/components/tier-changelog"
 import { EloLeaderboard } from "@/components/elo-leaderboard"
 import { TrueSkillLeaderboard } from "@/components/trueskill-leaderboard"
@@ -375,7 +375,7 @@ export function ReportsTab() {
 
   // Check if user is admin (server-side allowlist, RLS-enforced)
   useEffect(() => {
-    checkIsAdmin().then(setIsAdmin)
+    checkIsFullAdmin().then(setIsAdmin)
   }, [])
 
   useEffect(() => {

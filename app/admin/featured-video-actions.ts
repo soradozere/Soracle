@@ -1,8 +1,8 @@
 "use server"
 
 import { updateTag } from "next/cache"
-import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
+import { requireFullAdmin } from "@/lib/player-role"
 import { FEATURED_VIDEO_KEY, FEATURED_VIDEO_TAG, getFeaturedVideo, parseVideoId } from "@/lib/youtube-feed"
 
 /*
@@ -12,19 +12,9 @@ import { FEATURED_VIDEO_KEY, FEATURED_VIDEO_TAG, getFeaturedVideo, parseVideoId 
  * and every write goes through the service-role client behind this check, the same
  * shape as the rest of the admin writes in this codebase.
  */
-async function requireAdmin(): Promise<{ ok: true; userId: string } | { ok: false; error: string }> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return { ok: false, error: "Not signed in" }
-  const { data: isAdmin } = await supabase.rpc("is_admin")
-  if (isAdmin !== true) return { ok: false, error: "Admins only" }
-  return { ok: true, userId: user.id }
-}
 
 export async function setFeaturedVideo(input: string) {
-  const authz = await requireAdmin()
+  const authz = await requireFullAdmin()
   if (!authz.ok) return { success: false as const, error: authz.error }
 
   // Reject anything we can't turn into an id, rather than storing junk that
@@ -37,7 +27,12 @@ export async function setFeaturedVideo(input: string) {
   const { error } = await createServiceClient()
     .from("site_settings")
     .upsert(
-      { key: FEATURED_VIDEO_KEY, value: videoId, updated_at: new Date().toISOString(), updated_by: authz.userId },
+      {
+        key: FEATURED_VIDEO_KEY,
+        value: videoId,
+        updated_at: new Date().toISOString(),
+        updated_by: authz.userId ?? authz.playerId,
+      },
       { onConflict: "key" },
     )
   if (error) return { success: false as const, error: error.message }
@@ -49,7 +44,7 @@ export async function setFeaturedVideo(input: string) {
 }
 
 export async function clearFeaturedVideo() {
-  const authz = await requireAdmin()
+  const authz = await requireFullAdmin()
   if (!authz.ok) return { success: false as const, error: authz.error }
 
   // Deleted, not set to NULL: an absent row is the documented "automatic" state,
@@ -63,7 +58,7 @@ export async function clearFeaturedVideo() {
 
 /** What the homepage would show right now, for the admin panel to display. */
 export async function readFeaturedVideo() {
-  const authz = await requireAdmin()
+  const authz = await requireFullAdmin()
   if (!authz.ok) return { success: false as const, error: authz.error }
   return { success: true as const, data: await getFeaturedVideo() }
 }

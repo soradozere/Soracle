@@ -1,19 +1,13 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
+import { requireFullAdmin } from "@/lib/player-role"
 import { generatePassword, hashPassword } from "@/lib/player-auth"
 
 // Admin-only: (re)generate a player's login password. Returns the plaintext
 // exactly once — it is never stored or logged, only the hash is persisted.
 export async function POST(request: Request) {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
-
-  const { data: isAdmin } = await supabase.rpc("is_admin")
-  if (isAdmin !== true) return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
+  const authz = await requireFullAdmin()
+  if (!authz.ok) return NextResponse.json({ error: "Unauthorized" }, { status: 403 })
 
   let body: { playerId?: string }
   try {

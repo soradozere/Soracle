@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
+import { requireFullAdmin } from "@/lib/player-role"
 
 /*
  * How many render jobs are waiting on a human, for the masthead's notification
@@ -22,15 +22,8 @@ export const dynamic = "force-dynamic"
 export const revalidate = 0
 
 export async function GET() {
-  const supabase = await createClient()
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.getUser()
-  if (error || !user) return NextResponse.json({ waiting: 0 }, { status: 401 })
-
-  const { data: isAdmin } = await supabase.rpc("is_admin")
-  if (isAdmin !== true) return NextResponse.json({ waiting: 0 }, { status: 403 })
+  const authz = await requireFullAdmin()
+  if (!authz.ok) return NextResponse.json({ waiting: 0 }, { status: 403 })
 
   const db = createServiceClient()
   const { count, error: countError } = await db
