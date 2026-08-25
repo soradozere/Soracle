@@ -1,8 +1,8 @@
 "use server"
 
 import { revalidatePath } from "next/cache"
-import { createClient } from "@/lib/supabase/server"
 import { createServiceClient } from "@/lib/supabase/admin"
+import { requireFullAdmin } from "@/lib/player-role"
 import { deleteRender } from "@/lib/r2-renders"
 import { dispatchPublishJob } from "@/lib/github-dispatch"
 import { DAILY_PUBLISH_CAP } from "@/lib/render-limits"
@@ -10,15 +10,8 @@ import { buildYoutubeTitle, buildYoutubeDescription } from "@/lib/youtube-metada
 
 type ActionResult = { success: true } | { success: false; error: string }
 
-
 async function requireAdmin(): Promise<boolean> {
-  const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return false
-  const { data: isAdmin } = await supabase.rpc("is_admin")
-  return isAdmin === true
+  return (await requireFullAdmin()).ok
 }
 
 /** How many have gone out today, against the cap. */

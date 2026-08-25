@@ -6,7 +6,7 @@ import { PlayerProfile } from "@/components/player-profile"
 import { BackgroundParticles } from "@/components/background-particles"
 import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import { resolvePlayerSlug } from "@/lib/player-profile"
-import { checkIsAdmin } from "@/lib/is-admin"
+import { checkIsFullAdmin } from "@/lib/is-admin"
 import type { Player } from "@/lib/types"
 import { ArrowLeft } from "lucide-react"
 
@@ -30,7 +30,7 @@ export function PlayerProfileRoute({ slug }: { slug: string }) {
       .catch(() => setError(true))
     // Admins (you) get the full inline profile editor; anyone else just views
     // unless they're logged in as this player.
-    checkIsAdmin().then(setIsAdmin).catch(() => setIsAdmin(false))
+    checkIsFullAdmin().then(setIsAdmin).catch(() => setIsAdmin(false))
     fetch("/api/player-auth/me")
       .then((r) => r.json())
       .then((data) => setOwnPlayerId(data.playerId ?? null))

@@ -46,7 +46,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
-import { createClient } from "@/lib/supabase/client"
+import { updatePlayerProfileAsAdmin } from "@/app/admin/player-actions"
 import { useToast } from "@/hooks/use-toast"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -433,9 +433,10 @@ function Spotlight({ url }: { url: string }) {
   )
 }
 
-// Admin-only editor for slogan / avatar / spotlight. Writes straight to the
-// players table via the browser client — the players update RLS policy is
-// admin-only, so this is safe. Calls onSaved with the new values on success.
+// Admin-only editor for slogan / avatar / spotlight. Writes via
+// updatePlayerProfileAsAdmin, a full-admin-gated server action (so a player
+// login promoted to full_admin can use it too, not just a Supabase Auth
+// admin). Calls onSaved with the new values on success.
 function EditProfileDialog({
   open,
   onOpenChange,
@@ -539,28 +540,24 @@ function EditProfileDialog({
     const action_animation = fields.action_animation || null
 
     if (canEditTooltip) {
-      // Admin path: writes straight to the players table via the browser
-      // client — the players update RLS policy is admin-only, so this is safe.
+      // Admin path: a server action gated on full-admin access (Supabase Auth
+      // admin, or a player login promoted to full_admin — see lib/player-role.ts).
       const tooltip = fields.tooltip.trim() || null
-      const supabase = createClient()
-      const { error } = await supabase
-        .from("players")
-        .update({
-          tooltip,
-          avatar_url,
-          spotlight_url,
-          title,
-          profile_theme,
-          model,
-          saber,
-          skin,
-          idle_animation,
-          action_animation,
-        })
-        .eq("id", playerId)
+      const result = await updatePlayerProfileAsAdmin(playerId, {
+        tooltip,
+        avatar_url,
+        spotlight_url,
+        title,
+        profile_theme,
+        model,
+        saber,
+        skin,
+        idle_animation,
+        action_animation,
+      })
       setSaving(false)
-      if (error) {
-        setSaveError(error.message)
+      if (!result.success) {
+        setSaveError(result.error)
         return
       }
       onSaved({
@@ -862,25 +859,21 @@ function EditLoadoutDialog({
 
     if (canEditTooltip) {
       const tooltip = fields.tooltip.trim() || null
-      const supabase = createClient()
-      const { error } = await supabase
-        .from("players")
-        .update({
-          tooltip,
-          avatar_url,
-          spotlight_url,
-          title,
-          profile_theme,
-          model,
-          saber,
-          skin,
-          idle_animation,
-          action_animation,
-        })
-        .eq("id", playerId)
+      const result = await updatePlayerProfileAsAdmin(playerId, {
+        tooltip,
+        avatar_url,
+        spotlight_url,
+        title,
+        profile_theme,
+        model,
+        saber,
+        skin,
+        idle_animation,
+        action_animation,
+      })
       setSaving(false)
-      if (error) {
-        setSaveError(error.message)
+      if (!result.success) {
+        setSaveError(result.error)
         return
       }
       onSaved({

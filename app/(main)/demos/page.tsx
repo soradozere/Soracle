@@ -2,6 +2,7 @@ import type { Metadata } from "next"
 import { cookies } from "next/headers"
 import { createClient } from "@/lib/supabase/server"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
+import { requireFullAdmin } from "@/lib/player-role"
 import { listDemos, listPlaylists } from "@/lib/demos-server"
 import { DemoLibrary } from "@/components/demo-library"
 
@@ -15,10 +16,8 @@ async function uploaderContext() {
   const playerId = verifySessionValue(cookieStore.get(PLAYER_SESSION_COOKIE)?.value)
 
   const supabase = await createClient()
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  const isAdmin = user ? (await supabase.rpc("is_admin")).data === true : false
+  const authz = await requireFullAdmin()
+  const isAdmin = authz.ok
 
   const { data: players } = await supabase.from("players").select("id, name").order("name")
   return { canUpload: !!playerId || isAdmin, isAdmin, players: players ?? [] }

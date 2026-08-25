@@ -13,6 +13,7 @@ import {
 } from "@/lib/demos-server"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
 import { createClient } from "@/lib/supabase/server"
+import { requireFullAdmin } from "@/lib/player-role"
 import { DemoDetail } from "@/components/demo-detail"
 
 export async function generateMetadata({ params }: { params: Promise<{ id: string }> }): Promise<Metadata> {
@@ -60,12 +61,12 @@ export default async function DemoDetailPage({
     createClient(),
   ])
   const playerId = verifySessionValue(cookieStore.get(PLAYER_SESSION_COOKIE)?.value)
-  const [ownReaction, auth, { data: players }] = await Promise.all([
+  const [ownReaction, authz, { data: players }] = await Promise.all([
     playerId ? getOwnReaction(id, playerId) : Promise.resolve(null),
-    supabase.auth.getUser(),
+    requireFullAdmin(),
     supabase.from("players").select("id, name").order("name"),
   ])
-  const isAdmin = auth.data.user ? (await supabase.rpc("is_admin")).data === true : false
+  const isAdmin = authz.ok
 
   return (
     // Wider than the library grid on purpose -- a single video benefits from

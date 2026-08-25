@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
+import { hideTierChange } from "@/app/admin/player-actions"
 import { useToast } from "@/hooks/use-toast"
 import { ArrowRight, X } from 'lucide-react'
 
@@ -64,12 +65,9 @@ export function TierChangelog({ year, month, isAdmin = false }: TierChangelogPro
   }
 
   async function hideChange(id: string) {
-    const { error } = await supabase
-      .from("tier_changes")
-      .update({ hidden: true })
-      .eq("id", id)
+    const result = await hideTierChange(id)
 
-    if (error) {
+    if (!result.success) {
       toast({
         title: "Error",
         description: "Failed to hide entry",
