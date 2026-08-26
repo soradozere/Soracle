@@ -1183,6 +1183,26 @@ export interface ClaimContext {
   maxUnansweredKills?: number
 }
 
+/**
+ * How a month-resolved crest is scored. A discriminated union rather than a
+ * bag of numbers so that adding a second month-long crest means adding a
+ * variant here and a branch in the resolver, not widening a shared shape and
+ * hoping every reader keeps up.
+ *
+ * `capperConversion` — cap conversion across a month's capper-role games (see
+ * capperMonths in lib/cap-conversion.ts). `gameFloorFraction` is measured
+ * against the month's busiest capper, not a fixed count, matching every other
+ * qualifier on the site: a fixed number means something different in a month
+ * with four matches than in one with sixty.
+ */
+export type MonthlySecretMetric = {
+  kind: "capperConversion"
+  /** Conversion percentage that must be cleared outright. */
+  minConversion: number
+  /** Share of the month's busiest capper's games needed to qualify. */
+  gameFloorFraction: number
+}
+
 export interface SecretDef {
   id: string
   title: string
@@ -1201,6 +1221,14 @@ export interface SecretDef {
    * question is who crossed it earliest, not who is highest now.
    */
   scoreThreshold?: number
+  /**
+   * Month-resolved crests: answered by an aggregate over a whole COMPLETED
+   * calendar month, which neither of the above can express — claim() sees one
+   * scoreboard row, and scoreThreshold is about Achievement Score. Held by
+   * whoever cleared the bar in the EARLIEST qualifying month. See
+   * resolveMonthlySecretHolders in lib/achievements.ts.
+   */
+  monthly?: MonthlySecretMetric
   /**
    * Points this crest contributes, overriding its rarity. Only The GOAT sets it
    * (to 0): it fires AT 1337 Achievement Score, and a 150-point crest would
@@ -1263,6 +1291,41 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
     condition: "2+ caps, 20+ returns and 100+ kills in one match",
     from: "2026-07-09T00:00:00.000Z",
     claim: (s) => s.captures >= 2 && s.returns >= 20 && s.kills >= 100,
+  },
+  {
+    /*
+     * The only MONTH-resolved crest: a whole month of capping, not one game.
+     *
+     * It used to be a single-match crest ("hold the flag 45+ minutes with 3+
+     * caps and under 30 deaths") and was retired 26 Aug 2026 for a measured
+     * reason — a 45-minute hold is impossible in 42% of matches on record, so
+     * the crest was mostly gated on match length rather than on the player.
+     * Rebuilt as: sustain an exceptional cap conversion across a full month.
+     *
+     * Conversion, not cap totals, for the same reason the Top Capper badge
+     * moved to it (#163) — a totals crest just names whoever ran flag most.
+     * Restricted to capper-role games so a chaser who picked up one loose flag
+     * and walked it in can't post 100% off a single carry.
+     *
+     * Why 35%: scored over the matches the kill matrix actually covers, the
+     * best capper-role month on record is 20.3% (cooky, Aug 2026). An earlier
+     * pass put the bar's nearest approach at 28.4%, but that number was
+     * inflated — it counted captures from every August match while counting
+     * times-caught only from the covered ones. 35% is comfortably clear of the
+     * real ceiling either way. This ships UNCLAIMED and is meant to.
+     *
+     * Needs match_kills (returns made AGAINST a carrier), which is JSON-era
+     * only and cannot be backfilled — so no month before Aug 2026 can ever
+     * qualify, and no `from` gate is needed to stop the back catalogue
+     * claiming it: capperMonths scores only matrix-covered matches, and there
+     * are none before then.
+     */
+    id: "wesleys-prodigy",
+    title: "Wesley's Prodigy",
+    category: "career",
+    icon: "rogue-one", // shares Pro Rusher's crest — the runner's crest
+    condition: "35%+ cap conversion as your team's capper, across a full month",
+    monthly: { kind: "capperConversion", minConversion: 35, gameFloorFraction: 0.5 },
   },
   {
     // Score-resolved, not match-resolved: no single scoreboard row can answer

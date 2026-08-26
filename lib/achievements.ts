@@ -12,6 +12,7 @@ import {
   type Rarity,
 } from "@/lib/achievement-meta"
 import { RARITY_POINTS } from "@/lib/achievement-score"
+import type { CapperMonthRow } from "@/lib/cap-conversion"
 
 // Turns a player's chronological match history into earned/locked state for
 // every achievement. Pure and presentation-free — the crest styling is derived
@@ -472,6 +473,69 @@ export function resolveScoreSecretHolders(
       }
     }
     if (best) holders.set(def.id, best)
+  }
+  return holders
+}
+
+/**
+ * Holders of month-resolved secrets (Wesley's Prodigy).
+ *
+ * The third resolution path, beside match-resolved and score-resolved. The
+ * question is "who was the FIRST to sustain this across a whole month", so
+ * months are walked oldest-first and the earliest one containing a qualifier
+ * settles the crest permanently — later months can no longer take it, which is
+ * what makes it a one-of-one rather than a recurring monthly award.
+ *
+ * The game floor is relative to the month it's measured in (the busiest
+ * capper's game count that month), so it has to be recomputed per month rather
+ * than applied globally — a 6-game floor means something different in a
+ * 12-match month than in a 46-match one.
+ *
+ * Two players CAN clear the bar in the same month, so "earliest" alone is not a
+ * total order: higher conversion wins, then playerId. Same requirement as
+ * claimedFirst — the browser and the server resolve this independently and must
+ * never name different holders.
+ *
+ * `rows` must already exclude the in-progress month; capperMonths does that.
+ */
+export function resolveMonthlySecretHolders(rows: CapperMonthRow[]): Map<string, SecretHolder> {
+  const holders = new Map<string, SecretHolder>()
+
+  const byMonth = new Map<string, CapperMonthRow[]>()
+  for (const r of rows) {
+    const bucket = byMonth.get(r.month)
+    if (bucket) bucket.push(r)
+    else byMonth.set(r.month, [r])
+  }
+  const months = [...byMonth.keys()].sort()
+
+  for (const def of SECRET_ACHIEVEMENTS) {
+    if (!def.monthly) continue
+    const fromMs = def.from ? Date.parse(def.from) : null
+
+    for (const month of months) {
+      const monthRows = byMonth.get(month)!
+      // Floor is measured against everyone who played capper this month,
+      // including those who never resolved a carry — they still held the role.
+      const topGames = monthRows.reduce((max, r) => Math.max(max, r.capperGames), 0)
+      const gameFloor = Math.ceil(topGames * def.monthly.gameFloorFraction)
+
+      const qualified = monthRows
+        .filter((r) => r.capperGames >= gameFloor && r.carries > 0)
+        .filter((r) => r.conversion >= def.monthly!.minConversion)
+        .filter((r) => fromMs === null || Date.parse(r.lastDate) >= fromMs)
+        .sort((a, b) => b.conversion - a.conversion || (a.playerId < b.playerId ? -1 : 1))
+
+      const best = qualified[0]
+      if (best) {
+        holders.set(def.id, {
+          playerId: best.playerId,
+          matchId: best.lastMatchId,
+          date: best.lastDate,
+        })
+        break // earliest qualifying month wins; the crest is settled
+      }
+    }
   }
   return holders
 }
