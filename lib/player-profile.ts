@@ -159,7 +159,15 @@ export interface OppRecord {
   rate: number
 }
 
-export type BadgeId = "champion" | "star" | "highscore" | "dbs-god" | "top5" | "top-capper" | "top-kd"
+export type BadgeId =
+  | "champion"
+  | "star"
+  | "highscore"
+  | "dbs-god"
+  | "top5"
+  | "top-capper"
+  | "top-kd"
+  | "wesleys-prodigy"
 
 // One earned month of a badge, with the stat that earned it ("2.31 K/D",
 // "34 caps", "#3 · 12W–4L") for the badge tooltip.
@@ -371,6 +379,15 @@ function secretCandidates(
 // 30% of the month's matches to place on the board.
 const MONTHLY_MIN_FRACTION = 0.3
 
+// Wesley's Prodigy qualifiers — see the computation below for the full story.
+// Floor is on CAPPER GAMES, not carries: half the month's busiest capper's
+// game count, so a player who barely plays the role can't sneak in on a tiny
+// sample. Conversion is a fixed bar rather than a ranking (30% read as too
+// easy against a real month — several players sit just under it even in a
+// quiet month — so it's set at 35%): some months this goes unclaimed.
+const CAPPER_GAME_FLOOR_FRACTION = 0.5
+const WESLEYS_PRODIGY_MIN_CONVERSION = 35
+
 interface BoardPlace {
   name: string
   rank: number
@@ -401,6 +418,14 @@ interface MonthlyHonours {
     | { name: string; basis: "caps"; captures: number }
     | null
   topKD: { name: string; kd: number } | null
+  /**
+   * Cap conversion restricted to games the player was identified as their
+   * team's capper (highest flag_hold_ms on their side that match) — see the
+   * computation below. A fixed bar (WESLEYS_PRODIGY_MIN_CONVERSION), not a
+   * ranking: null means nobody hit it, not "nobody tried". Same match_kills
+   * dependency as topCapper's conversion basis, so also absent before Aug 2026.
+   */
+  wesleysProdigy: { name: string; conversion: number; capperGames: number } | null
 }
 
 // Star Player for a set of matches (one month's worth): upset-weighted average
@@ -612,12 +637,76 @@ function computeMonthlyHonours(
       .sort(rankBy(([name]) => name, (a, b) => b[1] - a[1]))[0]
     const topKD = bestKD ? { name: bestKD[0], kd: bestKD[1] } : null
 
+    // --- Wesley's Prodigy: cap conversion restricted to games the player was
+    // their team's CAPPER — the highest flag_hold_ms on their side that match,
+    // same role-identification idea as pickReturners in lib/returner-rate.ts,
+    // just picking the top of a side instead of the bottom third. Unlike
+    // topCapper (best of the month, always awarded if the month has any kill-
+    // matrix data), this is a fixed bar: conversion has to clear
+    // WESLEYS_PRODIGY_MIN_CONVERSION outright, so a below-bar month awards
+    // nobody rather than crowning whoever happened to be best.
+    //
+    // Same match_kills dependency as topCapper's conversion, so also silently
+    // absent before Aug 2026 — reuses monthKillPairs rather than re-checking.
+    let wesleysProdigy: MonthlyHonours["wesleysProdigy"] = null
+    if (monthKillPairs.length > 0) {
+      const capperRowKeys = new Set<string>()
+      for (const match of monthMatches) {
+        const rows = statsByMatch.get(match.id)
+        if (!rows?.length) continue
+        for (const side of ["Red", "Blue"]) {
+          const sideRows = rows.filter((r) => (r.team ?? "") === side)
+          const maxHold = Math.max(...sideRows.map((r) => r.flag_hold_ms ?? 0), 0)
+          if (maxHold <= 0) continue
+          for (const r of sideRows) {
+            if ((r.flag_hold_ms ?? 0) === maxHold) capperRowKeys.add(`${r.match_id}|${r.player_id}`)
+          }
+        }
+      }
+      const caughtByRow = new Map<string, number>()
+      for (const k of monthKillPairs) {
+        const rowKey = `${k.match_id}|${k.victim_player_id}`
+        caughtByRow.set(rowKey, (caughtByRow.get(rowKey) ?? 0) + (k.rets ?? 0))
+      }
+      const capperAgg = new Map<string, { games: number; captures: number; caught: number }>()
+      for (const match of monthMatches) {
+        const rows = statsByMatch.get(match.id)
+        if (!rows?.length) continue
+        for (const row of rows) {
+          const rowKey = `${row.match_id}|${row.player_id}`
+          if (!capperRowKeys.has(rowKey)) continue
+          const name = nameById.get(row.player_id)
+          if (!name) continue
+          const rec = capperAgg.get(name) ?? { games: 0, captures: 0, caught: 0 }
+          rec.games++
+          rec.captures += row.captures ?? 0
+          rec.caught += caughtByRow.get(rowKey) ?? 0
+          capperAgg.set(name, rec)
+        }
+      }
+      const capperRows = Array.from(capperAgg.entries()).map(([name, r]) => ({
+        name,
+        games: r.games,
+        captures: r.captures,
+        carries: r.captures + r.caught,
+      }))
+      const topCapperGames = capperRows.reduce((max, r) => Math.max(max, r.games), 0)
+      const gameFloor = Math.ceil(topCapperGames * CAPPER_GAME_FLOOR_FRACTION)
+      const best = capperRows
+        .filter((r) => r.games >= gameFloor && r.carries > 0)
+        .map((r) => ({ ...r, conversion: (r.captures / r.carries) * 100 }))
+        .filter((r) => r.conversion >= WESLEYS_PRODIGY_MIN_CONVERSION)
+        .sort(rankBy((r) => r.name, (a, b) => b.conversion - a.conversion))[0]
+      if (best) wesleysProdigy = { name: best.name, conversion: best.conversion, capperGames: best.games }
+    }
+
     honours.push({
       key,
       champion: board[0] ?? null,
       top5: board.slice(0, 5),
       topCapper,
       topKD,
+      wesleysProdigy,
     })
   }
 
@@ -655,12 +744,18 @@ function badgesFor(name: string, honours: MonthlyHonours[]): ProfileBadge[] {
       : null,
   )
   const kd = collect((h) => (h.topKD?.name === name ? `${h.topKD.kd.toFixed(2)} K/D` : null))
+  const prodigy = collect((h) =>
+    h.wesleysProdigy?.name === name
+      ? `${h.wesleysProdigy.conversion.toFixed(1)}% conversion as capper · ${h.wesleysProdigy.capperGames} games`
+      : null,
+  )
 
   // Order here is cosmetic (chips render in this order); prestige ordering for
   // the single "best badge" on Player Cards lives in BADGE_PRIORITY.
   const badges: ProfileBadge[] = []
   if (champion.length) badges.push({ id: "champion", entries: champion })
   if (top5.length) badges.push({ id: "top5", entries: top5 })
+  if (prodigy.length) badges.push({ id: "wesleys-prodigy", entries: prodigy })
   if (capper.length) badges.push({ id: "top-capper", entries: capper })
   if (kd.length) badges.push({ id: "top-kd", entries: kd })
   return badges
@@ -1067,12 +1162,14 @@ export async function loadPlayerBadges(players: Player[]): Promise<Record<string
     top5: new Set(),
     "top-capper": new Set(),
     "top-kd": new Set(),
+    "wesleys-prodigy": new Set(),
   }
   for (const h of honours) {
     if (h.champion) earned.champion.add(h.champion.name)
     for (const p of h.top5) earned.top5.add(p.name)
     if (h.topCapper) earned["top-capper"].add(h.topCapper.name)
     if (h.topKD) earned["top-kd"].add(h.topKD.name)
+    if (h.wesleysProdigy) earned["wesleys-prodigy"].add(h.wesleysProdigy.name)
   }
 
   // Star Player is the single CURRENT-month title (not one badge per past month).

@@ -610,7 +610,7 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     rarity: "epic",
   },
   {
-    // Same computed-tier trick as Camp above: captures + returns + enemy mine
+    // Same computed-tier trick as Cap God above: captures + returns + enemy mine
     // grabs all rise together, so get() reports the highest tier currently met.
     // The entry tier has happened 4 times; Legendary and Mythic are aspirational.
     id: "triple-threat",
@@ -1251,24 +1251,6 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
     icon: "sith-order", // shares DBS Enjoyer's crest — it's a DBS feat
     condition: "20+ DBS kills in a single match",
     claim: (s) => s.dbs_kills >= 20,
-  },
-  {
-    // 3-cap floor added 29 Jul 2026: without it, a pure turtle who never once
-    // brought the flag home could still claim a crest named after a runner.
-    id: "wesleys-prodigy",
-    title: "Wesley's Prodigy",
-    category: "match",
-    icon: "rogue-one", // shares Pro Rusher's crest — the runner's crest
-    condition: "Hold the flag 45+ minutes with 3+ caps and under 30 deaths",
-    claim: (s) => s.flag_hold_ms >= 2_700_000 && s.captures >= 3 && s.deaths < 30,
-  },
-  {
-    id: "cheese-is-hacking",
-    title: "Embrace Cheese, reject masculinity",
-    category: "match",
-    icon: "mandalorian-mysteries", // shares Cheese's Dream's crest, naturally
-    condition: "100+ DFA kills in a single match",
-    claim: (s) => s.dfa_kills >= 100,
   },
   {
     // Interlude already did this on 8 Jun 2026 (2 caps, 20 returns, 119 kills) —
