@@ -3,6 +3,9 @@ import Link from "next/link"
 import { Emblem } from "@/components/emblem"
 import { CtfVideoCard } from "@/components/ctf-video-card"
 import { DecodingTitle } from "@/components/decoding-title"
+// Read the real numbers rather than restating them: this page went stale once
+// already, still promising a 10-game floor after it moved to 5.
+import { CALIBRATION } from "@/lib/calibration"
 
 export const metadata: Metadata = {
   title: "CTF 101 — JK2 Capture the Flag",
@@ -419,14 +422,14 @@ export default function Ctf101Page() {
                   "Win more than your tier expected",
                   "Every match records the tiers both sides had when it was played, so the system knows what was expected of you: roughly your team's share of the games. Consistently beat that and you rank up. Consistently fall short and you rank down.",
                 ],
-                ["Only your last 15 games count", "It measures current form, not your entire history."],
+                [`Only your last ${CALIBRATION.WINDOW_CAP} games count`, "It measures current form, not your entire history."],
                 [
-                  "You need 10 games at a tier before you can move",
+                  `You need ${CALIBRATION.MIN_GAMES} games at a tier before you can move`,
                   "Get moved — by the system or by an admin — and your record starts fresh. Returning to a tier you held before starts a new record too; the games that moved you off it are spent.",
                 ],
                 [
                   "The gap has to be real",
-                  "On 10–14 games you need to be about 30 points clear of expectation — roughly 8–2 where 5–5 was predicted. At 15 games the bar eases to 20 points, about 7–3. One lucky night moves nobody.",
+                  `Below ${CALIBRATION.FULL_SAMPLE_GAMES} games you need to be about ${Math.round(CALIBRATION.GAP_SMALL * 100)} points clear of expectation — roughly 8–2 where 5–5 was predicted. At ${CALIBRATION.FULL_SAMPLE_GAMES} games the bar eases to ${Math.round(CALIBRATION.GAP_FULL * 100)} points, about 7–3. One lucky night moves nobody.`,
                 ],
                 [
                   "One tier at a time, always in public",

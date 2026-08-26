@@ -87,13 +87,36 @@ export async function readAutoCalibrationEnabledAt(supabase: SupabaseClient): Pr
  * favourites. Re-run the replay before changing any of these.
  */
 export const CALIBRATION = {
-  /** Games at the current tier before a player can move at all. */
-  MIN_GAMES: 10,
+  /**
+   * Games at the current tier before a player can move at all.
+   *
+   * Was 10, moved to 5 on 26 Aug 2026 at Sora's request AND on fresh evidence.
+   * The original 10 came from a replay that found 5 thrashed badly (497 moves /
+   * 380 reversals over 5 months). **That no longer reproduces.** Re-replayed
+   * over all 301 matches (Mar–Aug 2026), out-of-sample, averaged across five
+   * train/test splits:
+   *
+   *   MIN_GAMES=5   63.8% favourite accuracy, 38 moves, 8.4 reversals (21%)
+   *   MIN_GAMES=8   63.1%                     30 moves, 5.2
+   *   MIN_GAMES=10  61.4%                     29 moves, 4.6
+   *   MIN_GAMES=12  58.1%                     28 moves, 3.6
+   *
+   * So 5 is the BEST of the tested floors on accuracy, and its reversal rate
+   * (21%) is nothing like the old 76%. The likely reason the old result does
+   * not reproduce: it predates PR #183 (24 Aug), which stopped a player's
+   * pre-demotion games counting as fresh evidence after they returned to a
+   * tier — exactly the bug that would manufacture thrashing.
+   *
+   * READ THE BIGGER FINDING BEFORE TUNING THIS FURTHER: in the same replay,
+   * hand tiers left alone scored 67.8%, beating EVERY calibrator setting. The
+   * floor is not the problem; see the note above CALIBRATION.
+   */
+  MIN_GAMES: 5,
   /** From this many games the evidence bar drops to GAP_FULL. */
   FULL_SAMPLE_GAMES: 15,
   /** Only the most recent N games at the current tier count — form, not history. */
   WINDOW_CAP: 15,
-  /** Required |actual − expected| win-rate gap at 10–14 games. */
+  /** Required |actual − expected| win-rate gap below FULL_SAMPLE_GAMES (5–14). */
   GAP_SMALL: 0.3,
   /** Required gap at FULL_SAMPLE_GAMES+. */
   GAP_FULL: 0.2,
