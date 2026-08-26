@@ -222,3 +222,61 @@ export async function fetchRecordedTitles(
     earnedAt: r.earned_at,
   }))
 }
+
+/**
+ * Record an equipped-title change (scripts/046), for the bot's title ping.
+ *
+ * Resolves BOTH sides to display strings at write time rather than storing ids
+ * alone, because a seasonal title stops resolving once its month leaves
+ * lib/titles.ts — see the migration's note. One player_titles read serves both
+ * lookups, so this is a single extra query on a save path that already runs
+ * several.
+ *
+ * A no-op when the title didn't actually move, so callers can call it
+ * unconditionally rather than each re-deriving "did this change".
+ *
+ * Never throws, by the same contract as recordSeasonalTitlesSafely: a player
+ * saving their profile must not see an error because a changelog insert failed.
+ * The cost of that is a missed ping, which is the right thing to lose.
+ */
+export async function recordTitleChangeSafely(
+  supabase: SupabaseClient,
+  playerId: string,
+  playerName: string,
+  oldTitleId: string | null,
+  newTitleId: string | null,
+): Promise<void> {
+  if (oldTitleId === newTitleId) return
+
+  try {
+    const recorded = await fetchRecordedTitles(supabase, playerId)
+    // Banked (player_titles) wins over the catalogue, matching how the title is
+    // resolved everywhere it renders — see resolveEquippedTitle.
+    const resolve = (id: string | null) => {
+      if (!id) return null
+      const rec = recorded.find((t) => t.titleId === id)
+      if (rec) return { title: rec.title, rarity: rec.rarity }
+      const cat = catalogueTitleById(id)
+      return cat ? { title: cat.title, rarity: cat.rarity } : null
+    }
+
+    const from = resolve(oldTitleId)
+    const to = resolve(newTitleId)
+
+    const { error } = await supabase.from("title_changes").insert({
+      player_id: playerId,
+      player_name: playerName,
+      old_title_id: oldTitleId,
+      // An id that resolves to nothing (a title retired before it was ever
+      // banked) still records the change — the id is kept as the only trace of
+      // what it was, and the bot renders the null as "no title".
+      old_title: from?.title ?? null,
+      new_title_id: newTitleId,
+      new_title: to?.title ?? null,
+      new_rarity: to?.rarity ?? null,
+    })
+    if (error) throw new Error(error.message)
+  } catch (err) {
+    console.warn("Title change recording failed:", err)
+  }
+}

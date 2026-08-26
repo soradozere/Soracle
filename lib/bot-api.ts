@@ -1,4 +1,4 @@
-import type { NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 import { requireBearer } from "@/lib/bearer-auth"
 import { createClient } from "@/lib/supabase/server"
 import { mapDbPlayer } from "@/lib/fetch-players-db"
@@ -62,4 +62,54 @@ export async function fetchNwhIdsForBot(): Promise<NwhMapping[]> {
   }
 
   return data ?? []
+}
+
+/**
+ * Parses the `?since=<ISO timestamp>` window shared by the changelog endpoints
+ * (tier-changelog, title-changelog), which the bot polls on a timer.
+ *
+ * Omitted means "no lower bound" — the first poll of a fresh bot, before it has
+ * a high-water mark to send. Anything unparseable is a 400 rather than a silent
+ * fall-through to the unbounded read: a poller with a broken clock or a
+ * mis-encoded param would otherwise re-announce the entire history on every
+ * tick, and the whole point of these endpoints is to ping people exactly once.
+ *
+ * Returns the caller's string VERBATIM (or null for no bound), or a 400 to send back.
+ *
+ * Verbatim is load-bearing. An earlier version returned `new Date(raw).toISOString()`,
+ * which looks like harmless normalization and is in fact a re-announce bug: Postgres
+ * timestamptz keeps MICROseconds, a JS Date keeps MILLIseconds. Round-tripping
+ * "…41.054038+00:00" through Date yields "…41.054Z", which is strictly EARLIER than
+ * the row it came from — so `> since` matched that row again, the poller was handed
+ * back its own cursor row on every tick, and the same player got pinged forever.
+ * Date is used here only to answer "is this a timestamp at all"; the value handed to
+ * PostgREST is the caller's own, compared by Postgres at full precision.
+ */
+export function parseSinceParam(request: Request): { since: string | null } | NextResponse {
+  const raw = new URL(request.url).searchParams.get("since")
+  if (!raw) return { since: null }
+
+  if (Number.isNaN(new Date(raw).getTime())) {
+    return NextResponse.json({ error: "invalid `since` — expected an ISO timestamp" }, { status: 400 })
+  }
+  return { since: raw }
+}
+
+/**
+ * A timestamptz from PostgREST, rendered so a bot can echo it straight back as
+ * `?since=` without encoding it.
+ *
+ * PostgREST hands back "2026-08-26T18:17:41.054038+00:00". That '+' is a SPACE in a
+ * query string, so a poller that reuses the value unencoded — the obvious thing to
+ * write — gets a permanent 400 rather than a working cursor. Swapping the UTC offset
+ * for 'Z' is a pure notation change that keeps every microsecond, so the cursor stays
+ * exact (see parseSinceParam) while becoming URL-safe. It also matches the 'Z'-suffixed
+ * shape the bot's spec asked for.
+ */
+export function toIsoUtc(timestamp: string): string {
+  if (timestamp.endsWith("Z")) return timestamp
+  if (timestamp.endsWith("+00:00")) return `${timestamp.slice(0, -"+00:00".length)}Z`
+  // A non-UTC offset shouldn't occur (Supabase serves UTC), but if it ever did,
+  // correctness beats precision: convert properly and accept millisecond truncation.
+  return new Date(timestamp).toISOString()
 }

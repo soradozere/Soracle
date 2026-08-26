@@ -2,6 +2,7 @@
 
 import { createServiceClient } from "@/lib/supabase/admin"
 import { requireFullAdmin } from "@/lib/player-role"
+import { recordTitleChangeSafely } from "@/lib/titles-server"
 
 // Full-admin roster writes, moved server-side so a player login promoted to
 // full_admin (scripts/044_add_player_admin_roles.sql) can use them too --
@@ -94,8 +95,20 @@ export async function updatePlayerProfileAsAdmin(
   const authz = await requireFullAdmin()
   if (!authz.ok) return { success: false, error: authz.error }
 
-  const { error } = await createServiceClient().from("players").update(fields).eq("id", playerId)
+  const supabase = createServiceClient()
+
+  // The title before the write, for the changelog below. This path and
+  // /api/player-profile are the ONLY two writers of players.title -- if a third
+  // ever appears it needs this too, or the bot's title ping silently misses it.
+  const { data: before } = await supabase.from("players").select("name, title").eq("id", playerId).maybeSingle()
+
+  const { error } = await supabase.from("players").update(fields).eq("id", playerId)
   if (error) return { success: false, error: error.message }
+
+  // Best-effort, after the write, and a no-op unless the title actually moved --
+  // same contract as the self-service path. See scripts/046.
+  await recordTitleChangeSafely(supabase, playerId, before?.name ?? "", before?.title ?? null, fields.title)
+
   return { success: true, data: null }
 }
 
