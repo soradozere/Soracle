@@ -11,6 +11,7 @@ const ALLOWED_STATS: Record<string, string> = {
   dbs_kills: "DBS kills",
   dbs_returns: "DBS return kills",
   dfa_kills: "DFA kills",
+  dfa_returns: "DFA return kills",
   captures: "captures",
   returns: "returns",
   base_cleaner: "base cleans",
@@ -19,6 +20,15 @@ const ALLOWED_STATS: Record<string, string> = {
   kills: "kills",
   score: "score",
   doom_kills: "doom kills",
+}
+
+// Stats that carry a companion column alongside the ranked value — shown for
+// context, never used for ranking. DFA kills alone doesn't say whether it was
+// efficient or spammed; pairing it with attempts (=dfa reads "897 (attempts:
+// 1230)") does. Nothing else needs this yet, so it's a lookup rather than a
+// blanket second-column fetch.
+const COMPANION_STATS: Record<string, string> = {
+  dfa_kills: "dfa_attempts",
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ stat: string }> }) {
@@ -68,13 +78,13 @@ export async function GET(request: Request, { params }: { params: Promise<{ stat
   // Paged: supabase-js caps a select at 1000 rows and match_stats is already
   // past that all-time, so an unpaged read would silently drop the oldest games
   // and under-count the board.
+  const companion = COMPANION_STATS[stat]
+  const selectCols = companion ? `player_id, ${stat}, ${companion}` : `player_id, ${stat}`
   const PAGE = 1000
   const totals = new Map<string, number>()
+  const companionTotals = new Map<string, number>()
   for (let from = 0; ; from += PAGE) {
-    let q = supabase
-      .from("match_stats")
-      .select(`player_id, ${stat}`)
-      .range(from, from + PAGE - 1)
+    let q = supabase.from("match_stats").select(selectCols).range(from, from + PAGE - 1)
     if (matchIds) q = q.in("match_id", matchIds)
     const { data, error } = await q
     if (error) {
@@ -84,12 +94,19 @@ export async function GET(request: Request, { params }: { params: Promise<{ stat
     const rows = (data ?? []) as unknown as Array<{ player_id: string } & Record<string, number>>
     for (const row of rows) {
       totals.set(row.player_id, (totals.get(row.player_id) ?? 0) + (row[stat] ?? 0))
+      if (companion) {
+        companionTotals.set(row.player_id, (companionTotals.get(row.player_id) ?? 0) + (row[companion] ?? 0))
+      }
     }
     if (rows.length < PAGE) break
   }
 
   const top = [...totals.entries()]
-    .map(([id, value]) => ({ name: nameById.get(id) ?? "unknown", value }))
+    .map(([id, value]) => ({
+      name: nameById.get(id) ?? "unknown",
+      value,
+      ...(companion ? { companion: companionTotals.get(id) ?? 0 } : {}),
+    }))
     .filter((r) => r.value > 0)
     .sort(rankByName((a, b) => b.value - a.value))
     .slice(0, 5)

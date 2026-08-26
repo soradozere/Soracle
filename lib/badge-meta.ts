@@ -16,6 +16,9 @@ export const BADGE_META: Record<BadgeId, { label: string; color: string }> = {
   highscore: { label: "High Score", color: "#f39c12" },
   "dbs-god": { label: "DBS God", color: "#9b59b6" },
   top5: { label: "Top 5 Finish", color: "#c5c6c7" },
+  // Wesley's Prodigy = cap conversion as capper, fixed 35% bar (not a ranking
+  // like the others below) — see computeMonthlyHonours in lib/player-profile.ts.
+  "wesleys-prodigy": { label: "Wesley's Prodigy", color: "#2ecc71" },
   "top-capper": { label: "Top Capper", color: "#62d6e8" },
   "top-kd": { label: "Top K/D", color: "#ff4757" },
 }
@@ -26,6 +29,7 @@ export const BADGE_PRIORITY: BadgeId[] = [
   "highscore",
   "dbs-god",
   "top5",
+  "wesleys-prodigy",
   "top-capper",
   "top-kd",
 ]
