@@ -112,19 +112,22 @@ export const SEASONS: Record<string, Season> = {
       ],
     },
   },
+  // Five escalating threat levels, street crook to universe-ending. Named
+  // before any September match landed (checked 26 Aug 2026: zero player_titles
+  // rows under 2026-09), so unlike August this needed no rename migration.
   "2026-09": {
     key: "2026-09",
-    name: "Season 3 — TBC",
+    name: "Villain Arc",
     ladder: {
       id: "s2026-09",
-      label: "Season 3 — TBC",
+      label: "Villain Arc",
       metric: "month_score",
       tiers: [
-        { id: "s2026-09-1", title: "Tier One", threshold: 5000, rarity: "common" },
-        { id: "s2026-09-2", title: "Tier Two", threshold: 12500, rarity: "rare" },
-        { id: "s2026-09-3", title: "Tier Three", threshold: 20000, rarity: "epic" },
-        { id: "s2026-09-4", title: "Tier Four", threshold: 27500, rarity: "legendary" },
-        { id: "s2026-09-5", title: "Tier Five", threshold: 35000, rarity: "mythic" },
+        { id: "thug", title: "Thug", threshold: 5000, rarity: "common" },
+        { id: "enforcer", title: "Enforcer", threshold: 12500, rarity: "rare" },
+        { id: "mastermind", title: "Mastermind", threshold: 20000, rarity: "epic" },
+        { id: "supervillain", title: "Supervillain", threshold: 27500, rarity: "legendary" },
+        { id: "cosmic-threat", title: "Cosmic Threat", threshold: 35000, rarity: "mythic" },
       ],
     },
   },
