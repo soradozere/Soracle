@@ -4,6 +4,7 @@ import {
   computeAchievements,
   resolveSecretHolders,
   resolveScoreSecretHolders,
+  resolveMonthlySecretHolders,
   secretViewsFor,
   unlockEventsFor,
   type AchievementView,
@@ -13,6 +14,7 @@ import {
   type SecretHolder,
   type UnlockEvent,
 } from "@/lib/achievements"
+import { capperMonths } from "@/lib/cap-conversion"
 import {
   ACHIEVEMENTS,
   RARITY_META,
@@ -156,8 +158,14 @@ async function fetchHistoryRowsUncached(): Promise<RawHistory> {
     fetchAll<ServerMatch>(supabase, "matches", "id, red_team, blue_team, red_score, blue_score, created_at"),
     fetchAll<ServerStat>(supabase, "match_stats", STAT_COLUMNS),
     // The kill matrix, for crests about who beat whom rather than raw totals
-    // (Bully). Small on purpose: it only exists for JSON-era matches.
-    fetchAll<KillPairRow>(supabase, "match_kills", "match_id, killer_player_id, victim_player_id, kills"),
+    // (Bully), and for `rets` — returns made AGAINST a carrier, which is the
+    // denominator half of Wesley's Prodigy's cap conversion and exists nowhere
+    // else. Small on purpose: it only exists for JSON-era matches.
+    fetchAll<KillPairRow>(
+      supabase,
+      "match_kills",
+      "match_id, killer_player_id, victim_player_id, kills, rets",
+    ),
     // tier_value / avatar_url / manually_inactive ride along for the /players
     // board: same row, same round-trip, and the achievement passes ignore them.
     //
@@ -294,11 +302,17 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
     }
   }
 
-  // Match-resolved and score-resolved secrets answer different questions off the
+  // Match-, score- and month-resolved secrets answer different questions off the
   // same history, so they're resolved separately and merged into one map. Ids
-  // never overlap: a def has claim() or scoreThreshold, never both.
+  // never overlap: a def has exactly one of claim() / scoreThreshold / monthly,
+  // and each resolver skips the defs that aren't its own.
   const holders = resolveSecretHolders(candidates)
   for (const [id, holder] of resolveScoreSecretHolders(seqByPlayer)) holders.set(id, holder)
+  for (const [id, holder] of resolveMonthlySecretHolders(
+    capperMonths(matches, stats, killPairs, new Date()),
+  )) {
+    holders.set(id, holder)
+  }
   return { seqByPlayer, nameById, metaById, holders }
 }
 

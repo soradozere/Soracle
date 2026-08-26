@@ -12,6 +12,14 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Check, ChevronsUpDown, Loader2, Maximize2, RotateCcw } from "lucide-react"
@@ -668,10 +676,42 @@ export function ScoreboardReview({
     }
   }
 
+  /*
+   * Same player on both rosters — confirm rather than block.
+   *
+   * A scoreboard genuinely can list someone on both sides: switch teams
+   * mid-game and you get a row per side. So this asks instead of refusing.
+   *
+   * It matters because the roster arrays are what ELO, the monthly W/L records
+   * and Star Player's tier totals read — a name on both sides is counted for
+   * both, landing as a win AND a loss. (The stats themselves are keyed by
+   * player_id and stay correct either way.)
+   *
+   * This lives here, not in the individual submit handlers, because every path
+   * that logs a reviewed scoreboard funnels through handleConfirm: the admin
+   * log form and the pending bin via <MatchStatsCsvModal>, and the full review
+   * screen directly. One check, one place, no way to add a fourth caller that
+   * quietly misses it.
+   */
+  const [bothTeamsNames, setBothTeamsNames] = useState<string[]>([])
+
   function handleConfirm() {
     const data = buildCsvData()
     if (!data) return
+
+    const onBothTeams = data.redTeamNames.filter((name) => data.blueTeamNames.includes(name))
+    if (onBothTeams.length > 0) {
+      setBothTeamsNames(onBothTeams)
+      return
+    }
     void onConfirm(data)
+  }
+
+  // Resume after the admin confirms the both-teams roster is intentional.
+  function confirmBothTeams() {
+    setBothTeamsNames([])
+    const data = buildCsvData()
+    if (data) void onConfirm(data)
   }
 
   return (
@@ -1250,6 +1290,32 @@ export function ScoreboardReview({
           )}
         </div>
       </div>
+
+      {/*
+        Confirm-don't-block: dismissing (Escape, backdrop, "No") returns to the
+        review with every mapping and edit intact — nothing is logged until
+        "Yes, proceed".
+      */}
+      <Dialog open={bothTeamsNames.length > 0} onOpenChange={(open) => !open && setBothTeamsNames([])}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Player on both teams</DialogTitle>
+            <DialogDescription>
+              {bothTeamsNames.length === 1
+                ? `${bothTeamsNames[0]} has been logged on both Red and Blue team. Is this correct?`
+                : `${bothTeamsNames.slice(0, -1).join(", ")} and ${bothTeamsNames[bothTeamsNames.length - 1]} have been logged on both Red and Blue team. Is this correct?`}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button type="button" variant="outline" onClick={() => setBothTeamsNames([])}>
+              No, edit needed
+            </Button>
+            <Button type="button" onClick={confirmBothTeams}>
+              Yes, proceed
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
