@@ -6,7 +6,7 @@ import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
 import { computeAllPlayerAchievements, HISTORY_TAG } from "@/lib/achievements-server"
 import { scoreFromViews } from "@/lib/achievement-score"
 import { earnedTitles, mergeRecordedTitles, oneOfOneTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
-import { fetchRecordedTitles } from "@/lib/titles-server"
+import { fetchRecordedTitles, recordTitleChangeSafely } from "@/lib/titles-server"
 import { findModelSkin, findPlayerModel, isKnownModel } from "@/lib/player-models"
 import { isKnownHandSlot } from "@/lib/saber-colours"
 import { isKnownActionAnimation, isKnownIdleAnimation } from "@/lib/animations"
@@ -134,9 +134,11 @@ export async function POST(request: Request) {
   // renders, so they alone decide whether the invalidation at the end is worth
   // paying for. See the note there for the full list and how it was derived.
   // One narrow select, against a route that already runs several.
+  // `name` rides along for the title changelog below rather than costing a
+  // second read; it is not part of the cache gate.
   const { data: before } = await supabase
     .from("players")
-    .select("avatar_url, title")
+    .select("avatar_url, title, name")
     .eq("id", playerId)
     .maybeSingle()
   const cacheRelevantChanged =
@@ -157,6 +159,19 @@ export async function POST(request: Request) {
     })
     .eq("id", playerId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+
+  // Log an equipped-title change for the bot's title ping (scripts/046).
+  // After the update, so a failed write never produces a changelog entry for a
+  // change that didn't land; best-effort, so a failed entry never fails the
+  // save. No-ops when the title didn't move, which is the common case here --
+  // this route is every profile save, not just a title swap.
+  await recordTitleChangeSafely(
+    supabase,
+    playerId,
+    before?.name ?? "",
+    before?.title ?? null,
+    titleId,
+  )
 
   /*
    * Of the nine columns written above, exactly TWO are rendered by a page
