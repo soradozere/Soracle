@@ -31,7 +31,7 @@ import { rankByName } from "./rank-order"
  */
 
 /** Fraction of the top player's resolved runs needed to make the board. */
-export const CARRY_FLOOR_FRACTION = 0.3
+export const CARRY_FLOOR_FRACTION = 0.2
 
 export interface CapConversionRow {
   playerId: string
@@ -97,7 +97,7 @@ async function fetchAll<T>(
  * with at least one resolved run, sorted best-first, already filtered to
  * those clearing the carry floor.
  *
- * The floor is relative — 30% of the leader's resolved runs — rather than an
+ * The floor is relative — 20% of the leader's resolved runs — rather than an
  * absolute count, matching the existing monthly qualifiers and, unlike a fixed
  * number, staying meaningful whether the window holds three matches or three
  * hundred. It is deliberately on CARRIES, not captures: a support player with
