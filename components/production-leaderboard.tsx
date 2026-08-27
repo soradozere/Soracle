@@ -16,6 +16,7 @@ import { RankMedal } from "@/components/rank-medal"
 import {
   ALL_TIME_MIN_MATCHES,
   MONTHLY_MIN_FRACTION,
+  WIN_SHARE,
   computeProductionBoard,
   type Job,
   type ProductionBoard,
@@ -24,6 +25,13 @@ import {
   type ProductionRow,
   type ProductionStatRow,
 } from "@/lib/production-rating"
+
+/**
+ * The W/L share as a percentage, for copy. Read from the constant rather than
+ * written out, because it has been changed twice and the prose went stale both
+ * times.
+ */
+const WIN_PCT = `${Math.round(WIN_SHARE * 100)}%`
 
 // The Impact board — rating a month on what players did rather than on what the
 // scoreboard said at the end.
@@ -135,21 +143,34 @@ async function fetchAll<T>(
  * nothing here.
  */
 function JobBar({ row }: { row: ProductionRow }) {
-  const title = JOBS.map((j) => `${JOB_LABELS[j]} ${row.jobs[j].toFixed(2)}`).join(" · ")
+  // Share of this player's MATCHES spent in each role — not the share of their
+  // points, which is what this used to be.
+  //
+  // Points-share was actively misleading. Captures are the most expensive thing on
+  // the board, so a capper's bar filled with blue and a support player's purple
+  // sliver stayed thin no matter how well they played. It read as "capping is the
+  // only way to make headway and support is worthless" when it was really just
+  // showing which jobs carry the biggest price tags. What a player actually spent
+  // the month doing is both more useful and not a value judgement.
+  const total = JOBS.reduce((t, j) => t + row.rolesPlayed[j], 0)
+  const title = JOBS.filter((j) => row.rolesPlayed[j] > 0)
+    .map((j) => `${JOB_LABELS[j]} ${row.rolesPlayed[j]}`)
+    .join(" · ")
   return (
-    <div className="flex items-center gap-2" title={`${title} — total ${row.value.toFixed(2)}`}>
+    <div className="flex items-center gap-2" title={`Matches played in each role — ${title}`}>
       <div
         role="img"
-        aria-label={title}
+        aria-label={`Matches played in each role: ${title}`}
         className="relative h-3 w-full rounded-sm overflow-hidden bg-[var(--color-surface-elevated)] flex"
       >
-        {JOBS.map((job) => {
-          const share = row.value > 0 ? (row.jobs[job] / row.value) * 100 : 0
-          if (share <= 0) return null
-          return (
-            <span key={job} style={{ width: `${share}%`, backgroundColor: JOB_COLOURS[job] }} />
-          )
-        })}
+        {total > 0 &&
+          JOBS.map((job) => {
+            const share = (row.rolesPlayed[job] / total) * 100
+            if (share <= 0) return null
+            return (
+              <span key={job} style={{ width: `${share}%`, backgroundColor: JOB_COLOURS[job] }} />
+            )
+          })}
       </div>
     </div>
   )
@@ -179,6 +200,16 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
    * the selector at the top of Stats already does.
    */
   const [dayIndex, setDayIndex] = useState<number | null>(null)
+  /**
+   * "combined" is the ordinary board. "byrole" splits it into one table per job,
+   * rating each player only on the matches they actually played that job.
+   *
+   * The combined board answers "who produced most this month". It cannot answer
+   * "who is the best BC", because it divides a player's base work by every match
+   * they played including the ones spent capping — which is exactly the complaint
+   * that prompted this view.
+   */
+  const [view, setView] = useState<"combined" | "byrole">("combined")
 
   const load = async ({ isStale }: { isStale?: () => boolean } = {}) => {
     const stale = () => isStale?.() ?? false
@@ -287,9 +318,9 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
             <strong className="text-[var(--color-text)]">
               This board is experimental and the weights may still change.
             </strong>{" "}
-            What players actually did in {monthLabel}, per minute played — with the jobs priced
-            so no role is worth more than another. Doing none of a job costs nothing. W/L counts
-            for 25% on top.
+            What players actually did in {monthLabel}, totalled up per match — with each thing
+            priced by how much it actually swung the games it happened in. Doing none of a job
+            costs nothing, and turning up more often does not help. W/L counts for {WIN_PCT} on top.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -304,7 +335,7 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
               <DialogHeader>
                 <DialogTitle>How the Impact board works</DialogTitle>
                 <DialogDescription>
-                  It counts what you did per minute, prices each thing, and adds it up.
+                  It counts what you did in each match, prices each thing, and adds it up.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-5 text-sm text-[var(--color-text-dim)]">
@@ -315,8 +346,8 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                       Count your captures, returns, BC kills, mine grabs, assists, flag grabs,
                       mine kills and flag carry time
                     </li>
-                    <li>Divide by minutes played, so a short appearance is not punished</li>
-                    <li>Multiply each by its price and add them together</li>
+                    <li>Multiply each by its price and add them together, per match</li>
+                    <li>Average over the matches you played, so turning up more does not help</li>
                     <li>
                       Adjust slightly for how strong the opposition was, then add a bit for your
                       W/L record
@@ -340,13 +371,15 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                       <tbody className="tabular-nums">
                         {[
                           ["Capture", "100"],
-                          ["Assist", "35"],
-                          ["Return", "11"],
-                          ["Mine grab", "5"],
-                          ["Mine kill / return", "4"],
-                          ["BC kill", "3.6"],
-                          ["Flag grab", "2.6"],
-                          ["Flag carry (per min)", "2"],
+                          ["Assist", "63"],
+                          ["Return", "21"],
+                          ["Mine return", "12.5"],
+                          ["Flag carry (per min)", "7.7"],
+                          ["BC kill", "7"],
+                          ["Mine grab, enemy base", "5.2"],
+                          ["Mine kill", "3.8"],
+                          ["Flag grab", "0.5"],
+                          ["Mine grab, own base", "0"],
                         ].map(([label, value]) => (
                           <tr key={label} className="border-t border-[var(--color-border)]/40">
                             <td className="py-1">{label}</td>
@@ -357,11 +390,15 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                     </table>
                   </div>
                   <p className="mt-2">
-                    These stats were ranked by Sora, who is open to suggestions on changes.
+                    These prices are not guesses. Sora went through ten real scoreboards and
+                    rated every player on them for how much they actually swung that game. These
+                    are the prices that best reproduce those calls — on games the fit had never
+                    seen, they agree with him 92% of the time, against 83% for the prices this
+                    board used before.
                   </p>
                   <p className="mt-2">
-                    A capture is worth 30 BC kills each, but base cleans happen 16 times a game
-                    and captures 0.87 times — so they end up nearly level on the board overall.
+                    A capture is worth 14 BC kills, but base cleans happen 16 times a game and
+                    captures 0.87 times — so they still end up close on the board overall.
                   </p>
                 </div>
 
@@ -403,8 +440,9 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                       all downstream of winning
                     </li>
                     <li>
-                      <strong className="text-[var(--color-text)]">Winning</strong> — in, but only
-                      25%, because a result says more about the team draw than about you
+                      <strong className="text-[var(--color-text)]">Winning</strong> — in, at {WIN_PCT}.
+                      Players on the winning side really do rate as more impactful, but a
+                      season win rate says much less than a single result does
                     </li>
                   </ul>
                 </div>
@@ -467,8 +505,8 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                     The order of the stats is a call about JK2, not a measurement — nothing in the
                     data can settle what a capture is worth against a base clean. Specifically
                     unconfirmed: a mine grab is currently worth about two flag grabs, and it is
-                    what carries the top mine-heavy players. Assists are priced 4th. W/L counts
-                    for 25%, which costs some accuracy in exchange for reflecting results.
+                    what carries the top mine-heavy players. W/L counts for {WIN_PCT}, which costs
+                    some accuracy in exchange for reflecting results.
                   </p>
                 </div>
                 <div>
@@ -584,11 +622,30 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                 scoreboards
               </span>
 
+              {/* Combined vs by-role. Sits with the day cursor because both change
+                  what the table below is answering, rather than filtering it. */}
+              <div className="ml-auto flex items-center gap-1">
+                {(["combined", "byrole"] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setView(v)}
+                    className="rounded-md px-2 py-1 text-[11px] font-medium transition-colors"
+                    style={{
+                      border: "1px solid var(--color-border)",
+                      background: view === v ? "var(--color-surface-elevated)" : "transparent",
+                      color: view === v ? "var(--color-text)" : "var(--color-text-dim)",
+                    }}
+                  >
+                    {v === "combined" ? "Combined" : "By role"}
+                  </button>
+                ))}
+              </div>
+
               {/* Day cursor, top right. Steps back through the nights the league
                   actually played, re-rating on only the matches up to that point,
                   so the table can be read as it stood on the night. */}
               {scope === "month" && matchDays.length > 1 && (
-                <div className="ml-auto flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5">
                   <button
                     onClick={() =>
                       setDayIndex((i) => Math.max(0, (i == null ? matchDays.length - 1 : i) - 1))
@@ -624,6 +681,87 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
               )}
             </div>
 
+            {view === "byrole" ? (
+              <div className="divide-y divide-[var(--color-border)]">
+                {JOBS.map((job) => {
+                  const list = board.rows
+                    .filter((r) => r.roleRatings[job] != null)
+                    .sort((a, b) => (b.roleRatings[job] ?? 0) - (a.roleRatings[job] ?? 0))
+                  if (list.length === 0) return null
+                  return (
+                    <div key={job} className="p-4">
+                      <h4
+                        className="mb-2 text-xs font-semibold uppercase tracking-wide"
+                        style={{ color: JOB_COLOURS[job] }}
+                      >
+                        {JOB_LABELS[job]}
+                        <span className="ml-2 font-normal normal-case tracking-normal text-[var(--color-text-dim)]">
+                          rated against others doing this job
+                        </span>
+                      </h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-[var(--color-border)] text-left text-[var(--color-text-dim)]">
+                              <th className="px-2 py-1.5 font-medium">#</th>
+                              <th className="px-2 py-1.5 font-medium">Player</th>
+                              <th className="px-2 py-1.5 font-medium text-center">Rating</th>
+                              <th className="px-2 py-1.5 font-medium text-right">Games in role</th>
+                              <th className="px-2 py-1.5 font-medium text-right">Of total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {list.map((r, i) => (
+                              <tr
+                                key={r.name}
+                                className="border-b border-[var(--color-border)]/50 hover:bg-[var(--color-surface-elevated)]/40"
+                              >
+                                <td className="px-2 py-1.5 text-[var(--color-text-dim)]">{i + 1}</td>
+                                <td className="px-2 py-1.5 font-medium text-[var(--color-text)]">
+                                  {r.name}
+                                </td>
+                                <td
+                                  className="px-2 py-1.5 text-center font-mono tabular-nums"
+                                  style={{
+                                    color:
+                                      (r.roleRatings[job] ?? 50) >= 62
+                                        ? JOB_COLOURS[job]
+                                        : "var(--color-text-dim)",
+                                  }}
+                                >
+                                  {r.roleRatings[job]}
+                                </td>
+                                <td
+                                  className="px-2 py-1.5 text-right tabular-nums"
+                                  style={{
+                                    // A rating off 3-4 matches is a different kind of
+                                    // claim from one off 30. Dim it rather than hide it.
+                                    color:
+                                      r.rolesPlayed[job] < 5
+                                        ? "var(--color-accent-yellow)"
+                                        : "var(--color-text-dim)",
+                                  }}
+                                  title={
+                                    r.rolesPlayed[job] < 5
+                                      ? "Few matches in this role — treat the rating with caution"
+                                      : undefined
+                                  }
+                                >
+                                  {r.rolesPlayed[job]}
+                                </td>
+                                <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text-dim)]">
+                                  {r.games}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
               <thead>
@@ -632,10 +770,10 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                   <th className="px-2 py-2 font-medium">Player</th>
                   <th className="px-2 py-2 font-medium text-right">Rating</th>
                   <th className="px-2 py-2 font-medium text-right">GP</th>
-                  <th className="px-2 py-2 font-medium text-right" title="Counts for 25% of the rating">
+                  <th className="px-2 py-2 font-medium text-right" title={`Counts for ${WIN_PCT} of the rating`}>
                     W-L
                   </th>
-                  <th className="px-2 py-2 font-medium min-w-[160px]">What the rating is made of</th>
+                  <th className="px-2 py-2 font-medium min-w-[160px]">Roles played</th>
                   {JOBS.map((job) => (
                     <th
                       key={job}
@@ -691,19 +829,19 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                         className="px-2 py-1.5 text-center font-mono tabular-nums"
                         style={{
                           color:
-                            !row.jobPlayed[job]
+                            row.roleRatings[job] == null
                               ? "var(--color-border)"
-                              : row.jobRatings[job] >= 62
+                              : (row.roleRatings[job] ?? 0) >= 62
                                 ? JOB_COLOURS[job]
                                 : "var(--color-text-dim)",
                         }}
                         title={
-                          row.jobPlayed[job]
-                            ? `${JOB_LABELS[job]} ${row.jobRatings[job]} — ${jobDetail(row, job)}`
+                          row.roleRatings[job] != null
+                            ? `${JOB_LABELS[job]} ${row.roleRatings[job]} across ${row.rolesPlayed[job]} matches in that role — ${jobDetail(row, job)}`
                             : `Barely played this job — ${jobDetail(row, job)}. Costs nothing.`
                         }
                       >
-                        {row.jobPlayed[job] ? row.jobRatings[job] : "–"}
+                        {row.roleRatings[job] ?? "–"}
                       </td>
                     ))}
                   </tr>
@@ -712,6 +850,7 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
               </tbody>
               </table>
             </div>
+            )}
           </div>
 
           <p className="text-xs italic text-[var(--color-text-dim)]">

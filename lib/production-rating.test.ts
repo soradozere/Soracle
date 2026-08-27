@@ -230,20 +230,44 @@ describe("computeProductionBoard: strength of schedule", () => {
   })
 })
 
-describe("computeProductionBoard: rates, not totals", () => {
-  it("does not reward simply being on the server longer", () => {
+describe("computeProductionBoard: totals, not rates", () => {
+  it("counts half a match of work as half the impact", () => {
     const matches = [match("m1"), match("m2")]
     const stats = matches.flatMap((m) =>
       fullRows(m.id, {
-        a: { captures: 2, time_played: 25 }, // same rate, half the time
+        a: { captures: 2, time_played: 25 }, // same RATE, half the match
         b: { captures: 4, time_played: 50 },
       }),
     )
     const board = computeProductionBoard(matches, stats, PLAYERS, { minGames: 1 })
-    expect(rowFor(board.rows, "a").jobs.cap).toBeCloseTo(rowFor(board.rows, "b").jobs.cap, 10)
+    // Impact means impact on the match, so the same rate over half the time is
+    // half the contribution — not, as this board used to have it, identical.
+    expect(rowFor(board.rows, "a").jobs.cap).toBeCloseTo(rowFor(board.rows, "b").jobs.cap / 2, 10)
   })
 
-  it("treats a missing or zero time_played as one minute rather than dividing by zero", () => {
+  it("does not reward simply turning up more often", () => {
+    // Each match is one observation averaged over matches played, so a player with
+    // twice the appearances at the same per-match output rates the same.
+    const many = [match("m1"), match("m2"), match("m3"), match("m4")]
+    const perMatch = { a: { captures: 2 }, b: { captures: 2 } }
+    const board = computeProductionBoard(
+      many,
+      many.flatMap((m) => fullRows(m.id, perMatch)),
+      PLAYERS,
+      { minGames: 1 },
+    )
+    const twoOnly = computeProductionBoard(
+      many,
+      many.slice(0, 2).flatMap((m) => fullRows(m.id, perMatch)),
+      PLAYERS,
+      { minGames: 1 },
+    )
+    expect(rowFor(board.rows, "a").jobs.cap).toBeCloseTo(rowFor(twoOnly.rows, "a").jobs.cap, 10)
+  })
+
+  it("survives a missing or zero time_played", () => {
+    // Totals no longer divide by minutes, but the strength-of-schedule factor is
+    // still derived in per-minute units, so the guard still has to hold.
     const matches = [match("m1")]
     const stats = fullRows("m1", { a: { captures: 1, time_played: null } })
     const board = computeProductionBoard(matches, stats, PLAYERS, { minGames: 1 })
@@ -262,13 +286,6 @@ describe("computeProductionBoard: mine grabs read from the player's own end of t
   })
   const board = computeProductionBoard(matches, stats, PLAYERS, { minGames: 1 })
 
-  it("counts a grab in your own base as base work", () => {
-    expect(rowFor(board.rows, "a").jobs.base).toBeGreaterThan(0)
-    expect(rowFor(board.rows, "a").jobs.support).toBe(0)
-    expect(rowFor(board.rows, "z1").jobs.base).toBeGreaterThan(0)
-    expect(rowFor(board.rows, "z1").jobs.support).toBe(0)
-  })
-
   it("counts a grab in the enemy base as support work", () => {
     expect(rowFor(board.rows, "b").jobs.support).toBeGreaterThan(0)
     expect(rowFor(board.rows, "b").jobs.base).toBe(0)
@@ -276,8 +293,26 @@ describe("computeProductionBoard: mine grabs read from the player's own end of t
     expect(rowFor(board.rows, "z2").jobs.base).toBe(0)
   })
 
-  it("prices both ends of the map identically — only the job differs", () => {
-    expect(rowFor(board.rows, "a").jobs.base).toBeCloseTo(rowFor(board.rows, "b").jobs.support, 10)
+  it("reads a grab from the right end of the map for either team", () => {
+    // The home/away split is what this suite is really pinning: a red player's
+    // red-base grab and a blue player's blue-base grab are the same act, and both
+    // are base work rather than support.
+    for (const who of ["a", "z1"]) {
+      expect(rowFor(board.rows, who).jobs.support).toBe(0)
+    }
+    for (const who of ["b", "z2"]) {
+      expect(rowFor(board.rows, who).jobs.support).toBeGreaterThan(0)
+    }
+  })
+
+  it("prices a grab at HOME at nothing, and one in the ENEMY base at something", () => {
+    // Deliberate, and the one place the two ends of the map are not symmetric.
+    // Fitting prices to Sora's labelled boards put an enemy-base grab at 5.21 and
+    // a home grab at 0.003 +/- 0.009 across folds — indistinguishable from zero.
+    // Same act, opposite ends of the map, and only one of them is support work.
+    // If this ever fails, someone has repriced homeMines; read PRICES first.
+    expect(rowFor(board.rows, "a").jobs.base).toBe(0)
+    expect(rowFor(board.rows, "b").jobs.support).toBeGreaterThan(0)
   })
 })
 
@@ -353,11 +388,12 @@ describe("computeProductionBoard: presentation", () => {
   )
   const board = computeProductionBoard(matches, stats, PLAYERS, { minGames: 1 })
 
-  it("sorts by production plus the W/L adjustment, best first", () => {
+  it("sorts by the rating it displays, best first", () => {
+    // The rating is built from role standing, not raw production. Asserting against
+    // `value` here would pass while the table printed out of order, which is exactly
+    // what happened when the rating basis changed and this test did not.
     for (let i = 1; i < board.rows.length; i++) {
-      const prev = board.rows[i - 1]
-      const cur = board.rows[i]
-      expect(prev.value + prev.winAdjustment).toBeGreaterThanOrEqual(cur.value + cur.winAdjustment)
+      expect(board.rows[i - 1].rating).toBeGreaterThanOrEqual(board.rows[i].rating)
     }
   })
 

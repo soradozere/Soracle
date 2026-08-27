@@ -170,6 +170,29 @@ export interface ProductionRow {
   jobPlayed: Record<Job, boolean>
   /** The single job that contributed most, for display. Not used in scoring. */
   topJob: Job
+  /**
+   * The role this player was detected as playing MOST OFTEN, and how many of their
+   * matches that was. Used only by the "By role" view.
+   */
+  mainRole: Job
+  /** How many matches this player was detected in each role. */
+  rolesPlayed: Record<Job, number>
+  /**
+   * Rating among players doing the SAME job, counting ONLY the matches where this
+   * player was detected in that role. 50 is an average performance at that job.
+   * Null where they have too few matches in it to say anything.
+   *
+   * This is the number that answers "who is the best BC this month" — the ordinary
+   * `jobRatings.base` cannot, because it averages a player's base output across
+   * every match INCLUDING the ones where they played something else. Interlude
+   * base-cleaned in 4 of 34 August matches; dividing that by 34 ranks him 6th, when
+   * among actual base-cleaning performances he is 1st.
+   *
+   * A player appears in EVERY role they played enough of, deliberately. Filing a
+   * four-role player under one "main" role would hide exactly the versatility that
+   * makes them hard to rate.
+   */
+  roleRatings: Record<Job, number | null>
   games: number
   minutes: number
   wins: number
@@ -248,20 +271,63 @@ export interface ProductionBoard {
 /**
  * What one of each event is worth, with a capture set to 100.
  *
- * The ORDER is Sora's ranking and must not be reshuffled. The magnitudes were tuned
- * within that order for role fairness — see the header. `mineGrabs` is one price
- * covering both own-base and enemy-base grabs (the same act, opposite ends of the
- * map); `mineKillRet` likewise covers mine kills and mine returns.
+ * FITTED TO SORA'S OWN JUDGEMENT, not chosen. Ten scoreboards were labelled player
+ * by player into four impact buckets — carried it, big game, did the job, quiet —
+ * giving 121 rated rows and 464 "A had more impact than B" pairs within a match.
+ * These prices are the ones that order those pairs best, fitted by non-negative
+ * logistic regression on the pairwise loss.
+ *
+ * Measured by leave-one-board-out, fitting on nine boards and testing on the tenth:
+ *
+ *   these prices ................ 0.924 agreement with Sora
+ *   the previous prices ......... 0.828
+ *   in-game SCORE column ........ 0.935  (see below)
+ *   coin flip ................... 0.500
+ *
+ * The gain sits where it matters: on pairs one bucket apart — the close calls —
+ * agreement goes 0.778 -> 0.900, and on pairs involving a base cleaner, 0.727 ->
+ * 0.906. Match length is not doing the work; minutes played alone scores 0.527.
+ *
+ * WHAT CHANGED, AND WHY IT MATTERED
+ *
+ * Against a capture at 100, a base clean was 3.56 and is now 7.04, while a return
+ * went 10.55 -> 21.11. Both roughly doubled, so what actually moved is everything
+ * measured AGAINST them: base cleaning is far and away the most common event on the
+ * board, so doubling the rarer stats around it halves its effective weight. That
+ * single change is what had a 4th-best base cleaner out-ranking the best returner
+ * in the league, and repricing fixed at source what two earlier designs
+ * tried to patch downstream: rating within role groups (specialists then dominated)
+ * and equalising the job pots (support inflated 4x and the best returner fell to
+ * 13th). Neither survived contact with a real board. This does.
+ *
+ * THIS BREAKS SORA'S STAT RANKING, DELIBERATELY AND WITH HIS SIGN-OFF. The ranking
+ * was capture > return > BC kill > mine grab > assist > flag grab > mine kill/return
+ * > flag hold. The fit puts assists second and flag hold above flag grabs. It is his
+ * own judgement either way -- a stated ordering against a hundred concrete calls on
+ * real games -- and the concrete calls won.
+ *
+ * The mine prices are no longer shared across their pairs, because the fit
+ * separates them cleanly: a mine grabbed in the ENEMY base is worth 5.2 and one
+ * grabbed at home is worth nothing measurable (0.003 +/- 0.009 across folds). Same
+ * act, opposite ends of the map, and only one of them is support work.
+ *
+ * A CAVEAT WORTH KEEPING. The game's own SCORE column scores 0.935 on these
+ * buckets by itself, beating this fit, and score is ~92% reconstructible as a price
+ * set of its own. Some of that lead is likely circular -- the score column is
+ * visible on the screenshots that were being labelled -- and blending the two beats
+ * either alone (0.938). It is not used here, but it is the obvious next thing to try.
  */
 const PRICES = {
   caps: 100,
-  returns: 10.553,
-  clears: 3.556,
-  mineGrabs: 5.061,
-  assists: 35.474,
-  grabs: 2.576,
-  mineKillRet: 4.045,
-  hold: 1.959,
+  assists: 63.02,
+  returns: 21.11,
+  mineReturns: 12.49,
+  hold: 7.66,
+  clears: 7.04,
+  awayMines: 5.21,
+  mineKills: 3.79,
+  grabs: 0.54,
+  homeMines: 0,
 } as const
 
 /**
@@ -272,19 +338,41 @@ const PRICES = {
  * 100% W/L -- and it is applied to a player's win rate over the whole period, not
  * per match.
  *
- * It costs something, and the cost is real, because win rate here is statistically
- * indistinguishable from chance (see the header) -- so it adds spread without adding
- * signal. Measured:
+ * WINNING IS REAL EVIDENCE OF IMPACT, which earlier versions of this comment got
+ * wrong. On the ten labelled boards, players on the winning side average a much
+ * better impact bucket than the losers (2.50 against 3.18, Cohen's d 0.77): 17% of
+ * winners were rated as having carried the game against 2% of losers, and 8% of
+ * winners were rated quiet against 38% of losers. The "win rate is indistinguishable
+ * from chance" finding in the header is about a player's SEASON win rate, and does
+ * not transfer to a single match.
  *
- *   0%  ... reliability 0.87, role gap 11%
- *   15% ... reliability 0.85, role gap 13%
- *   25% ... reliability 0.83, role gap 15%   (SHIPPED, Sora's call)
- *   30% ... reliability 0.81, role gap 16%
+ * The season dial is a different question, though, and the labels put it lower than
+ * this: fitting a per-match win bonus to them lands around 10%. Winning says a lot
+ * about one match, but season win rates compress -- across August they spread over
+ * 11 points against production's 124 -- so the same evidence stretched over a month
+ * has far less to grip on.
  *
- * Lowering this number improves both figures; raising it degrades both. It is the
- * single easiest dial to turn if the board ever looks too luck-driven.
+ * Re-measured under the fitted prices, on totals:
+ *
+ *   0%  ... reliability 0.82, role gap  9%
+ *   10% ... reliability 0.81, role gap  9%    (what the labels imply)
+ *   15% ... reliability 0.79, role gap 13%
+ *   25% ... reliability 0.77, role gap 21%
+ *   30% ... reliability 0.75, role gap 24%    (SHIPPED, Sora's call)
+ *   40% ... reliability 0.71, role gap 28%
+ *
+ * Raising it degrades both figures, and it buys very little movement: 25% -> 30%
+ * swaps two adjacent pairs and leaves the top nine untouched. Sora set it here
+ * knowing that, because a board that ignores winning reads wrong to the people on
+ * it. Do not "fix" it downward without asking him.
+ *
+ * NOTE when measuring this: a split-half test must compute each half's win rate
+ * from that half's OWN matches. Sharing one season figure across both halves puts
+ * an identical number in each, which inflates agreement rather than testing it --
+ * and inflates it more the higher the share, so the metric ends up endorsing
+ * exactly what it cannot check. That mistake reverses the table above.
  */
-const WIN_SHARE = 0.25
+export const WIN_SHARE = 0.3
 
 /**
  * Which stats roll up into which job, for the breakdown display only.
@@ -308,18 +396,18 @@ const JOB_OF = {
 
 type Counter = keyof typeof JOB_OF
 
-/** Price per counter — the two mine prices are each shared across their pair. */
+/** Price per counter. One price per counter now — see PRICES on the mine split. */
 const PRICE_OF: Record<Counter, number> = {
   caps: PRICES.caps,
   grabs: PRICES.grabs,
   hold: PRICES.hold,
   clears: PRICES.clears,
-  homeMines: PRICES.mineGrabs,
-  mineKills: PRICES.mineKillRet,
+  homeMines: PRICES.homeMines,
+  mineKills: PRICES.mineKills,
   returns: PRICES.returns,
   assists: PRICES.assists,
-  awayMines: PRICES.mineGrabs,
-  mineReturns: PRICES.mineKillRet,
+  awayMines: PRICES.awayMines,
+  mineReturns: PRICES.mineReturns,
 }
 
 /**
@@ -400,6 +488,64 @@ const sumOf = (rows: ProductionStatRow[], fn: (r: ProductionStatRow) => number) 
  * only production to average. Matches without a scoreboard cannot contribute anything
  * and are ignored rather than counted as a blank game.
  */
+/**
+ * How evenly a match's production is spread across the four jobs, 0 to 1.
+ *
+ * Normalised entropy: 1.0 is perfectly even across all four, 0 is everything in one.
+ * This is the support signal. Measured against 119 hand-labelled player-matches,
+ * support is the ONLY role that plays broadly -- median breadth 0.885 and meaningful
+ * output in all four jobs, against 0.30-0.58 and one or two jobs for every other
+ * role. Every other role concentrates; support does not, which is what makes it
+ * findable at all.
+ */
+function breadthOf(jobs: Record<Job, number>): number {
+  const total = JOBS.reduce((t, j) => t + jobs[j], 0)
+  if (total <= 0) return 0
+  let h = 0
+  for (const j of JOBS) {
+    const p = jobs[j] / total
+    if (p > 0) h -= p * Math.log(p)
+  }
+  return h / Math.log(4)
+}
+
+/**
+ * Matches in a role before that role gets a rating.
+ *
+ * Deliberately low, because the interesting cases are versatile players with a
+ * handful of matches in a second role — and excluding them is exactly the dilution
+ * problem this view exists to fix. The UI shows the game count next to every rating
+ * so a 4-game number can be read with appropriate suspicion.
+ */
+const MIN_ROLE_GAMES = 3
+
+/** Breadth at or above this, plus the enemy-mine test, marks a support game. */
+const SUPPORT_BREADTH = 0.7
+/** Enemy-base mine grabs this many times the pool average, for a support game. */
+const SUPPORT_AWAY_MINES = 1.5
+
+/**
+ * Which job a player was actually doing in one match.
+ *
+ * Support is checked FIRST and separately, because it cannot be found by "which job
+ * scored highest" -- a support player's biggest single bucket is usually base, not
+ * support, so the obvious test misfiles them. Everyone else is simply their top job,
+ * which hand-labelled data gets exactly right: 39/39 cappers, 18/18 base cleaners
+ * and 38/38 chase+camp were identified correctly by top job alone.
+ *
+ * The support rule comes from Interlude, who put it better than the data did:
+ * supporters almost never pick up their OWN mines but pick up a lot of the enemy's.
+ * That is measurably true -- own-base mines are 0.885/min for a base cleaner against
+ * 0.013 for support, and enemy-base mines are 0.246/min for support against 0.000
+ * for a base cleaner. It is the cleanest separator in the scoreboard.
+ */
+function detectRole(jobs: Record<Job, number>, awayMinesPerMin: number, poolAwayMines: number): Job {
+  if (breadthOf(jobs) >= SUPPORT_BREADTH && awayMinesPerMin >= SUPPORT_AWAY_MINES * poolAwayMines) {
+    return "support"
+  }
+  return JOBS.reduce((a, b) => (jobs[b] > jobs[a] ? b : a))
+}
+
 export function computeProductionBoard(
   matches: ProductionMatch[],
   statRows: ProductionStatRow[],
@@ -512,19 +658,84 @@ export function computeProductionBoard(
   const allOpp = [...oppOf.values()]
   const poolOpp = allOpp.length > 0 ? allOpp.reduce((a, b) => a + b, 0) / allOpp.length : 0
 
-  const scored = pool.map(([name, rs]) => {
-    // Each match is one observation, averaged evenly: a 20-minute appearance and a
-    // 60-minute one both describe a rate, so neither should outvote the other.
-    const jobs: Record<Job, number> = { cap: 0, base: 0, returns: 0, support: 0 }
+  // Pass 3: what job was each player actually doing in each match, and how good was
+  // that performance compared to OTHERS DOING THE SAME JOB.
+  //
+  // This exists because averaging a player's base output over every match answers
+  // the wrong question. Interlude base-cleaned in 4 of 34 August matches; the plain
+  // Base column divides his real base work by 34 and ranks him 6th, when among
+  // actual base-cleaning performances he is 1st. Same for anyone who switches.
+  const poolAwayMines = (() => {
+    let sum = 0
+    let n = 0
+    for (const rs of rowsByPlayer.values()) {
+      for (const r of rs) {
+        sum += awayMinesOf(r) / minutesOf(r)
+        n++
+      }
+    }
+    return n > 0 ? sum / n : 0
+  })()
+
+  /** One scored match: what was played, and how much was produced doing it. */
+  interface RoleGame {
+    role: Job
+    produced: number
+  }
+  const roleGamesOf = new Map<string, RoleGame[]>()
+  for (const [name, rs] of rowsByPlayer) {
+    const games: RoleGame[] = []
     for (const r of rs) {
       const counts = countsOf(r)
       const mins = minutesOf(r)
+      const jobs: Record<Job, number> = { cap: 0, base: 0, returns: 0, support: 0 }
+      for (const c of COUNTERS) jobs[JOB_OF[c]] += PRICE_OF[c] * (counts[c] / mins)
+      const role = detectRole(jobs, awayMinesOf(r) / mins, poolAwayMines)
+      games.push({ role, produced: jobs[role] })
+    }
+    roleGamesOf.set(name, games)
+  }
+
+  // Cohort baselines: mean and spread of production BY PLAYERS DOING THAT JOB.
+  const cohort = {} as Record<Job, { mean: number; sd: number }>
+  for (const job of JOBS) {
+    const vals: number[] = []
+    for (const games of roleGamesOf.values()) {
+      for (const g of games) if (g.role === job) vals.push(g.produced)
+    }
+    const m = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+    const sd = vals.length > 1 ? Math.sqrt(vals.reduce((a, v) => a + (v - m) ** 2, 0) / vals.length) : 1
+    cohort[job] = { mean: m, sd: sd || 1 }
+  }
+
+  const scored = pool.map(([name, rs]) => {
+    /**
+     * MATCH TOTALS, NOT PER-MINUTE RATES.
+     *
+     * Sora's call, and the labelled boards back it: impact means impact on the
+     * match, so half a match of work is half the impact, not the same impact at
+     * the same rate. Held-out agreement with his buckets is 0.924 on totals
+     * against 0.913 on rates.
+     *
+     * Each match is still ONE observation, averaged over matches played — a
+     * player who turns up more often is not thereby more impactful, so this is a
+     * mean of per-match totals and never a season total.
+     */
+    const jobs: Record<Job, number> = { cap: 0, base: 0, returns: 0, support: 0 }
+    for (const r of rs) {
+      const counts = countsOf(r)
       const raw = rawOf(r)
 
       // Strength of schedule. Facing a stronger side suppresses production, so what
       // was produced against one is worth more. Spread across the jobs in proportion
       // to where the production came from, which keeps the jobs summing to the value
       // and keeps every one of them non-negative.
+      //
+      // `raw`, `opp` and OPPONENT_SLOPE all stay in the per-minute units the slope
+      // was measured in; what comes out is a dimensionless RATIO, so it applies to
+      // match totals unchanged and needed no recalibration when the board moved off
+      // rates. Deriving the shift from totals instead would silently neuter it,
+      // since a shift of ~1 against a total of ~600 rounds to no adjustment at all.
       const opp = oppOf.get(`${r.match_id}|${r.player_id}`)
       const shift = opp == null ? 0 : -OPPONENT_SLOPE * (opp - poolOpp)
       // Clamped so a single lopsided lobby cannot swing a match by more than half,
@@ -532,7 +743,7 @@ export function computeProductionBoard(
       const factor = raw > 0 ? Math.min(1.5, Math.max(0.5, (raw + shift) / raw)) : 1
 
       for (const counter of COUNTERS) {
-        jobs[JOB_OF[counter]] += (factor * PRICE_OF[counter] * (counts[counter] / mins)) / rs.length
+        jobs[JOB_OF[counter]] += (factor * PRICE_OF[counter] * counts[counter]) / rs.length
       }
     }
     const value = jobs.cap + jobs.base + jobs.returns + jobs.support
@@ -600,6 +811,24 @@ export function computeProductionBoard(
       JOBS.map((job) => [job, s.jobs[job] >= jobMean[job] * JOB_PLAYED_FRACTION]),
     ) as Record<Job, boolean>,
     topJob: s.topJob,
+    ...(() => {
+      const games = roleGamesOf.get(s.name) ?? []
+      const counts: Record<Job, number> = { cap: 0, base: 0, returns: 0, support: 0 }
+      for (const g of games) counts[g.role]++
+      const mainRole = JOBS.reduce((a, b) => (counts[b] > counts[a] ? b : a))
+      const ratings = Object.fromEntries(
+        JOBS.map((job) => {
+          const inRole = games.filter((g) => g.role === job)
+          if (inRole.length < MIN_ROLE_GAMES) return [job, null]
+          const avg = inRole.reduce((t, g) => t + g.produced, 0) / inRole.length
+          const { mean: cm, sd: csd } = cohort[job]
+          // Same 50/12 presentation as everything else, but the comparison group
+          // is players doing this job, not the whole pool.
+          return [job, Math.round(T_MEAN + (T_SPREAD * (avg - cm)) / csd)]
+        }),
+      ) as Record<Job, number | null>
+      return { mainRole, rolesPlayed: counts, roleRatings: ratings }
+    })(),
     games: s.rs.length,
     minutes: Math.round(sumOf(s.rs, minutesOf)),
     wins: rec?.wins ?? 0,
