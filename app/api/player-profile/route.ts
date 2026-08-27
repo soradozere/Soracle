@@ -7,7 +7,7 @@ import { computeAllPlayerAchievements, HISTORY_TAG } from "@/lib/achievements-se
 import { scoreFromViews } from "@/lib/achievement-score"
 import { earnedTitles, mergeRecordedTitles, oneOfOneTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
 import { fetchRecordedTitles, recordTitleChangeSafely } from "@/lib/titles-server"
-import { findModelSkin, findPlayerModel, isKnownModel } from "@/lib/player-models"
+import { findModelSkin, findPlayerModel, isKnownModel, unlockedModelIds } from "@/lib/player-models"
 import { isKnownHandSlot } from "@/lib/saber-colours"
 import { isKnownActionAnimation, isKnownIdleAnimation } from "@/lib/animations"
 import {
@@ -110,11 +110,21 @@ export async function POST(request: Request) {
     }
   }
 
-  // Models aren't gated on entitlement (any player may pick any model we ship),
-  // but the id still has to be one we recognise — otherwise a crafted POST could
-  // park arbitrary text in the column for /api/model-url to be handed later.
-  if (modelId && !isKnownModel(modelId)) {
-    return NextResponse.json({ error: "Unknown model" }, { status: 400 })
+  // Most models aren't gated on entitlement (any player may pick most models
+  // we ship), but the id still has to be one we recognise — otherwise a
+  // crafted POST could park arbitrary text in the column for /api/model-url
+  // to be handed later. A model CAN carry its own unlock condition
+  // (PlayerModel.unlockedBy) — Batman Beyond/Swoledor are the first two — and
+  // this is what a crafted POST would hit, so it re-checks against this
+  // player's actual earned crests rather than trusting the client's picker,
+  // same shape as the flag/mine variant checks below.
+  if (modelId) {
+    if (!isKnownModel(modelId)) {
+      return NextResponse.json({ error: "Unknown model" }, { status: 400 })
+    }
+    if (!unlockedModelIds(earnedCrestRanks).includes(modelId)) {
+      return NextResponse.json({ error: "Model not unlocked" }, { status: 403 })
+    }
   }
 
   // Same for the blade colour, and for the same reason — it becomes an asset id

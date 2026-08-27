@@ -542,4 +542,35 @@ export const MODEL_SKINS: Record<string, ModelSkin[]> = {
       surfaces: { torsoe_skin: 0, hipsd: 1, hipsd_skin: 1, l_legd: 1, r_legd: 1 },
     },
   ],
+  jskellington: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 1,
+      surfaces: { hips: 0, r_leg: 0, l_leg: 0, torso: 0, r_arm: 0, l_arm: 0, torso_knot: 0 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 1,
+      surfaces: { hips: 0, r_leg: 0, l_leg: 0, torso: 0, r_arm: 0, l_arm: 0, torso_knot: 0 },
+    },
+  ],
+  swoledor: [
+    { id: "default", label: "Default", textures: 0, surfaces: {} },
+    {
+      id: "blue",
+      label: "Blue team",
+      textures: 1,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 0, l_arm: 0, l_hand: 0, r_arm: 0, r_hand: 0 },
+    },
+    {
+      id: "red",
+      label: "Red team",
+      textures: 1,
+      surfaces: { hips: 0, l_leg: 0, r_leg: 0, torso: 0, l_arm: 0, l_hand: 0, r_arm: 0, r_hand: 0 },
+    },
+  ],
+  "batman-beyond": [{ id: "default", label: "Default", textures: 0, surfaces: {} }],
 }
