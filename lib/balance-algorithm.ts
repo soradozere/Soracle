@@ -644,6 +644,8 @@ export function balanceTeamsWithOptions(selectedNames: string[], allPlayers: Pla
       blueMic: blueMicCount,
       redTierTotal,
       blueTierTotal,
+      redTiers: redTeam.map((p) => p.tierValue),
+      blueTiers: blueTeam.map((p) => p.tierValue),
       wasRandomized,
     }
 
@@ -893,6 +895,8 @@ export function balanceTeamsByElo(
       blueMic,
       redTierTotal,
       blueTierTotal,
+      redTiers: redTeam.map((p) => p.tierValue),
+      blueTiers: blueTeam.map((p) => p.tierValue),
       redEloTotal,
       blueEloTotal,
       wasRandomized,

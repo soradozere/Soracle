@@ -56,6 +56,10 @@ export interface BalanceResult {
   blueMic: number
   redTierTotal: number
   blueTierTotal: number
+  // Per-player tier values, in the same order as teamRed / teamBlue. These are the
+  // exact values summed into redTierTotal / blueTierTotal.
+  redTiers: number[]
+  blueTiers: number[]
   // Present only for the admin-only "Balance by ELO" mode — team average ELO. When set,
   // the balance UI shows ELO totals instead of tier totals.
   redEloTotal?: number

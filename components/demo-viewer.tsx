@@ -47,7 +47,7 @@ const CAMERAS: Array<{ id: CameraMode; label: string; icon: typeof Eye }> = [
   { id: "free", label: "Free fly", icon: Compass },
 ]
 
-const DEFAULT_VOLUME = 0.8
+const DEFAULT_VOLUME = 0.56
 
 /**
  * Free-camera look speed. The engine's own default of 5 is set for playing
