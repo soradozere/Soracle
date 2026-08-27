@@ -47,6 +47,25 @@ function DialogOverlay({
   )
 }
 
+// Radix's Presence keeps DialogPrimitive.Content's CHILDREN mounted only while
+// a dialog is open or still playing its close animation -- so this only mounts
+// and unmounts alongside that, which is exactly what background-particles.tsx
+// needs to know about (see lib/dialog-open-events.ts for why). It has to live
+// here, as an actual child of DialogPrimitive.Content, rather than as an effect
+// on DialogContent itself: DialogContent is the component that RENDERS
+// DialogPrimitive.Content, so it mounts as soon as `<Dialog><DialogContent>` is
+// in the tree at all -- regardless of Radix's own open/closed state -- and a
+// caller that renders that unconditionally (toggling only the `open` prop, as
+// every dialog in this app does) would announce "open" once, permanently, the
+// moment its owning component mounts.
+function DialogOpenTracker() {
+  React.useEffect(() => {
+    markDialogOpen()
+    return markDialogClosed
+  }, [])
+  return null
+}
+
 function DialogContent({
   className,
   children,
@@ -55,14 +74,6 @@ function DialogContent({
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean
 }) {
-  // Content only mounts while a dialog is open (and through its close
-  // animation), which is exactly the window background-particles.tsx needs to
-  // know about -- see lib/dialog-open-events.ts for why.
-  React.useEffect(() => {
-    markDialogOpen()
-    return markDialogClosed
-  }, [])
-
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
@@ -74,6 +85,7 @@ function DialogContent({
         )}
         {...props}
       >
+        <DialogOpenTracker />
         {children}
         {showCloseButton && (
           <DialogPrimitive.Close

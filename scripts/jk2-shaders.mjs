@@ -94,6 +94,20 @@ export function readShaderScripts(assetsRoots) {
  * "additive" in a material, so this flag travels to the viewer, which
  * rebuilds the surface as an additive emissive material at runtime
  * (components/model-skin.tsx).
+ *
+ * Two more fields, both added for the Nightmare mine/flag variants and both
+ * likewise static approximations of something genuinely animated: `flatColor`
+ * reads `rgbGen const (r g b)` — a surface with no real texture, just a flat
+ * multiplied colour (their solid-black base layer) — into an `[r, g, b]`
+ * triple a consumer can hand straight to `baseColorFactor`. `additiveMap` is
+ * `glow`'s condition without the `tcGen environment` requirement: the
+ * Nightmare outline shells are animated (`tcMod turb/scroll/rotate`, `rgbGen
+ * wave`) rather than environment-mapped, but are still an additive glowing
+ * layer in the same spirit, so a consumer can bake one frame of it as a static
+ * emissive texture. Deliberately a NEW field rather than a broadening of
+ * `glow` itself — `glow` keeps its exact original condition so every model
+ * already converted against it is untouched; only code that reads
+ * `additiveMap` opts into the wider match.
  */
 export function analyseShader(block) {
   const stages = []
@@ -117,15 +131,34 @@ export function analyseShader(block) {
   const translucent = /blendFunc\s+GL_ONE\s+GL_ONE_MINUS_SRC_ALPHA\b/i.test(block)
   const reflective = /tcGen\s+environment/i.test(block)
   const additive = stages.length > 0 && /blendFunc\s+GL_ONE\s+GL_ONE\b/i.test(stages[0])
+  // A stage with no `map` at all, driven instead by `rgbGen const (r g b)` —
+  // JK2's idiom for a flat-colour surface (`map $whiteimage` times a constant,
+  // or no map keyword at all). The Nightmare item variants' black base layer is
+  // the motivating case: no image exists to resolve, so without this the
+  // surface would fall through to untextured white instead of matte black.
+  const constMatch = /rgbGen\s+const\s*\(\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\)/i.exec(block)
+  const flatColor = constMatch ? constMatch.slice(1, 4).map(Number) : null
   let glow = null
+  // Same additive-stage scan as `glow` below, but WITHOUT requiring `tcGen
+  // environment` — a plain scrolling/turbulent additive layer (JK2's Nightmare
+  // outline shells: `tcMod turb/scroll/rotate` + `rgbGen wave`, no environment
+  // mapping at all) still reads as a glow in game, just an animated one glTF
+  // has no field for. This is a SEPARATE field from `glow`, not a broadening of
+  // it: `glow`'s tcGen-environment requirement stays exactly as before, so
+  // every model already converted with it is unaffected. Only a NEW consumer
+  // that reads `additiveMap` instead sees the wider match, and picks a single
+  // static frame of the animation as an approximation, same "cheap but honest"
+  // trade-off as `reflective`'s fixed shine.
+  let additiveMap = null
   for (const stage of stages) {
-    if (!/tcGen\s+environment/i.test(stage)) continue
     if (/rgbGen\s+entity/i.test(stage)) continue
     const stageAdditive =
       /blendFunc\s+GL_ONE\s+GL_ONE\b/i.test(stage) || /blendFunc\s+GL_SRC_ALPHA\s+GL_ONE\b/i.test(stage)
     if (!stageAdditive) continue
     const mapMatch = /(?:^|\n)\s*map\s+(\S+)/i.exec(stage)
-    if (mapMatch) glow = mapMatch[1]
+    if (!mapMatch) continue
+    additiveMap = mapMatch[1]
+    if (/tcGen\s+environment/i.test(stage)) glow = mapMatch[1]
   }
-  return { alphaCutout, translucent, reflective, additive, glow }
+  return { alphaCutout, translucent, reflective, additive, glow, additiveMap, flatColor }
 }

@@ -577,6 +577,42 @@ axis, 20° of roll, and **scale exactly 0.5**. All offsets are Quake units.
 engine rather than measuring screenshots or cycling through mount points. The game
 is open source and the answer is fifteen lines long.
 
+**Getting the source doesn't end the tuning, though.** Reading `CG_PlayerFlag` gave
+the right *shape* immediately — bone position only, orientation rebuilt from fixed
+angles — but three of its five numbers still needed adjusting for our geometry, and
+one more bug was hiding underneath the positioning entirely:
+
+- **Yaw offset** (engine: 270°) turned into 0° via axis-convention algebra that
+  solved two unmeasured unknowns at once and landed on a plausible-looking wrong
+  answer — it put the banner in front of the player's face. Fixed by testing all
+  four cardinal turns against the model directly instead of re-deriving: 180° is
+  correct. See `FLAG_YAW_OFFSET` in `components/carried-flag.tsx`.
+- **Right offset** (engine: 8) needed re-tuning to -6, but the bigger bug was
+  architectural: the position code applied it along a fixed glTF axis, on the
+  assumption the bone always faces one canonical direction. It doesn't — `useFrame`
+  re-reads the bone's *live* world matrix every frame for the forward offset, so a
+  static axis for the right offset falls out of sync with it. Fixed by deriving
+  both offsets from the same live yaw-based basis.
+- **Forward offset** (engine: 24) needed halving-ish to 17: our converted
+  `r_flag.glb`'s pivot sits further from the pole's base than `r_flag.md3`'s does,
+  so the full 24 units left a visible gap between the banner and the back that the
+  game doesn't have. Overcorrecting to 12 drove the banner into the model instead —
+  this one only has a right answer, not a formula, until someone measures the two
+  pivots directly.
+- **The banner disappeared face-on once positioning was fixed** — a plain
+  backface-culling bug, unrelated to placement. A flag is the first prop in this
+  pipeline thin enough for the camera to ever see its back; JK2's own shader almost
+  certainly disables culling for exactly that reason, and Blender's glTF export has
+  no equivalent flag, defaulting every material to single-sided. Fixed in code
+  (`Md3Prop`'s `doubleSided` prop, not in the conversion script) by setting
+  `material.side = DoubleSide` on the flag's mesh specifically — a hilt or a mine
+  has real volume and has never needed it.
+
+None of this contradicts the lesson above. The engine tells you the *mechanism*;
+it doesn't tell you where our independently-authored geometry's pivots and
+materials diverge from the original's, and that part still has to be checked by
+eye against the model, not assumed from the source.
+
 ---
 
 ## 7.7 Skin variants — no second export

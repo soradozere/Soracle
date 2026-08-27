@@ -37,6 +37,16 @@ export interface Player {
   skin?: string | null
   idle_animation?: string | null
   action_animation?: string | null
+  // Carried CTF flag (migration 047). A team id from lib/prop-assets.ts
+  // (FLAG_TEAMS). Null means "no flag" — the model carries nothing.
+  flag?: string | null
+  // Cosmetic variant of the carried flag / trip mine (migration 047), from
+  // FLAG_VARIANTS / MINE_VARIANTS in lib/prop-assets.ts. Meaningless without
+  // `flag` / a mines-armed `saber` respectively — same relationship `skin` has
+  // to `model`. UNLIKE model/skin/saber/the base flag/mine, these two ARE
+  // gated on entitlement; see FLAG_VARIANT_UNLOCK / MINE_VARIANT_UNLOCK.
+  flag_variant?: string | null
+  mine_variant?: string | null
 }
 
 export interface BalanceResult {

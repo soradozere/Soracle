@@ -10,6 +10,13 @@ import { fetchRecordedTitles, recordTitleChangeSafely } from "@/lib/titles-serve
 import { findModelSkin, findPlayerModel, isKnownModel } from "@/lib/player-models"
 import { isKnownHandSlot } from "@/lib/saber-colours"
 import { isKnownActionAnimation, isKnownIdleAnimation } from "@/lib/animations"
+import {
+  FLAG_TEAMS,
+  FLAG_VARIANTS,
+  MINE_VARIANTS,
+  unlockedFlagVariants,
+  unlockedMineVariants,
+} from "@/lib/prop-assets"
 
 // Self-service profile save for a logged-in player (not an admin). Deliberately
 // narrower than the admin path: no tooltip (that stays an admin-only "signature"),
@@ -31,6 +38,9 @@ export async function POST(request: Request) {
     skin?: string
     idle_animation?: string
     action_animation?: string
+    flag?: string
+    flag_variant?: string
+    mine_variant?: string
   }
   try {
     body = await request.json()
@@ -47,6 +57,9 @@ export async function POST(request: Request) {
   const skinId = (body.skin ?? "").trim() || null
   const idleAnimationId = (body.idle_animation ?? "").trim() || null
   const actionAnimationId = (body.action_animation ?? "").trim() || null
+  const flagTeam = (body.flag ?? "").trim() || null
+  const flagVariantId = (body.flag_variant ?? "").trim() || null
+  const mineVariantId = (body.mine_variant ?? "").trim() || null
 
   const supabase = createServiceClient()
 
@@ -129,6 +142,34 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unknown action animation" }, { status: 400 })
   }
 
+  // The flag team itself isn't gated — any player may carry either team's flag,
+  // same as the model/saber/skin above — just checked against the catalogue.
+  if (flagTeam && !(FLAG_TEAMS as readonly string[]).includes(flagTeam)) {
+    return NextResponse.json({ error: "Unknown flag team" }, { status: 400 })
+  }
+
+  // Unlike the base flag/mine, these two cosmetic variants ARE gated — the
+  // dropdown only ever offers what unlockedFlagVariants/unlockedMineVariants
+  // already say this player has earned, but this route is what a crafted POST
+  // would hit, so it re-checks against their actual earned crests rather than
+  // trusting the client's list. Same shape as the theme check above.
+  if (flagVariantId) {
+    if (!(FLAG_VARIANTS as readonly string[]).includes(flagVariantId)) {
+      return NextResponse.json({ error: "Unknown flag variant" }, { status: 400 })
+    }
+    if (!unlockedFlagVariants(earnedCrestRanks).includes(flagVariantId as (typeof FLAG_VARIANTS)[number])) {
+      return NextResponse.json({ error: "Flag variant not unlocked" }, { status: 403 })
+    }
+  }
+  if (mineVariantId) {
+    if (!(MINE_VARIANTS as readonly string[]).includes(mineVariantId)) {
+      return NextResponse.json({ error: "Unknown mine variant" }, { status: 400 })
+    }
+    if (!unlockedMineVariants(earnedCrestRanks).includes(mineVariantId as (typeof MINE_VARIANTS)[number])) {
+      return NextResponse.json({ error: "Mine variant not unlocked" }, { status: 403 })
+    }
+  }
+
   // Read the cache-relevant columns before overwriting them: of everything
   // written below, these are the ones a HISTORY_TAG-cached page actually
   // renders, so they alone decide whether the invalidation at the end is worth
@@ -156,6 +197,9 @@ export async function POST(request: Request) {
       skin: skinId,
       idle_animation: idleAnimationId,
       action_animation: actionAnimationId,
+      flag: flagTeam,
+      flag_variant: flagVariantId,
+      mine_variant: mineVariantId,
     })
     .eq("id", playerId)
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })

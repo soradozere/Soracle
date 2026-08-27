@@ -34,6 +34,9 @@ export function ProfileModelFigure({
   skin,
   saber,
   mines,
+  mineVariant,
+  flag,
+  flagVariant,
   animation,
   action,
   lightMode,
@@ -61,6 +64,12 @@ export function ProfileModelFigure({
   saber?: string | null
   /** Carry a set of trip mines instead of a saber. */
   mines?: boolean
+  /** Cosmetic variant of the mine (lib/prop-assets.ts MINE_VARIANTS), or nothing for the default. */
+  mineVariant?: string | null
+  /** CTF flag team to carry on the back, or nothing to carry none. */
+  flag?: string | null
+  /** Cosmetic variant of the flag (lib/prop-assets.ts FLAG_VARIANTS), or nothing for the default. */
+  flagVariant?: string | null
   /** Idle clip to loop, or nothing for the model's own default idle. */
   animation?: string | null
   /** Specific one-shot clip the action button plays, or nothing for a random pick. */
@@ -107,6 +116,9 @@ export function ProfileModelFigure({
             action={action ?? undefined}
             saber={saber}
             mines={mines}
+            mineVariant={mineVariant}
+            flag={flag}
+            flagVariant={flagVariant}
             lightMode={lightMode}
             className="w-full h-full"
           />

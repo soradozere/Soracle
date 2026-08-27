@@ -82,6 +82,12 @@ const ASSETS = [
   ["props/trip-mine.glb", "public/models/props/trip-mine.glb"],
   ["props/flag-red.glb", "public/models/props/flag-red.glb"],
   ["props/flag-blue.glb", "public/models/props/flag-blue.glb"],
+  // Nightmare variants (lib/prop-assets.ts FLAG_VARIANTS/MINE_VARIANTS) — the
+  // "transparent" flag skin needs no object of its own; it's the default
+  // flag-{team}.glb above rendered at reduced opacity at runtime.
+  ["props/flag-red-nightmare.glb", "public/models/props/flag-red-nightmare.glb"],
+  ["props/flag-blue-nightmare.glb", "public/models/props/flag-blue-nightmare.glb"],
+  ["props/trip-mine-nightmare.glb", "public/models/props/trip-mine-nightmare.glb"],
   // The masthead's rotating logo. Not a player model or an equippable prop —
   // page chrome that happens to be a 3D asset — so it gets its own catalogue
   // (lib/masthead-assets.ts) rather than living in PLAYER_MODELS or

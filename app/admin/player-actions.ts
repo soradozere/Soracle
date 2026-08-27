@@ -81,6 +81,12 @@ export interface AdminProfileFields {
   skin: string | null
   idle_animation: string | null
   action_animation: string | null
+  // Not entitlement-checked here, same as model/saber/skin above — full admin
+  // access means full admin access. /api/player-profile is what re-validates
+  // flag_variant/mine_variant against the player's own earned crests.
+  flag: string | null
+  flag_variant: string | null
+  mine_variant: string | null
 }
 
 // Admin-edited profile fields (including the slogan, which is admin-only —
