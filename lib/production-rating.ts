@@ -271,20 +271,63 @@ export interface ProductionBoard {
 /**
  * What one of each event is worth, with a capture set to 100.
  *
- * The ORDER is Sora's ranking and must not be reshuffled. The magnitudes were tuned
- * within that order for role fairness — see the header. `mineGrabs` is one price
- * covering both own-base and enemy-base grabs (the same act, opposite ends of the
- * map); `mineKillRet` likewise covers mine kills and mine returns.
+ * FITTED TO SORA'S OWN JUDGEMENT, not chosen. Ten scoreboards were labelled player
+ * by player into four impact buckets — carried it, big game, did the job, quiet —
+ * giving 121 rated rows and 464 "A had more impact than B" pairs within a match.
+ * These prices are the ones that order those pairs best, fitted by non-negative
+ * logistic regression on the pairwise loss.
+ *
+ * Measured by leave-one-board-out, fitting on nine boards and testing on the tenth:
+ *
+ *   these prices ................ 0.924 agreement with Sora
+ *   the previous prices ......... 0.828
+ *   in-game SCORE column ........ 0.935  (see below)
+ *   coin flip ................... 0.500
+ *
+ * The gain sits where it matters: on pairs one bucket apart — the close calls —
+ * agreement goes 0.778 -> 0.900, and on pairs involving a base cleaner, 0.727 ->
+ * 0.906. Match length is not doing the work; minutes played alone scores 0.527.
+ *
+ * WHAT CHANGED, AND WHY IT MATTERED
+ *
+ * Against a capture at 100, a base clean was 3.56 and is now 7.04, while a return
+ * went 10.55 -> 21.11. Both roughly doubled, so what actually moved is everything
+ * measured AGAINST them: base cleaning is far and away the most common event on the
+ * board, so doubling the rarer stats around it halves its effective weight. That
+ * single change is what had a 4th-best base cleaner out-ranking the best returner
+ * in the league, and repricing fixed at source what two earlier designs
+ * tried to patch downstream: rating within role groups (specialists then dominated)
+ * and equalising the job pots (support inflated 4x and the best returner fell to
+ * 13th). Neither survived contact with a real board. This does.
+ *
+ * THIS BREAKS SORA'S STAT RANKING, DELIBERATELY AND WITH HIS SIGN-OFF. The ranking
+ * was capture > return > BC kill > mine grab > assist > flag grab > mine kill/return
+ * > flag hold. The fit puts assists second and flag hold above flag grabs. It is his
+ * own judgement either way -- a stated ordering against a hundred concrete calls on
+ * real games -- and the concrete calls won.
+ *
+ * The mine prices are no longer shared across their pairs, because the fit
+ * separates them cleanly: a mine grabbed in the ENEMY base is worth 5.2 and one
+ * grabbed at home is worth nothing measurable (0.003 +/- 0.009 across folds). Same
+ * act, opposite ends of the map, and only one of them is support work.
+ *
+ * A CAVEAT WORTH KEEPING. The game's own SCORE column scores 0.935 on these
+ * buckets by itself, beating this fit, and score is ~92% reconstructible as a price
+ * set of its own. Some of that lead is likely circular -- the score column is
+ * visible on the screenshots that were being labelled -- and blending the two beats
+ * either alone (0.938). It is not used here, but it is the obvious next thing to try.
  */
 const PRICES = {
   caps: 100,
-  returns: 10.553,
-  clears: 3.556,
-  mineGrabs: 5.061,
-  assists: 35.474,
-  grabs: 2.576,
-  mineKillRet: 4.045,
-  hold: 1.959,
+  assists: 63.02,
+  returns: 21.11,
+  mineReturns: 12.49,
+  hold: 7.66,
+  clears: 7.04,
+  awayMines: 5.21,
+  mineKills: 3.79,
+  grabs: 0.54,
+  homeMines: 0,
 } as const
 
 /**
@@ -295,19 +338,41 @@ const PRICES = {
  * 100% W/L -- and it is applied to a player's win rate over the whole period, not
  * per match.
  *
- * It costs something, and the cost is real, because win rate here is statistically
- * indistinguishable from chance (see the header) -- so it adds spread without adding
- * signal. Measured:
+ * WINNING IS REAL EVIDENCE OF IMPACT, which earlier versions of this comment got
+ * wrong. On the ten labelled boards, players on the winning side average a much
+ * better impact bucket than the losers (2.50 against 3.18, Cohen's d 0.77): 17% of
+ * winners were rated as having carried the game against 2% of losers, and 8% of
+ * winners were rated quiet against 38% of losers. The "win rate is indistinguishable
+ * from chance" finding in the header is about a player's SEASON win rate, and does
+ * not transfer to a single match.
  *
- *   0%  ... reliability 0.87, role gap 11%
- *   15% ... reliability 0.85, role gap 13%
- *   25% ... reliability 0.83, role gap 15%   (SHIPPED, Sora's call)
- *   30% ... reliability 0.81, role gap 16%
+ * The season dial is a different question, though, and the labels put it lower than
+ * this: fitting a per-match win bonus to them lands around 10%. Winning says a lot
+ * about one match, but season win rates compress -- across August they spread over
+ * 11 points against production's 124 -- so the same evidence stretched over a month
+ * has far less to grip on.
  *
- * Lowering this number improves both figures; raising it degrades both. It is the
- * single easiest dial to turn if the board ever looks too luck-driven.
+ * Re-measured under the fitted prices, on totals:
+ *
+ *   0%  ... reliability 0.82, role gap  9%
+ *   10% ... reliability 0.81, role gap  9%    (what the labels imply)
+ *   15% ... reliability 0.79, role gap 13%
+ *   25% ... reliability 0.77, role gap 21%
+ *   30% ... reliability 0.75, role gap 24%    (SHIPPED, Sora's call)
+ *   40% ... reliability 0.71, role gap 28%
+ *
+ * Raising it degrades both figures, and it buys very little movement: 25% -> 30%
+ * swaps two adjacent pairs and leaves the top nine untouched. Sora set it here
+ * knowing that, because a board that ignores winning reads wrong to the people on
+ * it. Do not "fix" it downward without asking him.
+ *
+ * NOTE when measuring this: a split-half test must compute each half's win rate
+ * from that half's OWN matches. Sharing one season figure across both halves puts
+ * an identical number in each, which inflates agreement rather than testing it --
+ * and inflates it more the higher the share, so the metric ends up endorsing
+ * exactly what it cannot check. That mistake reverses the table above.
  */
-const WIN_SHARE = 0.25
+export const WIN_SHARE = 0.3
 
 /**
  * Which stats roll up into which job, for the breakdown display only.
@@ -331,18 +396,18 @@ const JOB_OF = {
 
 type Counter = keyof typeof JOB_OF
 
-/** Price per counter — the two mine prices are each shared across their pair. */
+/** Price per counter. One price per counter now — see PRICES on the mine split. */
 const PRICE_OF: Record<Counter, number> = {
   caps: PRICES.caps,
   grabs: PRICES.grabs,
   hold: PRICES.hold,
   clears: PRICES.clears,
-  homeMines: PRICES.mineGrabs,
-  mineKills: PRICES.mineKillRet,
+  homeMines: PRICES.homeMines,
+  mineKills: PRICES.mineKills,
   returns: PRICES.returns,
   assists: PRICES.assists,
-  awayMines: PRICES.mineGrabs,
-  mineReturns: PRICES.mineKillRet,
+  awayMines: PRICES.awayMines,
+  mineReturns: PRICES.mineReturns,
 }
 
 /**
@@ -644,18 +709,33 @@ export function computeProductionBoard(
   }
 
   const scored = pool.map(([name, rs]) => {
-    // Each match is one observation, averaged evenly: a 20-minute appearance and a
-    // 60-minute one both describe a rate, so neither should outvote the other.
+    /**
+     * MATCH TOTALS, NOT PER-MINUTE RATES.
+     *
+     * Sora's call, and the labelled boards back it: impact means impact on the
+     * match, so half a match of work is half the impact, not the same impact at
+     * the same rate. Held-out agreement with his buckets is 0.924 on totals
+     * against 0.913 on rates.
+     *
+     * Each match is still ONE observation, averaged over matches played — a
+     * player who turns up more often is not thereby more impactful, so this is a
+     * mean of per-match totals and never a season total.
+     */
     const jobs: Record<Job, number> = { cap: 0, base: 0, returns: 0, support: 0 }
     for (const r of rs) {
       const counts = countsOf(r)
-      const mins = minutesOf(r)
       const raw = rawOf(r)
 
       // Strength of schedule. Facing a stronger side suppresses production, so what
       // was produced against one is worth more. Spread across the jobs in proportion
       // to where the production came from, which keeps the jobs summing to the value
       // and keeps every one of them non-negative.
+      //
+      // `raw`, `opp` and OPPONENT_SLOPE all stay in the per-minute units the slope
+      // was measured in; what comes out is a dimensionless RATIO, so it applies to
+      // match totals unchanged and needed no recalibration when the board moved off
+      // rates. Deriving the shift from totals instead would silently neuter it,
+      // since a shift of ~1 against a total of ~600 rounds to no adjustment at all.
       const opp = oppOf.get(`${r.match_id}|${r.player_id}`)
       const shift = opp == null ? 0 : -OPPONENT_SLOPE * (opp - poolOpp)
       // Clamped so a single lopsided lobby cannot swing a match by more than half,
@@ -663,7 +743,7 @@ export function computeProductionBoard(
       const factor = raw > 0 ? Math.min(1.5, Math.max(0.5, (raw + shift) / raw)) : 1
 
       for (const counter of COUNTERS) {
-        jobs[JOB_OF[counter]] += (factor * PRICE_OF[counter] * (counts[counter] / mins)) / rs.length
+        jobs[JOB_OF[counter]] += (factor * PRICE_OF[counter] * counts[counter]) / rs.length
       }
     }
     const value = jobs.cap + jobs.base + jobs.returns + jobs.support
