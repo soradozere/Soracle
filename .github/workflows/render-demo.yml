@@ -343,6 +343,18 @@ jobs:
             echo "set cl_noprint 0"
             echo "set con_notifytime 10"
 
+            # The notify text draws as fixed 8x16px bitmap glyphs (SMALLCHAR_
+            # WIDTH/HEIGHT in q_shared.h) no matter the render resolution --
+            # the engine was designed around a 640x480 baseline, so at
+            # 1440p/1080p it comes out proportionally tiny. con_scale is the
+            # one knob that resizes it (Con_CheckResize multiplies
+            # charWidth/charHeight by it); scaled to the actual output height
+            # rather than a fixed number, so every resolution tier reads the
+            # feed at roughly the same on-screen size instead of only the one
+            # tier a hardcoded value happened to be tuned for.
+            CON_SCALE=$(awk -v h="$HEIGHT" 'BEGIN{printf "%.2f", h/480}')
+            echo "set con_scale $CON_SCALE"
+
             # Kills without the conversation. The notify area carries both and
             # con_notifytime cannot separate them, which is why cg_drawChat
             # exists in the fork's cgame -- it gates the chat print sites and
