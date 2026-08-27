@@ -7,7 +7,8 @@ import { usePrefersReducedMotion } from "@/hooks/use-prefers-reduced-motion"
 import { useModelUrl } from "@/hooks/use-model-url"
 import { DEFAULT_SKIN, PLAYER_MODELS, findPlayerModel } from "@/lib/player-models"
 import { SABER_COLOURS } from "@/lib/saber-colours"
-import { FLAG_TEAMS } from "@/lib/prop-assets"
+import { FLAG_TEAMS, FLAG_VARIANTS, MINE_VARIANTS } from "@/lib/prop-assets"
+import { FLAG_YAW_OFFSET } from "@/components/carried-flag"
 
 // The canvas is client-only: WebGL can't prerender, and r3f's reconciler throws
 // if it runs during SSR. This file is already a client component, so `ssr: false`
@@ -71,14 +72,13 @@ const MINES = "mines"
 /** Only so the inactive flag buttons read at a glance which team they are. */
 const TEAM_COLOURS: Record<string, string> = { red: "#e74c3c", blue: "#3b7dff" }
 
-// Size is now the ONLY thing about the flag that isn't transcribed from the
-// engine — the mount, offsets and angles all come from CG_PlayerFlag, so there
-// is nothing left to pick between. The game uses 0.5; we run 0.4 by choice.
+// Size is the one thing about the flag that's taste rather than transcription
+// — see CARRIED_FLAG_SCALE in model-viewer.tsx. The game uses 0.5; we run 0.4.
 const FLAG_SCALES = [0.25, 0.3, 0.4, 0.5, 0.6, 0.75, 1]
-// The engine says 270, but it reads the yaw off a Ghoul2 bone matrix and we
-// read it off the same bone as Blender exported it — and Blender's armatures
-// run along local +Y rather than +X. So this one term can be a quadrant out,
-// and the four quadrants are the whole space of possible answers.
+// The engine says 270, but it reads yaw off a Ghoul2 bone matrix and we read
+// it off the same bone as Blender exported it, so the answer could only ever
+// be one of these four quadrants apart — see FLAG_YAW_OFFSET in
+// components/carried-flag.tsx for which one, and how that was settled.
 const FLAG_YAWS = [0, 90, 180, 270]
 
 export function ModelLab() {
@@ -91,9 +91,11 @@ export function ModelLab() {
   const [viewport, setViewport] = useState<ViewportKey>("desktop")
   const [skin, setSkin] = useState(DEFAULT_SKIN)
   const [hand, setHand] = useState<HandSlot>("blue")
+  const [mineVariant, setMineVariant] = useState<string>("default")
   const [flag, setFlag] = useState<string | null>(null)
+  const [flagVariant, setFlagVariant] = useState<string>("default")
   const [flagScale, setFlagScale] = useState(0.4)
-  const [flagYaw, setFlagYaw] = useState(0)
+  const [flagYaw, setFlagYaw] = useState(FLAG_YAW_OFFSET)
 
   const reducedMotion = usePrefersReducedMotion()
   const model = LAB_MODELS.find((m) => m.id === modelId) ?? LAB_MODELS[0]
@@ -146,7 +148,9 @@ export function ModelLab() {
               paused={effectivePaused}
               saber={hand === "none" || hand === MINES ? null : hand}
               mines={hand === MINES}
+              mineVariant={mineVariant}
               flag={flag}
+              flagVariant={flagVariant}
               flagScale={flagScale}
               flagYaw={flagYaw}
               onClipsLoaded={handleClips}
@@ -257,15 +261,54 @@ export function ModelLab() {
           ))}
         </div>
 
+        {/* Cosmetic variants, shown only while their prop is actually equipped
+            — otherwise these are dead buttons with nothing to preview. */}
+        {hand === MINES && (
+          <div className="mt-3 pt-3 border-t border-[#3d4855]/60">
+            <p className="text-xs text-[#8892a0] mb-2">Trip mine cosmetic.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {MINE_VARIANTS.map((variant) => (
+                <button
+                  key={variant}
+                  onClick={() => setMineVariant(variant)}
+                  className={controlClass(mineVariant === variant)}
+                >
+                  {variant === "default" ? "Default" : variant}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {flag && (
+          <div className="mt-3 pt-3 border-t border-[#3d4855]/60">
+            <p className="text-xs text-[#8892a0] mb-2">Flag cosmetic.</p>
+            <div className="flex flex-wrap items-center gap-2">
+              {FLAG_VARIANTS.map((variant) => (
+                <button
+                  key={variant}
+                  onClick={() => setFlagVariant(variant)}
+                  className={controlClass(flagVariant === variant)}
+                >
+                  {variant === "default" ? "Default" : variant}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Only shown while a flag is up, because that's the only time either
             control does anything, and they'd otherwise be 13 dead buttons. */}
         {flag && (
           <div className="mt-3 pt-3 border-t border-[#3d4855]/60">
             <p className="text-xs text-[#8892a0] mb-2">
-              Flag size and yaw. The bone, offsets, pitch and roll are transcribed from{" "}
-              <code>CG_PlayerFlag</code> in JK2&apos;s own source and aren&apos;t adjustable. Size is taste —
-              the game uses 0.50x, we run 0.40x. Yaw is the one term the source can&apos;t settle, because
-              Blender doesn&apos;t preserve Ghoul2&apos;s bone axes; one of these four is right.
+              Flag size and yaw. The bone, pitch and roll come straight from{" "}
+              <code>CG_PlayerFlag</code> in JK2&apos;s own source; the position offsets are tuned by eye
+              against our converted geometry instead, since the engine&apos;s own numbers left a gap the
+              game doesn&apos;t have. Neither is adjustable here. Size is taste — the game uses 0.50x, we
+              run 0.40x. Yaw was the one term the source couldn&apos;t settle on its own, because Blender
+              doesn&apos;t preserve Ghoul2&apos;s bone axes; 180° is the confirmed answer, left adjustable
+              here in case a future model&apos;s rest pose ever needs a different quadrant.
             </p>
             <div className="flex flex-wrap items-center gap-2">
               {FLAG_SCALES.map((scale) => (

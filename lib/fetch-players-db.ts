@@ -122,5 +122,9 @@ export function mapDbPlayer(dbPlayer: any): Player {
     skin: dbPlayer.skin ?? null,
     idle_animation: dbPlayer.idle_animation ?? null,
     action_animation: dbPlayer.action_animation ?? null,
+    // Present only once migration 047 has run; undefined before then.
+    flag: dbPlayer.flag ?? null,
+    flag_variant: dbPlayer.flag_variant ?? null,
+    mine_variant: dbPlayer.mine_variant ?? null,
   }
 }

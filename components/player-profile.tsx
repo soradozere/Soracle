@@ -15,6 +15,17 @@ import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucid
 import { ProfileModelFigure } from "@/components/profile-model-panel"
 import { PLAYER_MODELS, findPlayerModel, DEFAULT_SKIN } from "@/lib/player-models"
 import { SABER_COLOURS, MINES_HAND_SLOT } from "@/lib/saber-colours"
+import {
+  FLAG_TEAMS,
+  FLAG_VARIANTS,
+  MINE_VARIANTS,
+  flagVariantRequirementLabel,
+  mineVariantRequirementLabel,
+  unlockedFlagVariants,
+  unlockedMineVariants,
+  type FlagVariant,
+  type MineVariant,
+} from "@/lib/prop-assets"
 import { IDLE_ANIMATIONS, ACTION_ANIMATIONS } from "@/lib/animations"
 import { BADGE_META } from "@/lib/badge-meta"
 import { BadgeIcon } from "@/components/badge-icon"
@@ -94,6 +105,9 @@ interface EditableFields {
   skin: string
   idle_animation: string
   action_animation: string
+  flag: string
+  flag_variant: string
+  mine_variant: string
 }
 
 const ROLE_COLORS: Record<string, string> = {
@@ -539,6 +553,9 @@ function EditProfileDialog({
     const skin = fields.skin || null
     const idle_animation = fields.idle_animation || null
     const action_animation = fields.action_animation || null
+    const flag = fields.flag || null
+    const flag_variant = fields.flag_variant || null
+    const mine_variant = fields.mine_variant || null
 
     if (canEditTooltip) {
       // Admin path: a server action gated on full-admin access (Supabase Auth
@@ -555,6 +572,9 @@ function EditProfileDialog({
         skin,
         idle_animation,
         action_animation,
+        flag,
+        flag_variant,
+        mine_variant,
       })
       setSaving(false)
       if (!result.success) {
@@ -572,6 +592,9 @@ function EditProfileDialog({
         skin: skin ?? "",
         idle_animation: idle_animation ?? "",
         action_animation: action_animation ?? "",
+        flag: flag ?? "",
+        flag_variant: flag_variant ?? "",
+        mine_variant: mine_variant ?? "",
       })
       onOpenChange(false)
       return
@@ -592,6 +615,9 @@ function EditProfileDialog({
         skin,
         idle_animation,
         action_animation,
+        flag,
+        flag_variant,
+        mine_variant,
       }),
     })
     const data = await res.json()
@@ -611,6 +637,9 @@ function EditProfileDialog({
       skin: skin ?? "",
       idle_animation: idle_animation ?? "",
       action_animation: action_animation ?? "",
+      flag: flag ?? "",
+      flag_variant: flag_variant ?? "",
+      mine_variant: mine_variant ?? "",
     })
     onOpenChange(false)
   }
@@ -822,6 +851,8 @@ function EditLoadoutDialog({
   initial,
   canEditTooltip,
   onSaved,
+  editorFlagVariantOptions,
+  editorMineVariantOptions,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -832,10 +863,16 @@ function EditLoadoutDialog({
   // straight to the table, an owner goes through the validated API route.
   canEditTooltip: boolean
   onSaved: (fields: EditableFields) => void
+  // What this player may actually equip — computed once in PlayerProfile from
+  // their earned crests (admins get every variant, same as PREVIEW_THEME_IDS
+  // does for profile themes) — see unlockedFlagVariants/unlockedMineVariants.
+  editorFlagVariantOptions: FlagVariant[]
+  editorMineVariantOptions: MineVariant[]
 }) {
   const [fields, setFields] = useState<EditableFields>(initial)
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
+  const { toast } = useToast()
 
   useEffect(() => {
     if (open) {
@@ -857,6 +894,9 @@ function EditLoadoutDialog({
     const skin = fields.skin || null
     const idle_animation = fields.idle_animation || null
     const action_animation = fields.action_animation || null
+    const flag = fields.flag || null
+    const flag_variant = fields.flag_variant || null
+    const mine_variant = fields.mine_variant || null
 
     if (canEditTooltip) {
       const tooltip = fields.tooltip.trim() || null
@@ -871,6 +911,9 @@ function EditLoadoutDialog({
         skin,
         idle_animation,
         action_animation,
+        flag,
+        flag_variant,
+        mine_variant,
       })
       setSaving(false)
       if (!result.success) {
@@ -888,6 +931,9 @@ function EditLoadoutDialog({
         skin: skin ?? "",
         idle_animation: idle_animation ?? "",
         action_animation: action_animation ?? "",
+        flag: flag ?? "",
+        flag_variant: flag_variant ?? "",
+        mine_variant: mine_variant ?? "",
       })
       onOpenChange(false)
       return
@@ -906,6 +952,9 @@ function EditLoadoutDialog({
         skin,
         idle_animation,
         action_animation,
+        flag,
+        flag_variant,
+        mine_variant,
       }),
     })
     const data = await res.json()
@@ -925,6 +974,9 @@ function EditLoadoutDialog({
       skin: skin ?? "",
       idle_animation: idle_animation ?? "",
       action_animation: action_animation ?? "",
+      flag: flag ?? "",
+      flag_variant: flag_variant ?? "",
+      mine_variant: mine_variant ?? "",
     })
     onOpenChange(false)
   }
@@ -1106,6 +1158,106 @@ function EditLoadoutDialog({
               </p>
             </div>
           )}
+          {fields.model && fields.saber === MINES_HAND_SLOT && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8892a0]">Mine style</Label>
+              <Select
+                value={fields.mine_variant || "default"}
+                onValueChange={(v) => {
+                  // Locked styles stay clickable so picking one explains how to
+                  // unlock it; it doesn't equip, so the trigger keeps its choice.
+                  if (v !== "default" && !editorMineVariantOptions.includes(v as MineVariant)) {
+                    const req = mineVariantRequirementLabel(v as MineVariant)
+                    toast({
+                      title: "Mine style locked",
+                      description: req
+                        ? `You need to earn "${req}" to unlock this style.`
+                        : "You haven't unlocked this style yet.",
+                      duration: 4000,
+                    })
+                    return
+                  }
+                  setFields((f) => ({ ...f, mine_variant: v === "default" ? "" : v }))
+                }}
+              >
+                <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                  {MINE_VARIANTS.map((v) => {
+                    const locked = v !== "default" && !editorMineVariantOptions.includes(v)
+                    return (
+                      <SelectItem key={v} value={v} className={locked ? "opacity-70" : undefined}>
+                        {v === "default" ? "Default" : v[0].toUpperCase() + v.slice(1)}
+                        {locked && <span className="text-[#8892a0] text-xs ml-2">🔒 locked</span>}
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+          {fields.model && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8892a0]">Carried flag</Label>
+              <Select
+                value={fields.flag || "none"}
+                onValueChange={(v) => setFields((f) => ({ ...f, flag: v === "none" ? "" : v }))}
+              >
+                <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                  <SelectValue placeholder="No flag" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                  <SelectItem value="none">No flag</SelectItem>
+                  {FLAG_TEAMS.map((team) => (
+                    <SelectItem key={team} value={team}>
+                      {team === "red" ? "Red team" : "Blue team"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-[10px] text-[#8892a0]">
+                Carry a team&apos;s flag on your back. Free, like the model itself.
+              </p>
+            </div>
+          )}
+          {fields.model && fields.flag && (
+            <div className="space-y-1.5">
+              <Label className="text-xs text-[#8892a0]">Flag style</Label>
+              <Select
+                value={fields.flag_variant || "default"}
+                onValueChange={(v) => {
+                  if (v !== "default" && !editorFlagVariantOptions.includes(v as FlagVariant)) {
+                    const req = flagVariantRequirementLabel(v as FlagVariant)
+                    toast({
+                      title: "Flag style locked",
+                      description: req
+                        ? `You need to earn "${req}" to unlock this style.`
+                        : "You haven't unlocked this style yet.",
+                      duration: 4000,
+                    })
+                    return
+                  }
+                  setFields((f) => ({ ...f, flag_variant: v === "default" ? "" : v }))
+                }}
+              >
+                <SelectTrigger className="bg-[#1f2833] border-[#3d4855] w-full">
+                  <SelectValue placeholder="Default" />
+                </SelectTrigger>
+                <SelectContent className="bg-[#1f2833] border-[#3d4855] text-[#c5c6c7]">
+                  {FLAG_VARIANTS.map((v) => {
+                    const locked = v !== "default" && !editorFlagVariantOptions.includes(v)
+                    return (
+                      <SelectItem key={v} value={v} className={locked ? "opacity-70" : undefined}>
+                        {v === "default" ? "Default" : v[0].toUpperCase() + v.slice(1)}
+                        {locked && <span className="text-[#8892a0] text-xs ml-2">🔒 locked</span>}
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
           {fields.model && (
             <div className="space-y-1.5">
               <Label className="text-xs text-[#8892a0]">Idle animation</Label>
@@ -1188,6 +1340,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
     skin: player.skin ?? "",
     idle_animation: player.idle_animation ?? "",
     action_animation: player.action_animation ?? "",
+    flag: player.flag ?? "",
+    flag_variant: player.flag_variant ?? "",
+    mine_variant: player.mine_variant ?? "",
   })
   useEffect(() => {
     setFields({
@@ -1201,6 +1356,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
       skin: player.skin ?? "",
       idle_animation: player.idle_animation ?? "",
       action_animation: player.action_animation ?? "",
+      flag: player.flag ?? "",
+      flag_variant: player.flag_variant ?? "",
+      mine_variant: player.mine_variant ?? "",
     })
   }, [player.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1253,6 +1411,14 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
   // only ever see what they've actually unlocked. The admin save path writes
   // straight to the players table, so this list is the whole availability story.
   const editorThemeOptions: ThemeId[] = isAdmin ? [...availableThemes, ...PREVIEW_THEME_IDS] : availableThemes
+  // Same admin-preview treatment as themes: a regular owner only ever sees what
+  // they've actually earned, an admin can equip (and thus preview) anything.
+  const editorFlagVariantOptions: FlagVariant[] = isAdmin
+    ? [...FLAG_VARIANTS]
+    : unlockedFlagVariants(earnedCrestRanks)
+  const editorMineVariantOptions: MineVariant[] = isAdmin
+    ? [...MINE_VARIANTS]
+    : unlockedMineVariants(earnedCrestRanks)
   const theme = themeById(fields.profile_theme)
   // Preview themes render whenever equipped (only an admin could have set one);
   // the unlockable ones still re-validate against this player's entitlement.
@@ -1514,6 +1680,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
                     modelId={fields.model}
                     saber={fields.saber === MINES_HAND_SLOT ? null : fields.saber || null}
                     mines={fields.saber === MINES_HAND_SLOT}
+                    mineVariant={fields.mine_variant || null}
+                    flag={fields.flag || null}
+                    flagVariant={fields.flag_variant || null}
                     skin={fields.skin || null}
                     animation={fields.idle_animation || null}
                     action={fields.action_animation || null}
@@ -1773,6 +1942,8 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
           initial={fields}
           canEditTooltip={isAdmin}
           onSaved={setFields}
+          editorFlagVariantOptions={editorFlagVariantOptions}
+          editorMineVariantOptions={editorMineVariantOptions}
         />
       )}
     </div>

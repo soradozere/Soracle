@@ -2,7 +2,7 @@
 
 import { useLayoutEffect, useMemo } from "react"
 import { useGLTF } from "@react-three/drei"
-import type { Mesh, Object3D } from "three"
+import { DoubleSide, type Material, type Mesh, type Object3D } from "three"
 import { flattenMeshMaterials } from "@/lib/three-materials"
 
 /** Every model is rescaled to this height by <Model>; see model-viewer.tsx. */
@@ -39,7 +39,34 @@ export const MD3_SCALE = TARGET_HEIGHT / QUAKE_UNITS_PER_PLAYER
  * The scene is cloned because drei caches one object per URL: two viewers on a
  * page would otherwise be moving the same nodes around.
  */
-export function Md3Prop({ src, scale = 1 }: { src: string; scale?: number }) {
+export function Md3Prop({
+  src,
+  scale = 1,
+  doubleSided = false,
+  opacity = 1,
+}: {
+  src: string
+  scale?: number
+  /**
+   * For a prop thin enough that the camera can end up looking at its back —
+   * the carried flag is the only current case. JK2's own banner shader almost
+   * certainly disables culling for exactly this reason (a flapping flag has
+   * no fixed "front"); Blender's glTF export has no equivalent flag and
+   * defaults every material to single-sided, so a flag viewed from the
+   * player's front — looking at the back of the same plane that reads fine
+   * from behind — renders as nothing at all. A hilt or a mine has real
+   * volume, so this has never come up for them.
+   */
+  doubleSided?: boolean
+  /**
+   * The other genuine exception alongside `scale` and `doubleSided`: the
+   * flag's "transparent" cosmetic (see FLAG_OPACITY in lib/prop-assets.ts) is
+   * a real alpha-blended look, applied here at runtime rather than baked into
+   * a converted asset because it isn't one — there's no separate .glb for it,
+   * just the default flag rendered at reduced opacity.
+   */
+  opacity?: number
+}) {
   const { scene } = useGLTF(src)
   const model = useMemo(() => scene.clone(true), [scene])
 
@@ -49,8 +76,16 @@ export function Md3Prop({ src, scale = 1 }: { src: string; scale?: number }) {
       const mesh = obj as Mesh
       if (!mesh.isMesh) return
       flattenMeshMaterials(mesh.material)
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material]
+      for (const material of materials as Material[]) {
+        if (doubleSided) material.side = DoubleSide
+        if (opacity < 1) {
+          material.transparent = true
+          material.opacity = opacity
+        }
+      }
     })
-  }, [model])
+  }, [model, doubleSided, opacity])
 
   return <primitive object={model} scale={MD3_SCALE * scale} />
 }

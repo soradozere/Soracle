@@ -10,11 +10,19 @@
  * So saber hilts need no Blender session at all.
  *
  * Usage:
- *   node scripts/md3-to-gltf.mjs <input.md3> <output.glb> [--texture path]
+ *   node scripts/md3-to-gltf.mjs <input.md3> <output.glb> [--assets root] [--texture path]
  *
  * The texture is resolved from the surface's shader name, trying the extensions
  * JK2 actually ships (the shader usually says .tga while the file on disk is a
  * .jpg), or forced with --texture.
+ *
+ * With --assets, a surface's shader name is also looked up against any real JK2
+ * `.shader` script under that root (see scripts/jk2-shaders.mjs) — the same
+ * pass scripts/glm-graft.mjs makes for player models. Every prop converted
+ * before the Nightmare variants had no custom shader at all, so this is a
+ * no-op for them; it only matters for a shader whose surface has no ordinary
+ * image (a flat-colour `rgbGen const` base, or an additive glow layer with no
+ * base texture of its own).
  *
  * Tags are preserved as empty nodes. That matters: `tag_flash` is where the
  * blade emerges, so the viewer can read the blade origin out of the model
@@ -23,6 +31,17 @@
 
 import { readFileSync, writeFileSync, existsSync } from "node:fs"
 import { dirname, resolve, basename, extname } from "node:path"
+import { readShaderScripts, analyseShader } from "./jk2-shaders.mjs"
+
+/**
+ * glTF's base `emissiveFactor` is clamped to [0,1] per channel — nowhere near
+ * bright enough to read as "glowing" under the viewer's ACES tone mapping.
+ * This extension is a real multiplier three.js applies on top. Same value as
+ * glm-graft.mjs's EMISSIVE_STRENGTH; not shared as a constant because the two
+ * scripts don't share any module besides jk2-shaders.mjs, and this one number
+ * isn't worth a coupling for.
+ */
+const EMISSIVE_STRENGTH = 4
 
 const MD3_IDENT = "IDP3"
 const MD3_VERSION = 15
@@ -334,7 +353,7 @@ function alignTo4(n) {
   return (n + 3) & ~3
 }
 
-function buildGlb(model, textures) {
+function buildGlb(model, surfaceInfo) {
   const json = {
     asset: { version: "2.0", generator: "soracle md3-to-gltf" },
     scenes: [{ nodes: [] }],
@@ -376,26 +395,81 @@ function buildGlb(model, textures) {
   // One material per distinct shader. A single-texture model gets exactly one,
   // as before; a flag gets two, because its cloth and its pole are different
   // images and sharing a material would paint the pole with the banner.
+  //
+  // A shader with no ordinary texture can still need a material: the Nightmare
+  // variants' black base layer is `rgbGen const` with no image at all, and
+  // their glow outline layer has no base texture of its own either — its only
+  // content is the additive layer baked as emissive. `pushImage` de-dupes by
+  // path so a glow texture reused across shaders (or matching a shader's own
+  // primary texture, not the case today but cheap to guard) isn't embedded
+  // twice.
+  const imageIndexByPath = new Map()
+  const pushImage = (texture) => {
+    const existing = imageIndexByPath.get(texture.path)
+    if (existing !== undefined) return existing
+    json.images = json.images ?? []
+    json.samplers = json.samplers ?? [{ magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 }]
+    json.textures = json.textures ?? []
+    json.images.push({ bufferView: pushView(texture.data), mimeType: texture.mimeType })
+    json.textures.push({ sampler: 0, source: json.images.length - 1 })
+    const index = json.textures.length - 1
+    imageIndexByPath.set(texture.path, index)
+    return index
+  }
+
   const materialByShader = new Map()
-  if (textures.size > 0) {
-    json.images = []
-    json.samplers = [{ magFilter: 9729, minFilter: 9987, wrapS: 10497, wrapT: 10497 }]
-    json.textures = []
-    for (const [shader, texture] of textures) {
-      json.images.push({ bufferView: pushView(texture.data), mimeType: texture.mimeType })
-      json.textures.push({ sampler: 0, source: json.images.length - 1 })
-      json.materials.push({
-        name: basename(texture.path).replace(/\.[^.]+$/, ""),
-        pbrMetallicRoughness: {
-          baseColorTexture: { index: json.textures.length - 1 },
-          // JK2 has no PBR: flat diffuse, so no specular sheen. Same reasoning as
-          // the player-model viewer, which forces this at load time.
-          metallicFactor: 0,
-          roughnessFactor: 1,
-        },
-      })
-      materialByShader.set(shader, json.materials.length - 1)
-    }
+  for (const [shader, info] of surfaceInfo) {
+    const { texture, additiveTexture, effects } = info
+    const hasBase = Boolean(texture) || Boolean(effects.flatColor)
+    if (!hasBase && !additiveTexture) continue // nothing to draw — matches the old "no material" fallback
+
+    json.materials.push({
+      name: texture ? basename(texture.path).replace(/\.[^.]+$/, "") : shader,
+      pbrMetallicRoughness: {
+        // flatColor wins over an incidentally-resolved texture, not the other
+        // way round: `rgbGen const` on a real stage means JK2 ignores whatever
+        // image that stage's `map` names (typically the literal $whiteimage,
+        // but not always — a shader can be authored under the SAME name as a
+        // real texture file purely to retarget an existing surface, which is
+        // exactly how the flag's own "transparent"/"nightmare" variants are
+        // built: a custom shader block keyed to the STOCK banner's own shader
+        // name, so the pole — a different shader entirely — is untouched).
+        ...(effects.flatColor
+          ? { baseColorFactor: [...effects.flatColor, 1] }
+          : texture
+            ? { baseColorTexture: { index: pushImage(texture) } }
+            // Additive-only surface (the glow outline layers): JK2 draws no
+            // opaque base at all here, just the additive stage. glTF has no
+            // "additive, no base" material, so an opaque black base plus the
+            // emissive layer below approximates it — nothing shows except
+            // wherever the glow does.
+            : { baseColorFactor: [0, 0, 0, 1] }),
+        // JK2 has no PBR: flat diffuse, so no specular sheen. Same reasoning as
+        // the player-model viewer, which forces this at load time.
+        metallicFactor: 0,
+        roughnessFactor: 1,
+      },
+      ...(effects.translucent
+        ? { alphaMode: "BLEND" }
+        : effects.alphaCutout
+          ? { alphaMode: "MASK", alphaCutoff: 0.5 }
+          : {}),
+      ...(additiveTexture
+        ? {
+            emissiveFactor: [1, 1, 1],
+            emissiveTexture: { index: pushImage(additiveTexture) },
+            // A static bake of what JK2 animates (tcMod turb/scroll/rotate,
+            // rgbGen wave) — one frame of the glow, not the real motion. See
+            // jk2-shaders.mjs's `additiveMap` doc comment.
+            extensions: { KHR_materials_emissive_strength: { emissiveStrength: EMISSIVE_STRENGTH } },
+          }
+        : {}),
+    })
+    materialByShader.set(shader, json.materials.length - 1)
+  }
+
+  if (json.materials.some((m) => m.extensions?.KHR_materials_emissive_strength)) {
+    json.extensionsUsed = ["KHR_materials_emissive_strength"]
   }
 
   for (const surface of model.surfaces) {
@@ -555,20 +629,56 @@ function main() {
 
   // Resolved per distinct shader, so a model whose surfaces use different images
   // keeps them. --texture overrides everything, for the single-texture case.
-  const textures = new Map()
+  //
+  // Shader scripts are the exception, not the rule: none of the base-game
+  // models converted before the Nightmare variants shipped a custom one, so
+  // for them `shaderScripts` stays empty and `effects` is all-false — nothing
+  // downstream changes. See jk2-shaders.mjs.
+  const shaderScripts = assetsRoot ? readShaderScripts([assetsRoot]) : new Map()
+  const surfaceInfo = new Map()
   for (const surface of model.surfaces) {
-    if (textures.has(surface.shader)) continue
-    const texture = resolveTexture(input, surface.shader, override, assetsRoot)
-    if (!texture) {
-      console.warn(`  ! no texture for "${surface.name}" (shader "${surface.shader}")`)
-      continue
-    }
-    textures.set(surface.shader, texture)
-    console.log(`  texture ${basename(texture.path)} (${(texture.data.length / 1024).toFixed(1)} KB)`)
-  }
-  if (textures.size === 0) console.warn("  ! no textures found — writing an untextured mesh")
+    if (surfaceInfo.has(surface.shader)) continue
 
-  const glb = buildGlb(model, textures)
+    const stem = surface.shader.replace(/\.[^./]+$/, "").toLowerCase()
+    const block = shaderScripts.get(stem)
+    const effects = block
+      ? analyseShader(block)
+      : {
+          alphaCutout: false,
+          translucent: false,
+          reflective: false,
+          additive: false,
+          glow: null,
+          additiveMap: null,
+          flatColor: null,
+        }
+
+    const texture = resolveTexture(input, surface.shader, override, assetsRoot)
+    if (texture) {
+      console.log(`  texture ${basename(texture.path)} (${(texture.data.length / 1024).toFixed(1)} KB)`)
+    } else if (!effects.flatColor) {
+      console.warn(`  ! no texture for "${surface.name}" (shader "${surface.shader}")`)
+    }
+
+    let additiveTexture = null
+    if (effects.additiveMap) {
+      additiveTexture = resolveTexture(input, effects.additiveMap, null, assetsRoot)
+      if (!additiveTexture) {
+        console.warn(
+          `  ! no glow image for "${surface.name}" (shader "${effects.additiveMap}") — glow will be skipped`,
+        )
+      } else {
+        console.log(`  glow texture ${basename(additiveTexture.path)} (${(additiveTexture.data.length / 1024).toFixed(1)} KB)`)
+      }
+    }
+
+    surfaceInfo.set(surface.shader, { texture, additiveTexture, effects })
+  }
+  if ([...surfaceInfo.values()].every((info) => !info.texture && !info.effects.flatColor && !info.additiveTexture)) {
+    console.warn("  ! no textures found — writing an untextured mesh")
+  }
+
+  const glb = buildGlb(model, surfaceInfo)
   writeFileSync(output, glb)
   console.log(`\n→ ${output}  ${(glb.length / 1024).toFixed(1)} KB, ${verts} verts, ${tris} tris`)
 }

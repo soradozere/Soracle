@@ -32,7 +32,7 @@ import { useAssetUrls } from "@/hooks/use-asset-urls"
 import { findSaberColour } from "@/lib/saber-colours"
 import { findModelSkin, findPlayerModel, skinAssetIds } from "@/lib/player-models"
 import { applyReflectiveEnvMaps, flattenMeshMaterials } from "@/lib/three-materials"
-import { MINES_ASSET, SABER_HILT_ASSET, findFlagAsset, saberTextureAsset } from "@/lib/prop-assets"
+import { SABER_HILT_ASSET, findFlagAsset, findFlagOpacity, findMineAsset, saberTextureAsset } from "@/lib/prop-assets"
 
 /** Every model is rescaled to this height in world units, so one camera fits all. */
 const TARGET_HEIGHT = 2
@@ -150,7 +150,6 @@ const CARRIED_FLAG_SCALE = 0.4
 // same file as a new asset: re-download, re-suspend, and the model gets refitted
 // on the way back. Hoisted so the identity never changes.
 const HILT_ONLY = [SABER_HILT_ASSET]
-const MINES_ONLY = [MINES_ASSET]
 
 // Client-only animated glTF viewer. Everything here runs in the browser — the
 // page that renders it dynamic-imports with `ssr: false`, because WebGL has no
@@ -203,8 +202,12 @@ export type ModelViewerProps = {
    * column; the loadout makes the invalid pair unrepresentable.
    */
   mines?: boolean
+  /** Trip mine cosmetic, from lib/prop-assets's MINE_VARIANTS. Omit for the default. */
+  mineVariant?: string | null
   /** CTF flag to carry on the back: "red", "blue", or nothing. */
   flag?: string | null
+  /** Flag cosmetic, from lib/prop-assets's FLAG_VARIANTS. Omit for the default cloth. */
+  flagVariant?: string | null
   /**
    * Scale override for the flag, for the lab only.
    *
@@ -612,7 +615,9 @@ function Model({
   action,
   saber,
   mines,
+  mineVariant,
   flag,
+  flagVariant,
   flagScale = CARRIED_FLAG_SCALE,
   flagYaw,
   onClipsLoaded,
@@ -628,7 +633,9 @@ function Model({
   | "action"
   | "saber"
   | "mines"
+  | "mineVariant"
   | "flag"
+  | "flagVariant"
   | "flagScale"
   | "flagYaw"
   | "onClipsLoaded"
@@ -780,7 +787,8 @@ function Model({
   // Resolving the hand slot to at most one prop here is the whole exclusion:
   // downstream there is no state in which both a hilt and a mine have a URL.
   const saberColour = mines ? null : findSaberColour(saber)
-  const flagId = findFlagAsset(flag)
+  const flagId = findFlagAsset(flag, flagVariant)
+  const mineId = mines ? findMineAsset(mineVariant) : null
 
   // Null for the default skin as well as for anything unrecognised, so the
   // override below simply doesn't mount and the model keeps the textures Blender
@@ -816,7 +824,7 @@ function Model({
     }
   }, [saberColour, hilt.urls, blade.urls])
 
-  const mine = useAssetUrls(mines ? MINES_ONLY : null)
+  const mine = useAssetUrls(mineId ? [mineId] : null)
   const flagUrls = useAssetUrls(flagId ? [flagId] : null)
 
   return (
@@ -848,10 +856,10 @@ function Model({
         </Suspense>
       )}
 
-      {mines && mine.urls && (
+      {mineId && mine.urls && (
         <Suspense fallback={null}>
           <Bolt point={bolts.get(HAND_BOLT)}>
-            <Md3Prop src={mine.urls[MINES_ASSET]} />
+            <Md3Prop src={mine.urls[mineId]} />
           </Bolt>
         </Suspense>
       )}
@@ -860,7 +868,13 @@ function Model({
           bolt. See components/carried-flag.tsx. */}
       {flagId && flagUrls.urls && flagBone && (
         <Suspense fallback={null}>
-          <CarriedFlag bone={flagBone} src={flagUrls.urls[flagId]} scale={flagScale} yawOffset={flagYaw} />
+          <CarriedFlag
+            bone={flagBone}
+            src={flagUrls.urls[flagId]}
+            scale={flagScale}
+            opacity={findFlagOpacity(flagVariant)}
+            yawOffset={flagYaw}
+          />
         </Suspense>
       )}
     </group>
@@ -879,7 +893,9 @@ export function ModelViewer({
   action,
   saber,
   mines,
+  mineVariant,
   flag,
+  flagVariant,
   flagScale,
   flagYaw,
   onClipsLoaded,
@@ -942,7 +958,9 @@ export function ModelViewer({
             action={action}
             saber={saber}
             mines={mines}
+            mineVariant={mineVariant}
             flag={flag}
+            flagVariant={flagVariant}
             flagScale={flagScale}
             flagYaw={flagYaw}
             onClipsLoaded={onClipsLoaded}

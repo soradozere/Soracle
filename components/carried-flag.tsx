@@ -16,36 +16,58 @@ import { MD3_SCALE, Md3Prop } from "@/components/md3-prop"
  * angles plus fixed offsets, ignoring the bone's rotation entirely. No amount
  * of picking between the model's 46 tag bolts could ever have matched it.
  *
- * The constants below are that function, transcribed. Source quoted in full in
- * docs/jk2-model-conversion.md §7.6.
+ * The engine's own numbers are quoted in full in docs/jk2-model-conversion.md
+ * §7.6. Pitch, roll and the drop offset transcribe directly; yaw, the right
+ * offset and the forward offset don't — see each constant's own comment for
+ * why, and for how the value actually in use here was arrived at instead.
  */
 
 /** Quake units the flag drops below the lumbar bone. */
 const FLAG_DROP = -12
-/** ...and slides to the player's right. */
-const FLAG_RIGHT = 8
-/** ...and finally along its own forward axis, once oriented. */
-const FLAG_FORWARD = 24
+/**
+ * ...and slides to the player's right, in the SAME rotating basis as forward
+ * (see the position block in `useFrame` below). An earlier version applied
+ * this along a fixed glTF axis instead, on the wrong assumption that the bone
+ * always faces one canonical direction — that mismatch, not the number
+ * itself, was what put the banner over one shoulder instead of centred on the
+ * spine. The engine's own value is 8: Kyle's in-game model holds the pole
+ * angled out past his sword arm, so the bolt needs a sideways nudge to clear
+ * it. Our converted r_flag.glb has no such asymmetry baked into its pivot,
+ * and once the basis was fixed, -6 is what centres it — confirmed on both
+ * Kyle and Luke, front and back.
+ */
+const FLAG_RIGHT = -6
+/**
+ * ...and finally along its own forward axis, once oriented. The engine's own
+ * value is 24; ours is 17. The offset is measured against `r_flag.md3`'s own
+ * pivot, and our converted `r_flag.glb`'s pivot sits further from the pole's
+ * base, so the full 24 units left a visible gap between the banner and the
+ * player's back that the game itself doesn't have — but overcorrecting to 12
+ * drove the banner into the model instead. Tuned by eye, not re-derived;
+ * confirmed on both Kyle and Luke, front and back.
+ */
+const FLAG_FORWARD = 17
 
 const FLAG_PITCH = -30
 /**
  * Yaw is taken from the lumbar bone's +X axis, then turned by this.
  *
- * The engine's number is 270 and ours is 0, because the two aren't measuring
- * from the same place: `CG_PlayerFlag` reads `POSITIVE_X` off a Ghoul2 bone
- * matrix, and we read it off the same bone as Blender exported it, where
- * armatures run along local +Y. Everything else in this file transcribes
- * cleanly because it's expressed in the player's frame; this is the only term
- * where the bone's own axes leak in.
+ * The engine's number is 270 and ours is 180, because the two aren't
+ * measuring from the same place: `CG_PlayerFlag` reads `POSITIVE_X` off a
+ * Ghoul2 bone matrix, and we read it off the same bone as Blender exported
+ * it, where armatures run along local +Y. Everything else in this file
+ * transcribes cleanly because it's expressed in the player's frame; this is
+ * the only term where the bone's own axes leak in.
  *
- * DERIVED, not guessed, after two rounds of guessing wasted Sora's time. The
- * banner's mean normal is the prop's local +X (measured off flag-red.glb),
- * which this basis maps to the flag's forward. Forward in glTF is
- * (cos·cos(yaw), sin, -cos·sin(yaw)) at pitch -30, so pointing it out of the
- * player's back — +Z, since the model faces -Z — needs a total yaw of 270°.
- * The lumbar bone measures -93.1°, so the offset is 270 - (-93.1) = 363 ≈ 0.
+ * NOT derived — the axis-convention algebra that used to live here solved two
+ * unmeasured unknowns at once (the bone's own rest yaw, and which axis
+ * `flag-red.glb` calls "forward") and landed on 0, which put the banner in
+ * front of the player's face, pole crossing the saber. Settled instead by
+ * testing all four cardinal turns (see `FLAG_YAWS` in
+ * components/model-lab.tsx) against the model directly: 180 is the one that
+ * puts the banner on the back.
  */
-export const FLAG_YAW_OFFSET = 0
+export const FLAG_YAW_OFFSET = 180
 const FLAG_ROLL = 20
 
 /** The bone the game measures from. A bone, not a `*` tag surface. */
@@ -85,11 +107,13 @@ export function CarriedFlag({
   bone,
   src,
   scale,
+  opacity = 1,
   yawOffset = FLAG_YAW_OFFSET,
 }: {
   bone: Object3D
   src: string
   scale: number
+  opacity?: number
   yawOffset?: number
 }) {
   const mount = useRef<Group>(null)
@@ -123,16 +147,20 @@ export function CarriedFlag({
     const yaw = Math.atan2(-scratch.boneX.z, scratch.boneX.x) / DEG + yawOffset
 
     // Position. The offsets are in Quake units, so they scale the same way any
-    // converted prop does. Dropping and sliding happen in the PLAYER's frame,
-    // which in this viewer is unrotated: the model faces Quake +X, and Quake's
-    // right (0,-1,0) is glTF +Z.
+    // converted prop does. Drop is world-up, which is unambiguous. Right and
+    // forward both come from the SAME yaw-derived basis — computed BEFORE the
+    // roll is added, which is the order the engine does it in and does change
+    // the answer — so they rotate together with wherever the bone actually is
+    // this frame. (An earlier version applied FLAG_RIGHT along a fixed glTF
+    // axis on the assumption the bone always faces one canonical direction;
+    // it doesn't, and that mismatch is what made the flag sit off-centre.)
+    const preRoll = angleVectors(FLAG_PITCH, yaw, 0)
+    toGltf(scratch.forward, preRoll.forward)
+    toGltf(scratch.right, preRoll.right)
+
     group.position.copy(scratch.position)
     group.position.y += FLAG_DROP * MD3_SCALE
-    group.position.z += FLAG_RIGHT * MD3_SCALE
-
-    // Then 24 units along the flag's own forward — computed BEFORE the roll is
-    // added, which is the order the engine does it in and does change the answer.
-    toGltf(scratch.forward, angleVectors(FLAG_PITCH, yaw, 0).forward)
+    group.position.addScaledVector(scratch.right, FLAG_RIGHT * MD3_SCALE)
     group.position.addScaledVector(scratch.forward, FLAG_FORWARD * MD3_SCALE)
 
     // Orientation, now with the roll. Columns map the model's own axes onto the
@@ -148,7 +176,7 @@ export function CarriedFlag({
 
   return (
     <group ref={mount}>
-      <Md3Prop src={src} scale={scale} />
+      <Md3Prop src={src} scale={scale} doubleSided opacity={opacity} />
     </group>
   )
 }
