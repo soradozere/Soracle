@@ -170,6 +170,29 @@ export interface ProductionRow {
   jobPlayed: Record<Job, boolean>
   /** The single job that contributed most, for display. Not used in scoring. */
   topJob: Job
+  /**
+   * The role this player was detected as playing MOST OFTEN, and how many of their
+   * matches that was. Used only by the "By role" view.
+   */
+  mainRole: Job
+  /** How many matches this player was detected in each role. */
+  rolesPlayed: Record<Job, number>
+  /**
+   * Rating among players doing the SAME job, counting ONLY the matches where this
+   * player was detected in that role. 50 is an average performance at that job.
+   * Null where they have too few matches in it to say anything.
+   *
+   * This is the number that answers "who is the best BC this month" — the ordinary
+   * `jobRatings.base` cannot, because it averages a player's base output across
+   * every match INCLUDING the ones where they played something else. Interlude
+   * base-cleaned in 4 of 34 August matches; dividing that by 34 ranks him 6th, when
+   * among actual base-cleaning performances he is 1st.
+   *
+   * A player appears in EVERY role they played enough of, deliberately. Filing a
+   * four-role player under one "main" role would hide exactly the versatility that
+   * makes them hard to rate.
+   */
+  roleRatings: Record<Job, number | null>
   games: number
   minutes: number
   wins: number
@@ -400,6 +423,64 @@ const sumOf = (rows: ProductionStatRow[], fn: (r: ProductionStatRow) => number) 
  * only production to average. Matches without a scoreboard cannot contribute anything
  * and are ignored rather than counted as a blank game.
  */
+/**
+ * How evenly a match's production is spread across the four jobs, 0 to 1.
+ *
+ * Normalised entropy: 1.0 is perfectly even across all four, 0 is everything in one.
+ * This is the support signal. Measured against 119 hand-labelled player-matches,
+ * support is the ONLY role that plays broadly -- median breadth 0.885 and meaningful
+ * output in all four jobs, against 0.30-0.58 and one or two jobs for every other
+ * role. Every other role concentrates; support does not, which is what makes it
+ * findable at all.
+ */
+function breadthOf(jobs: Record<Job, number>): number {
+  const total = JOBS.reduce((t, j) => t + jobs[j], 0)
+  if (total <= 0) return 0
+  let h = 0
+  for (const j of JOBS) {
+    const p = jobs[j] / total
+    if (p > 0) h -= p * Math.log(p)
+  }
+  return h / Math.log(4)
+}
+
+/**
+ * Matches in a role before that role gets a rating.
+ *
+ * Deliberately low, because the interesting cases are versatile players with a
+ * handful of matches in a second role — and excluding them is exactly the dilution
+ * problem this view exists to fix. The UI shows the game count next to every rating
+ * so a 4-game number can be read with appropriate suspicion.
+ */
+const MIN_ROLE_GAMES = 3
+
+/** Breadth at or above this, plus the enemy-mine test, marks a support game. */
+const SUPPORT_BREADTH = 0.7
+/** Enemy-base mine grabs this many times the pool average, for a support game. */
+const SUPPORT_AWAY_MINES = 1.5
+
+/**
+ * Which job a player was actually doing in one match.
+ *
+ * Support is checked FIRST and separately, because it cannot be found by "which job
+ * scored highest" -- a support player's biggest single bucket is usually base, not
+ * support, so the obvious test misfiles them. Everyone else is simply their top job,
+ * which hand-labelled data gets exactly right: 39/39 cappers, 18/18 base cleaners
+ * and 38/38 chase+camp were identified correctly by top job alone.
+ *
+ * The support rule comes from Interlude, who put it better than the data did:
+ * supporters almost never pick up their OWN mines but pick up a lot of the enemy's.
+ * That is measurably true -- own-base mines are 0.885/min for a base cleaner against
+ * 0.013 for support, and enemy-base mines are 0.246/min for support against 0.000
+ * for a base cleaner. It is the cleanest separator in the scoreboard.
+ */
+function detectRole(jobs: Record<Job, number>, awayMinesPerMin: number, poolAwayMines: number): Job {
+  if (breadthOf(jobs) >= SUPPORT_BREADTH && awayMinesPerMin >= SUPPORT_AWAY_MINES * poolAwayMines) {
+    return "support"
+  }
+  return JOBS.reduce((a, b) => (jobs[b] > jobs[a] ? b : a))
+}
+
 export function computeProductionBoard(
   matches: ProductionMatch[],
   statRows: ProductionStatRow[],
@@ -512,6 +593,56 @@ export function computeProductionBoard(
   const allOpp = [...oppOf.values()]
   const poolOpp = allOpp.length > 0 ? allOpp.reduce((a, b) => a + b, 0) / allOpp.length : 0
 
+  // Pass 3: what job was each player actually doing in each match, and how good was
+  // that performance compared to OTHERS DOING THE SAME JOB.
+  //
+  // This exists because averaging a player's base output over every match answers
+  // the wrong question. Interlude base-cleaned in 4 of 34 August matches; the plain
+  // Base column divides his real base work by 34 and ranks him 6th, when among
+  // actual base-cleaning performances he is 1st. Same for anyone who switches.
+  const poolAwayMines = (() => {
+    let sum = 0
+    let n = 0
+    for (const rs of rowsByPlayer.values()) {
+      for (const r of rs) {
+        sum += awayMinesOf(r) / minutesOf(r)
+        n++
+      }
+    }
+    return n > 0 ? sum / n : 0
+  })()
+
+  /** One scored match: what was played, and how much was produced doing it. */
+  interface RoleGame {
+    role: Job
+    produced: number
+  }
+  const roleGamesOf = new Map<string, RoleGame[]>()
+  for (const [name, rs] of rowsByPlayer) {
+    const games: RoleGame[] = []
+    for (const r of rs) {
+      const counts = countsOf(r)
+      const mins = minutesOf(r)
+      const jobs: Record<Job, number> = { cap: 0, base: 0, returns: 0, support: 0 }
+      for (const c of COUNTERS) jobs[JOB_OF[c]] += PRICE_OF[c] * (counts[c] / mins)
+      const role = detectRole(jobs, awayMinesOf(r) / mins, poolAwayMines)
+      games.push({ role, produced: jobs[role] })
+    }
+    roleGamesOf.set(name, games)
+  }
+
+  // Cohort baselines: mean and spread of production BY PLAYERS DOING THAT JOB.
+  const cohort = {} as Record<Job, { mean: number; sd: number }>
+  for (const job of JOBS) {
+    const vals: number[] = []
+    for (const games of roleGamesOf.values()) {
+      for (const g of games) if (g.role === job) vals.push(g.produced)
+    }
+    const m = vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : 0
+    const sd = vals.length > 1 ? Math.sqrt(vals.reduce((a, v) => a + (v - m) ** 2, 0) / vals.length) : 1
+    cohort[job] = { mean: m, sd: sd || 1 }
+  }
+
   const scored = pool.map(([name, rs]) => {
     // Each match is one observation, averaged evenly: a 20-minute appearance and a
     // 60-minute one both describe a rate, so neither should outvote the other.
@@ -600,6 +731,24 @@ export function computeProductionBoard(
       JOBS.map((job) => [job, s.jobs[job] >= jobMean[job] * JOB_PLAYED_FRACTION]),
     ) as Record<Job, boolean>,
     topJob: s.topJob,
+    ...(() => {
+      const games = roleGamesOf.get(s.name) ?? []
+      const counts: Record<Job, number> = { cap: 0, base: 0, returns: 0, support: 0 }
+      for (const g of games) counts[g.role]++
+      const mainRole = JOBS.reduce((a, b) => (counts[b] > counts[a] ? b : a))
+      const ratings = Object.fromEntries(
+        JOBS.map((job) => {
+          const inRole = games.filter((g) => g.role === job)
+          if (inRole.length < MIN_ROLE_GAMES) return [job, null]
+          const avg = inRole.reduce((t, g) => t + g.produced, 0) / inRole.length
+          const { mean: cm, sd: csd } = cohort[job]
+          // Same 50/12 presentation as everything else, but the comparison group
+          // is players doing this job, not the whole pool.
+          return [job, Math.round(T_MEAN + (T_SPREAD * (avg - cm)) / csd)]
+        }),
+      ) as Record<Job, number | null>
+      return { mainRole, rolesPlayed: counts, roleRatings: ratings }
+    })(),
     games: s.rs.length,
     minutes: Math.round(sumOf(s.rs, minutesOf)),
     wins: rec?.wins ?? 0,

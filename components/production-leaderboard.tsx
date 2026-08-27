@@ -179,6 +179,16 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
    * the selector at the top of Stats already does.
    */
   const [dayIndex, setDayIndex] = useState<number | null>(null)
+  /**
+   * "combined" is the ordinary board. "byrole" splits it into one table per job,
+   * rating each player only on the matches they actually played that job.
+   *
+   * The combined board answers "who produced most this month". It cannot answer
+   * "who is the best BC", because it divides a player's base work by every match
+   * they played including the ones spent capping — which is exactly the complaint
+   * that prompted this view.
+   */
+  const [view, setView] = useState<"combined" | "byrole">("combined")
 
   const load = async ({ isStale }: { isStale?: () => boolean } = {}) => {
     const stale = () => isStale?.() ?? false
@@ -584,11 +594,30 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                 scoreboards
               </span>
 
+              {/* Combined vs by-role. Sits with the day cursor because both change
+                  what the table below is answering, rather than filtering it. */}
+              <div className="ml-auto flex items-center gap-1">
+                {(["combined", "byrole"] as const).map((v) => (
+                  <button
+                    key={v}
+                    onClick={() => setView(v)}
+                    className="rounded-md px-2 py-1 text-[11px] font-medium transition-colors"
+                    style={{
+                      border: "1px solid var(--color-border)",
+                      background: view === v ? "var(--color-surface-elevated)" : "transparent",
+                      color: view === v ? "var(--color-text)" : "var(--color-text-dim)",
+                    }}
+                  >
+                    {v === "combined" ? "Combined" : "By role"}
+                  </button>
+                ))}
+              </div>
+
               {/* Day cursor, top right. Steps back through the nights the league
                   actually played, re-rating on only the matches up to that point,
                   so the table can be read as it stood on the night. */}
               {scope === "month" && matchDays.length > 1 && (
-                <div className="ml-auto flex items-center gap-1.5">
+                <div className="flex items-center gap-1.5">
                   <button
                     onClick={() =>
                       setDayIndex((i) => Math.max(0, (i == null ? matchDays.length - 1 : i) - 1))
@@ -624,6 +653,87 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
               )}
             </div>
 
+            {view === "byrole" ? (
+              <div className="divide-y divide-[var(--color-border)]">
+                {JOBS.map((job) => {
+                  const list = board.rows
+                    .filter((r) => r.roleRatings[job] != null)
+                    .sort((a, b) => (b.roleRatings[job] ?? 0) - (a.roleRatings[job] ?? 0))
+                  if (list.length === 0) return null
+                  return (
+                    <div key={job} className="p-4">
+                      <h4
+                        className="mb-2 text-xs font-semibold uppercase tracking-wide"
+                        style={{ color: JOB_COLOURS[job] }}
+                      >
+                        {JOB_LABELS[job]}
+                        <span className="ml-2 font-normal normal-case tracking-normal text-[var(--color-text-dim)]">
+                          rated against others doing this job
+                        </span>
+                      </h4>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-[var(--color-border)] text-left text-[var(--color-text-dim)]">
+                              <th className="px-2 py-1.5 font-medium">#</th>
+                              <th className="px-2 py-1.5 font-medium">Player</th>
+                              <th className="px-2 py-1.5 font-medium text-center">Rating</th>
+                              <th className="px-2 py-1.5 font-medium text-right">Games in role</th>
+                              <th className="px-2 py-1.5 font-medium text-right">Of total</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {list.map((r, i) => (
+                              <tr
+                                key={r.name}
+                                className="border-b border-[var(--color-border)]/50 hover:bg-[var(--color-surface-elevated)]/40"
+                              >
+                                <td className="px-2 py-1.5 text-[var(--color-text-dim)]">{i + 1}</td>
+                                <td className="px-2 py-1.5 font-medium text-[var(--color-text)]">
+                                  {r.name}
+                                </td>
+                                <td
+                                  className="px-2 py-1.5 text-center font-mono tabular-nums"
+                                  style={{
+                                    color:
+                                      (r.roleRatings[job] ?? 50) >= 62
+                                        ? JOB_COLOURS[job]
+                                        : "var(--color-text-dim)",
+                                  }}
+                                >
+                                  {r.roleRatings[job]}
+                                </td>
+                                <td
+                                  className="px-2 py-1.5 text-right tabular-nums"
+                                  style={{
+                                    // A rating off 3-4 matches is a different kind of
+                                    // claim from one off 30. Dim it rather than hide it.
+                                    color:
+                                      r.rolesPlayed[job] < 5
+                                        ? "var(--color-accent-yellow)"
+                                        : "var(--color-text-dim)",
+                                  }}
+                                  title={
+                                    r.rolesPlayed[job] < 5
+                                      ? "Few matches in this role — treat the rating with caution"
+                                      : undefined
+                                  }
+                                >
+                                  {r.rolesPlayed[job]}
+                                </td>
+                                <td className="px-2 py-1.5 text-right tabular-nums text-[var(--color-text-dim)]">
+                                  {r.games}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
               <thead>
@@ -712,6 +822,7 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
               </tbody>
               </table>
             </div>
+            )}
           </div>
 
           <p className="text-xs italic text-[var(--color-text-dim)]">
