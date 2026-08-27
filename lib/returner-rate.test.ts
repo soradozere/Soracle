@@ -134,10 +134,10 @@ describe("aggregateReturnerRates", () => {
       Array.from({ length: n }, (_, i) =>
         row({ player_id: playerId, match_id: `m${i}`, returns: perMatchReturns, time_played: minutesEach }),
       )
-    // Leader: 10 returner games (floor = ceil(10*0.3) = 3). Just-clears: 3.
+    // Leader: 15 returner games (floor = ceil(15*0.2) = 3). Just-clears: 3.
     // Below-floor: 2, filtered out despite a higher per-minute rate.
     const stats: StatRow[] = [
-      ...games("leader", 10, 1),
+      ...games("leader", 15, 1),
       ...games("just-clears", 3, 1),
       ...games("below-floor", 2, 5),
     ]

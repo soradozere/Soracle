@@ -39,7 +39,7 @@ import { rankByName } from "./rank-order"
  */
 
 /** Fraction of the top player's returner games needed to make the board. */
-export const RETURNER_GAME_FLOOR_FRACTION = 0.3
+export const RETURNER_GAME_FLOOR_FRACTION = 0.2
 
 /** A 6v6 side fields two returners; scaled for short-handed teams. */
 const RETURNERS_PER_TEAM = 1 / 3

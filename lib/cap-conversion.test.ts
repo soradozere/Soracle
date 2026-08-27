@@ -40,15 +40,15 @@ describe("aggregateCapConversion", () => {
     expect(rows.map((r) => r.playerId)).toEqual(["p-leader"])
   })
 
-  it("applies the 30% carry floor relative to the leader, not an absolute count", () => {
+  it("applies the 20% carry floor relative to the leader, not an absolute count", () => {
     const kills: KillRow[] = [
       { match_id: "m1", victim_player_id: "p-leader", rets: 0 },
       { match_id: "m1", victim_player_id: "p-support", rets: 0 },
       { match_id: "m1", victim_player_id: "p-minor", rets: 0 },
     ]
-    // Leader: 10 carries (floor = 3). Support: exactly 3 -- clears. Minor: 2 -- doesn't.
+    // Leader: 15 carries (floor = 3). Support: exactly 3 -- clears. Minor: 2 -- doesn't.
     const stats: CaptureStatRow[] = [
-      { player_id: "p-leader", captures: 10 },
+      { player_id: "p-leader", captures: 15 },
       { player_id: "p-support", captures: 3 },
       { player_id: "p-minor", captures: 2 },
     ]
