@@ -13,7 +13,13 @@ import {
 import type { Player } from "@/lib/types"
 import { Flame, Swords, Heart, ChevronDown, Pencil, Video, Loader2 } from "lucide-react"
 import { ProfileModelFigure } from "@/components/profile-model-panel"
-import { PLAYER_MODELS, findPlayerModel, DEFAULT_SKIN } from "@/lib/player-models"
+import {
+  PLAYER_MODELS,
+  findPlayerModel,
+  DEFAULT_SKIN,
+  unlockedModelIds,
+  modelRequirementLabel,
+} from "@/lib/player-models"
 import { SABER_COLOURS, MINES_HAND_SLOT } from "@/lib/saber-colours"
 import {
   FLAG_TEAMS,
@@ -853,6 +859,7 @@ function EditLoadoutDialog({
   onSaved,
   editorFlagVariantOptions,
   editorMineVariantOptions,
+  editorModelOptions,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -863,6 +870,11 @@ function EditLoadoutDialog({
   // straight to the table, an owner goes through the validated API route.
   canEditTooltip: boolean
   onSaved: (fields: EditableFields) => void
+  // Model ids this player may actually equip — same computation shape as the
+  // two below (admins get every model, see unlockedModelIds). Most models
+  // have no unlock condition at all and pass for everyone; Batman Beyond and
+  // Swoledor are the first exceptions.
+  editorModelOptions: string[]
   // What this player may actually equip — computed once in PlayerProfile from
   // their earned crests (admins get every variant, same as PREVIEW_THEME_IDS
   // does for profile themes) — see unlockedFlagVariants/unlockedMineVariants.
@@ -1073,29 +1085,53 @@ function EditLoadoutDialog({
                       back to here the way the skin/right-hand pickers below have. */}
                   <DropdownMenuRadioGroup
                     value={fields.model || "kyle"}
-                    onValueChange={(v) =>
+                    onValueChange={(v) => {
+                      // Locked models stay clickable so picking one explains how to
+                      // unlock it; it doesn't equip, same pattern as the flag/mine/
+                      // theme pickers below.
+                      if (!editorModelOptions.includes(v)) {
+                        const req = modelRequirementLabel(v)
+                        toast({
+                          title: "Model locked",
+                          description: req
+                            ? `You need to earn "${req}" to unlock this model.`
+                            : "You haven't unlocked this model yet.",
+                          duration: 4000,
+                        })
+                        return
+                      }
                       // Changing model invalidates any skin chosen for the old one —
                       // Reborn's "boss" id means nothing once Kyle is selected.
                       setFields((f) => ({ ...f, model: v, skin: "" }))
-                    }
+                    }}
                     className="w-64 max-h-72 overflow-y-auto p-1"
                   >
-                    {(modelCategory === "base" ? baseModels : customModels).map((m) => (
-                      // flex-col: a credit wrapping mid-phrase ("— Credits: /
-                      // FetchD" split across two lines) read as broken, not just
-                      // narrow — putting it on its own smaller line is the same
-                      // information laid out on purpose instead of by accident.
-                      <DropdownMenuRadioItem key={m.id} value={m.id} className="flex-col items-start gap-0">
-                        <span>{m.label}</span>
-                        {m.credit ? <span className="text-[10px] text-[#8892a0]">Credits: {m.credit}</span> : null}
-                      </DropdownMenuRadioItem>
-                    ))}
+                    {(modelCategory === "base" ? baseModels : customModels).map((m) => {
+                      const locked = !editorModelOptions.includes(m.id)
+                      return (
+                        // flex-col: a credit wrapping mid-phrase ("— Credits: /
+                        // FetchD" split across two lines) read as broken, not just
+                        // narrow — putting it on its own smaller line is the same
+                        // information laid out on purpose instead of by accident.
+                        <DropdownMenuRadioItem
+                          key={m.id}
+                          value={m.id}
+                          className={cn("flex-col items-start gap-0", locked && "opacity-70")}
+                        >
+                          <span>
+                            {m.label}
+                            {locked && <span className="text-[#8892a0] text-xs ml-2">🔒 locked</span>}
+                          </span>
+                          {m.credit ? <span className="text-[10px] text-[#8892a0]">Credits: {m.credit}</span> : null}
+                        </DropdownMenuRadioItem>
+                      )
+                    })}
                   </DropdownMenuRadioGroup>
                 </div>
               </DropdownMenuContent>
             </DropdownMenu>
             <p className="text-[10px] text-[#8892a0]">
-              An animated JK2 player model on your profile. Not tied to achievements — anyone can pick any model.
+              An animated JK2 player model on your profile. Free for most models; a locked one shows what unlocks it.
             </p>
           </div>
           {/* fields.model is always truthy now (Kyle by default), so this guard
@@ -1419,6 +1455,9 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
   const editorMineVariantOptions: MineVariant[] = isAdmin
     ? [...MINE_VARIANTS]
     : unlockedMineVariants(earnedCrestRanks)
+  const editorModelOptions: string[] = isAdmin
+    ? PLAYER_MODELS.map((m) => m.id)
+    : unlockedModelIds(earnedCrestRanks)
   const theme = themeById(fields.profile_theme)
   // Preview themes render whenever equipped (only an admin could have set one);
   // the unlockable ones still re-validate against this player's entitlement.
@@ -1944,6 +1983,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
           onSaved={setFields}
           editorFlagVariantOptions={editorFlagVariantOptions}
           editorMineVariantOptions={editorMineVariantOptions}
+          editorModelOptions={editorModelOptions}
         />
       )}
     </div>

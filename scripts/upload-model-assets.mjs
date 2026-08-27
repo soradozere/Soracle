@@ -70,6 +70,9 @@ const ASSETS = [
   ["eternal.glb", "public/models/eternal.glb"],
   ["cal-kestis.glb", "public/models/cal-kestis.glb"],
   ["jedi-zf.glb", "public/models/jedi-zf.glb"],
+  ["jskellington.glb", "public/models/jskellington.glb"],
+  ["swoledor.glb", "public/models/swoledor.glb"],
+  ["batman-beyond.glb", "public/models/batman-beyond.glb"],
   // Stock JK2, converted later than the rest of the base roster above.
   ["rodian.glb", "public/models/rodian.glb"],
   ["saber-hilt.glb", "public/models/saber-hilt.glb"],

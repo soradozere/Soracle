@@ -11,6 +11,7 @@
 // a private Supabase Storage bucket instead (see MODEL_BUCKET below).
 
 import { MODEL_SKINS } from "@/lib/model-skins"
+import { findAchievementDef } from "@/lib/achievement-meta"
 
 export const MODEL_BUCKET = "models"
 
@@ -87,6 +88,15 @@ export type PlayerModel = {
    * derived from array position.
    */
   custom?: boolean
+  /**
+   * Crest id + minimum rank (1-based, matching AchievementView.rank) that
+   * unlocks this model, or absent for every model everyone can already pick —
+   * which is still the default and the norm. Same shape as
+   * FLAG_VARIANT_UNLOCK/MINE_VARIANT_UNLOCK in lib/prop-assets.ts, kept
+   * separate rather than imported for the same reason those two are separate
+   * from each other: this catalogue is models-only.
+   */
+  unlockedBy?: { crest: string; tier: number }
 }
 
 /** Every model has a default; the variants come from the generated catalogue. */
@@ -284,6 +294,32 @@ export const PLAYER_MODELS: PlayerModel[] = [
     credit: "FetchD",
     custom: true,
   },
+  {
+    id: "jskellington",
+    label: "Jack Skellington",
+    file: "jskellington.glb",
+    skins: skinsFor("jskellington"),
+    credit: "Psyk0Sith",
+    custom: true,
+  },
+  {
+    id: "swoledor",
+    label: "Swoledor",
+    file: "swoledor.glb",
+    skins: skinsFor("swoledor"),
+    custom: true,
+    // "Kimbo Slice" — a single-rank crest, so tier 1 is its only rank.
+    unlockedBy: { crest: "kimbo-slice", tier: 1 },
+  },
+  {
+    id: "batman-beyond",
+    label: "Batman Beyond",
+    file: "batman-beyond.glb",
+    skins: skinsFor("batman-beyond"),
+    custom: true,
+    // "Wingman" — rank 2 of giga-teammate (rank 1 is "Giga Teammate" itself).
+    unlockedBy: { crest: "giga-teammate", tier: 2 },
+  },
   // Stock JK2, not fan-made — just never converted alongside the rest of the
   // base roster above. Its "Shadow" skin is a fan retexture (zzz_Crash.pk3,
   // internally named ShadowRodian) that turned out to share Rodian's exact
@@ -352,4 +388,32 @@ export function findModelSkin(model: PlayerModel | null, skinId: string | null |
  *  should leave old profiles rendering nothing, not erroring. */
 export function isKnownModel(id: string | null | undefined): boolean {
   return findPlayerModel(id) !== null
+}
+
+// --- Achievement gating -----------------------------------------------------
+//
+// Every model was free to everyone until Batman Beyond and Swoledor — the
+// norm stays "no unlock needed" (unlockedBy absent), this is the exception,
+// not a new default. Same shape as unlockedFlagVariants/unlockedThemes: a
+// model with no `unlockedBy` always passes; one with a crest+tier needs it
+// earned to at least that rank.
+
+/** The model ids a player is entitled to, from the ranks they've earned per
+ *  crest (achievement id → highest earned rank, 1-based). */
+export function unlockedModelIds(earnedCrestRanks: Map<string, number>): string[] {
+  return PLAYER_MODELS.filter((m) => {
+    const c = m.unlockedBy
+    return !c || (earnedCrestRanks.get(c.crest) ?? 0) >= c.tier
+  }).map((m) => m.id)
+}
+
+/** The name of the rank that unlocks a model, for a "you need to earn X" notice
+ *  on a locked one. Null for a free model (nothing to report) or an id we
+ *  don't recognise. */
+export function modelRequirementLabel(id: string): string | null {
+  const condition = findPlayerModel(id)?.unlockedBy
+  if (!condition) return null
+  const def = findAchievementDef(condition.crest)
+  if (!def) return null
+  return def.ranks?.[condition.tier - 1]?.title ?? def.title
 }
