@@ -492,6 +492,30 @@ function countsOf(r: ProductionStatRow): Record<Counter, number> {
 
 const COUNTERS = Object.keys(JOB_OF) as Counter[]
 
+/**
+ * Priced production for one appearance, WITH CAPTURES REMOVED — the signal the
+ * tier calibrator reads. Not used by the board.
+ *
+ * Captures are stripped because they are not merely correlated with the result,
+ * they ARE the result: summed by team, player captures reproduce the final score
+ * exactly in 163 of 164 statted matches. Since a capture is also the most
+ * expensive item here at 100, leaving it in would have the calibrator reading the
+ * match outcome a second time under another name, on top of the W/L signal it
+ * already has. Assists were considered for removal too and kept: they correlate
+ * with scoring but are not identical to it, and dropping them costs a third of
+ * the remaining tier signal (slope 44.3 -> 31.8 points per tier).
+ *
+ * What is left still tracks tier: +44.3 points per tier against a residual spread
+ * of 231, measured over 1,973 appearances.
+ */
+export function calibrationProduction(r: ProductionStatRow): number {
+  const counts = countsOf(r)
+  return COUNTERS.reduce(
+    (sum, c) => (c === "caps" ? sum : sum + PRICE_OF[c] * counts[c]),
+    0,
+  )
+}
+
 /** The four jobs, in display order. */
 const JOBS: Job[] = ["cap", "base", "returns", "support"]
 

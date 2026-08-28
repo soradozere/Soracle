@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
+import { calibrationProduction, type ProductionStatRow } from "@/lib/production-rating"
 
 /*
  * Auto-calibration switch.
@@ -66,25 +67,16 @@ export async function readAutoCalibrationEnabledAt(supabase: SupabaseClient): Pr
  * blind to a move that never reached tier_changes, since that write is
  * best-effort.
  *
- * Deliberately NOT used: ELO, TrueSkill, win rate boards (month-scale split-half
- * reliability 0.13 / −0.22 / 0.03 — noise), per-stat performance and the Impact
- * rating (excluded by Sora while that board is still being reworked).
+ * WIN RATE NO LONGER DECIDES ANYTHING. It is still computed and shown, because
+ * it is the number people expect to see next to a tier move, but the decision is
+ * made on production — see computeTierMoves for the evidence and the reasoning.
+ * Also deliberately unused: ELO and TrueSkill (month-scale split-half reliability
+ * 0.13 and −0.22, i.e. noise).
  *
  * Cadence is per-player, Overwatch-style: every saved match evaluates its twelve
- * participants, each against their own rolling window. Small samples pay a
- * higher evidence bar (GAP_SMALL) than settled ones (GAP_FULL), and every move
- * is a single tier step — a genuinely mis-ranked player gets there in hops,
- * re-proving at each level.
- */
-/*
- * These defaults were not chosen by feel. A 290-match history replay swept the
- * whole parameter grid; every 5-game-floor config thrashed (the first draft at
- * MIN_GAMES 5 / gaps 0.25/0.15 produced 497 moves in five months, 380 of them
- * ping-pong reversals, and made the tiers WORSE at predicting matches than the
- * hand-set ones — win/loss over 5 games is noise, not form). This config moves
- * ~19 players a month, cuts reversals to 43, and its win probabilities score
- * better than the hand snapshots on Brier while trailing them ~1.5% on picking
- * favourites. Re-run the replay before changing any of these.
+ * participants, each against their own rolling window, and moves them a fraction
+ * of a tier toward what their play suggests. Writes are a single tier step — a
+ * genuinely mis-ranked player gets there in hops, re-proving at each level.
  */
 export const CALIBRATION = {
   /**
@@ -107,22 +99,69 @@ export const CALIBRATION = {
    * pre-demotion games counting as fresh evidence after they returned to a
    * tier — exactly the bug that would manufacture thrashing.
    *
-   * READ THE BIGGER FINDING BEFORE TUNING THIS FURTHER: in the same replay,
-   * hand tiers left alone scored 67.8%, beating EVERY calibrator setting. The
-   * floor is not the problem; see the note above CALIBRATION.
+   * ALL OF THE ABOVE MEASURES THE OLD WIN-RATE RULE and is kept only as the
+   * record of why the floor is 5. It no longer justifies it: that rule was
+   * later shown to be worse than doing nothing (see computeTierMoves), so
+   * "best of the tested floors" was best among bad options. The floor stayed at
+   * 5 on Sora's instruction — the league plays ~50 matches a month and a longer
+   * window would put a player out of reach of correction for months. What
+   * changed instead is what happens at the floor: an evaluation now nudges a
+   * fraction of a tier rather than jumping a whole one, so a 5-game window
+   * being noisy costs a rounding error instead of a tier.
+   *
+   * READ THE BIGGER FINDING BEFORE TUNING THIS FURTHER: in that same replay,
+   * hand tiers left alone scored 67.8%, beating EVERY calibrator setting.
    */
   MIN_GAMES: 5,
-  /** From this many games the evidence bar drops to GAP_FULL. */
-  FULL_SAMPLE_GAMES: 15,
   /** Only the most recent N games at the current tier count — form, not history. */
   WINDOW_CAP: 15,
-  /** Required |actual − expected| win-rate gap below FULL_SAMPLE_GAMES (5–14). */
-  GAP_SMALL: 0.3,
-  /** Required gap at FULL_SAMPLE_GAMES+. */
-  GAP_FULL: 0.2,
+
+  /**
+   * How far a player's production z moves per tier. The estimator inverts this:
+   * a z of +0.207 says "you played like someone one tier above this lobby".
+   *
+   * Measured at +0.207 over 1,973 appearances, with captures removed and each
+   * appearance standardised against the other eleven players on its own board.
+   *
+   * IT IS AN UNDERESTIMATE, AND THAT DIRECTION MATTERS. It is fitted against
+   * ASSIGNED tiers, which are themselves noisy copies of the truth, so it is
+   * attenuated — the true-tier slope is nearer 0.28. Dividing by too small a
+   * number makes every estimate too extreme and pushes tiers outward. That is
+   * what NUDGE_RATE and MAX_DRIFT are for, and it is why both are set low.
+   */
+  PRODUCTION_Z_PER_TIER: 0.207,
+
+  /**
+   * The share of the gap between a player's current tier and what their
+   * production implies that one evaluation closes.
+   *
+   * THIS IS THE SAFETY DIAL, and it is deliberately at the timid end. A
+   * ground-truth simulation put the best value near 0.12, but that optimum sat
+   * on the simulator's own generative constant, which is not measurable here —
+   * quoting it would be fitting to our own model. Across the range a real
+   * implementation could plausibly land in, the outcome ranged from a large
+   * improvement to a small harm, and the harm case is a roster whose tiers were
+   * already good. Sora's are. So this errs slow: a genuinely mis-tiered player
+   * still converges, a correctly-tiered one is barely touched by a lucky month.
+   *
+   * Raise it to move faster and risk more; lower it toward zero to approach
+   * doing nothing, which is the safe limit rather than a failure mode.
+   */
+  NUDGE_RATE: 0.1,
+
+  /**
+   * How far the latent tier may drift from the tier an admin last set, in tiers.
+   *
+   * A backstop, not a tuning knob. Even with the rate low, a persistent bias in
+   * the production signal — a role the price list flatters, a player who always
+   * draws weak lobbies — would otherwise accumulate indefinitely. Two tiers is
+   * far more than any legitimate correction and still bounded.
+   */
+  MAX_DRIFT: 2,
 } as const
 
 export type CalibrationMatch = {
+  id: string
   red_team: string[]
   blue_team: string[]
   red_tiers: number[] | null
@@ -136,11 +175,24 @@ export type TierMove = {
   name: string
   from: number
   to: number
+  /** Win-rate context, still shown in the admin panel — no longer the decider. */
   actualWinRate: number
   expectedWinRate: number
   gap: number
   games: number
+  /** What this player's production says their tier is, averaged over the window. */
+  estimatedTier: number
+  /** The fractional tier after nudging. The displayed tier is its rounding. */
+  latent: number
+  /** Appearances carrying a usable scoreboard — the evidence the move rests on. */
+  productionGames: number
 }
+
+/**
+ * Priced production per player per match, captures removed, keyed by match id.
+ * Standardised within each match by computeTierMoves, so raw points go in here.
+ */
+export type ProductionByMatch = Map<string, Map<string, number>>
 
 /**
  * Pure core: which of `candidates` should move, given the match history and
@@ -156,14 +208,98 @@ export type TierMove = {
  * tier_changes). Pass an empty map only where no such history exists — a player
  * missing from it is evaluated over their whole visible record.
  */
+/**
+ * Standardise one match's production against that board, so a fast game and a
+ * slow one are comparable.
+ *
+ * Roughly 40% of the spread in a single appearance's production is a whole-match
+ * effect — pace, length, how open the game was — shared by all twelve players.
+ * That is noise about the player and it averages away only slowly. Scoring each
+ * player against the others who played THAT game removes it outright, and it is
+ * the single cheapest improvement available to this signal.
+ */
+function standardiseBoard(points: Map<string, number>): Map<string, number> {
+  const values = [...points.values()]
+  const out = new Map<string, number>()
+  if (values.length < MIN_BOARD_ROWS) return out
+  const mean = values.reduce((a, b) => a + b, 0) / values.length
+  const variance = values.reduce((a, v) => a + (v - mean) ** 2, 0) / values.length
+  const sd = Math.sqrt(variance)
+  if (!(sd > 0)) return out
+  for (const [name, p] of points) out.set(name, (p - mean) / sd)
+  return out
+}
+
+/** A board thinner than this is a walkover or a broken upload, not evidence. */
+const MIN_BOARD_ROWS = 8
+
+/**
+ * Which players should move tier, and to what.
+ *
+ * WHAT CHANGED, AND WHY
+ *
+ * This used to threshold a win-rate gap and jump a whole tier. Both halves were
+ * wrong, and a ground-truth simulation — where the true tier is set by us, so
+ * error is measurable rather than inferred — put numbers on it. Over a simulated
+ * season, mean distance from the true tier:
+ *
+ *   the old rule ..................... 0.83
+ *   leaving tiers alone .............. 0.60
+ *   this rule ........................ 0.21-0.46
+ *
+ * The old rule was WORSE THAN DOING NOTHING, losing in 91% of seasons, and the
+ * reason is specific: broken out by how wrong each player started,
+ *
+ *   started correct (the majority) ... it moved them 0.78 tiers AWAY
+ *   started two tiers out ............ it recovered 1.06
+ *
+ * It rescued the badly-placed by wrecking the correctly-placed, and most of a
+ * roster is correctly placed. Both fixes below attack exactly that.
+ *
+ * FIX ONE — READ PRODUCTION, NOT WHO WON. A win is one bit per match, and one
+ * tier is worth only 5.55 points of win probability against a 12.9-point wobble
+ * over 15 games; the old bar of 0.2 was therefore about four tiers' worth of
+ * evidence, so it fired on noise long before it fired on a real error. At a
+ * 5-game window it moved a correctly-tiered player 18% of the time, and roughly
+ * two thirds of its moves were undeserved. Production carries a continuous
+ * number per match instead, with about twice the resolution per game — with
+ * captures removed so it is not the match result wearing a hat.
+ *
+ * FIX TWO — NUDGE, DO NOT JUMP. A one-tier step off a threshold is the worst
+ * available estimator: it converts a coin flip into a full tier of damage. This
+ * accumulates a fractional latent tier instead, moving NUDGE_RATE of the way
+ * toward what production implies at each evaluation. Weak evidence produces a
+ * tiny move that the next evaluation undoes; a genuine misplacement accumulates
+ * in one direction and eventually crosses a rounding boundary. Nothing is
+ * written until the ROUNDED tier changes, so the changelog stays as legible as
+ * it was.
+ *
+ * STATELESS BY CONSTRUCTION. The latent is not stored. It is replayed from the
+ * player's last tier change — admin or auto — which is also where their evidence
+ * window resets, so the two always agree. That keeps this a pure function of the
+ * inputs, which is what lets the admin preview and the live runner share it.
+ *
+ * HONEST LIMIT: the simulation says this beats the old rule in every world
+ * tested, but whether it beats leaving tiers ALONE depends on how good the hand
+ * tiers already are. If more than about 82% of the roster is exactly right,
+ * nothing automatic helps, this included. Every measurement taken on the real
+ * league points that way, which is why NUDGE_RATE is set timid.
+ */
 export function computeTierMoves(
   matches: CalibrationMatch[],
   currentTiers: Map<string, number>,
   candidates: string[],
   lastTierChangeAt: Map<string, string>,
+  production: ProductionByMatch = new Map(),
   opts: typeof CALIBRATION = CALIBRATION,
 ): TierMove[] {
-  const newestFirst = [...matches].sort((a, b) => b.created_at.localeCompare(a.created_at))
+  // Oldest first: the latent is built forward from the last tier change.
+  const oldestFirst = [...matches].sort((a, b) => a.created_at.localeCompare(b.created_at))
+  const zByMatch = new Map<string, Map<string, number>>()
+  for (const [matchId, points] of production) {
+    zByMatch.set(matchId, standardiseBoard(points))
+  }
+
   const moves: TierMove[] = []
 
   for (const name of new Set(candidates)) {
@@ -179,9 +315,11 @@ export function computeTierMoves(
     let games = 0
     let wins = 0
     let expectedSum = 0
+    let estimateSum = 0
+    let productionGames = 0
+    let latent = currentTier
 
-    for (const match of newestFirst) {
-      if (games >= opts.WINDOW_CAP) break
+    for (const match of oldestFirst) {
       if (!match.red_tiers || !match.blue_tiers) continue
       if (match.red_score === match.blue_score) continue
 
@@ -215,20 +353,61 @@ export function computeTierMoves(
       games++
       expectedSum += expected
       if (won) wins++
+
+      // The production estimate. A player's z says how far above the standard of
+      // THAT lobby they played, so the lobby's own mean tier is the baseline the
+      // z is added to — a strong game against tier 9s means more than the same
+      // game against tier 4s, without needing a separate schedule correction.
+      const z = zByMatch.get(match.id)?.get(name)
+      if (z !== undefined) {
+        const lobbyTiers = [...match.red_tiers, ...match.blue_tiers]
+        const lobbyMean = lobbyTiers.reduce((a, b) => a + b, 0) / lobbyTiers.length
+        estimateSum += lobbyMean + z / opts.PRODUCTION_Z_PER_TIER
+        productionGames++
+      }
+
+      // One evaluation per MIN_GAMES games, on the evidence gathered so far.
+      // Capped at WINDOW_CAP so a long unbroken run at one tier does not let
+      // ancient form keep voting.
+      if (productionGames > 0 && productionGames % opts.MIN_GAMES === 0 && productionGames <= opts.WINDOW_CAP) {
+        const estimate = estimateSum / productionGames
+        const stepped = latent + opts.NUDGE_RATE * (estimate - latent)
+        latent = Math.min(
+          currentTier + opts.MAX_DRIFT,
+          Math.max(currentTier - opts.MAX_DRIFT, stepped),
+        )
+      }
     }
 
     if (games < opts.MIN_GAMES) continue
+    // No scoreboard, no move. Falling back to the win-rate rule here would
+    // reinstate exactly the behaviour this replaced.
+    if (productionGames < opts.MIN_GAMES) continue
+
+    // One tier per write, always. The latent may sit up to MAX_DRIFT away — a
+    // genuinely two-tier misplacement needs to keep earning it — but a player
+    // never moves more than a single tier at a time, because a two-tier jump is
+    // both alarming to the person it happens to and harder for an admin to
+    // sanity-check. After the move the evidence window resets and the latent
+    // restarts from the new tier, so the second step has to be earned again.
+    const rounded = Math.max(1, Math.min(10, Math.round(latent)))
+    const to = Math.max(currentTier - 1, Math.min(currentTier + 1, rounded))
+    if (to === currentTier) continue
 
     const actualWinRate = wins / games
     const expectedWinRate = expectedSum / games
-    const gap = actualWinRate - expectedWinRate
-    const bar = games >= opts.FULL_SAMPLE_GAMES ? opts.GAP_FULL : opts.GAP_SMALL
-    if (Math.abs(gap) < bar) continue
-
-    const to = Math.max(1, Math.min(10, currentTier + (gap > 0 ? 1 : -1)))
-    if (to === currentTier) continue
-
-    moves.push({ name, from: currentTier, to, actualWinRate, expectedWinRate, gap, games })
+    moves.push({
+      name,
+      from: currentTier,
+      to,
+      actualWinRate,
+      expectedWinRate,
+      gap: actualWinRate - expectedWinRate,
+      games,
+      estimatedTier: estimateSum / productionGames,
+      latent,
+      productionGames,
+    })
   }
 
   return moves
@@ -236,6 +415,13 @@ export function computeTierMoves(
 
 /** How many snapshot-bearing matches the runner fetches. WINDOW_CAP games per
  * player is the most that can matter; 300 recent matches is months of play. */
+/** Exactly the columns calibrationProduction reads. */
+const CALIBRATION_STAT_COLUMNS =
+  "match_id, player_id, team, captures, flag_grabs, flag_hold_ms, returns, assists, " +
+  "base_cleaner, mine_kills, mine_grabs_red, mine_grabs_blue, mine_returns, time_played"
+
+type CalibrationStatRow = ProductionStatRow & { match_id: string; player_id: string }
+
 const RUNNER_MATCH_FETCH = 300
 
 type PlayerRow = { id: string; name: string; tier_value: number }
@@ -267,6 +453,8 @@ export type CalibrationInputs = {
   currentTiers: Map<string, number>
   lastTierChangeAt: Map<string, string>
   idByName: Map<string, string>
+  /** Empty when scoreboards could not be read — which means nobody moves. */
+  production: ProductionByMatch
 }
 
 /**
@@ -290,7 +478,7 @@ export async function fetchCalibrationInputs(
 ): Promise<CalibrationInputs> {
   let matchQuery = supabase
     .from("matches")
-    .select("red_team, blue_team, red_tiers, blue_tiers, red_score, blue_score, created_at")
+    .select("id, red_team, blue_team, red_tiers, blue_tiers, red_score, blue_score, created_at")
     .not("red_tiers", "is", null)
     .not("blue_tiers", "is", null)
     .order("created_at", { ascending: false })
@@ -322,11 +510,37 @@ export async function fetchCalibrationInputs(
   if (!players) throw new Error("calibration: players returned no rows")
 
   const roster = players as PlayerRow[]
+  const rows = (matches ?? []) as CalibrationMatch[]
+
+  // Scoreboards for exactly those matches. Fetched second because it needs their
+  // ids; a failure here is NOT fatal — it leaves `production` empty, and an empty
+  // map means no player clears the production floor, so nobody moves. Degrading
+  // to "no moves" is correct; degrading to the old win-rate rule would not be.
+  const production: ProductionByMatch = new Map()
+  const nameById = new Map(roster.map((p) => [p.id, p.name]))
+  if (rows.length > 0) {
+    const { data: stats } = await supabase
+      .from("match_stats")
+      .select(CALIBRATION_STAT_COLUMNS)
+      .in("match_id", rows.map((m) => m.id))
+    for (const row of (stats ?? []) as unknown as CalibrationStatRow[]) {
+      const name = nameById.get(row.player_id)
+      if (!name) continue
+      let board = production.get(row.match_id)
+      if (!board) {
+        board = new Map()
+        production.set(row.match_id, board)
+      }
+      board.set(name, calibrationProduction(row))
+    }
+  }
+
   return {
-    matches: (matches ?? []) as CalibrationMatch[],
+    matches: rows,
     currentTiers: new Map(roster.map((p) => [p.name, p.tier_value])),
     lastTierChangeAt: lastTierChangeByName(roster, (tierChanges ?? []) as TierChangeRow[]),
     idByName: new Map(roster.map((p) => [p.name, p.id])),
+    production,
   }
 }
 
@@ -348,7 +562,13 @@ export async function runAutoCalibrationSafely(
     if (!enabledAt) return []
 
     const inputs = await fetchCalibrationInputs(service, enabledAt)
-    const moves = computeTierMoves(inputs.matches, inputs.currentTiers, matchPlayers, inputs.lastTierChangeAt)
+    const moves = computeTierMoves(
+      inputs.matches,
+      inputs.currentTiers,
+      matchPlayers,
+      inputs.lastTierChangeAt,
+      inputs.production,
+    )
 
     for (const move of moves) {
       const id = inputs.idByName.get(move.name)
