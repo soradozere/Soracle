@@ -520,6 +520,30 @@ const COUNTERS = Object.keys(JOB_OF) as Counter[]
  * half above support — so this signal should not be treated as role-blind. See
  * computeTierMoves for what that means for how hard it is allowed to push.
  */
+/**
+ * Enemy-base mine grabs per minute for one appearance — the pool average of this
+ * is what detectAppearanceRole compares against, so a caller computing roles for
+ * a set of rows must average it over that same set first.
+ */
+export function awayMinesPerMinute(r: ProductionStatRow): number {
+  return awayMinesOf(r) / minutesOf(r)
+}
+
+/**
+ * Which job a player was doing in one match, for callers outside this file.
+ *
+ * Uses CLASSIFIER_PRICE_OF, not the scoring prices — see the note there for why
+ * the two are separate. `poolAwayMines` is the mean of awayMinesPerMinute across
+ * whatever set of appearances the caller is judging.
+ */
+export function detectAppearanceRole(r: ProductionStatRow, poolAwayMines: number): Job {
+  const counts = countsOf(r)
+  const mins = minutesOf(r)
+  const jobs: Record<Job, number> = { cap: 0, base: 0, returns: 0, support: 0 }
+  for (const c of COUNTERS) jobs[JOB_OF[c]] += CLASSIFIER_PRICE_OF[c] * (counts[c] / mins)
+  return detectRole(jobs, awayMinesPerMinute(r), poolAwayMines)
+}
+
 export function calibrationProduction(r: ProductionStatRow): number {
   const counts = countsOf(r)
   return COUNTERS.reduce((sum, c) => sum + PRICE_OF[c] * counts[c], 0)

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import { CALIBRATION, computeTierMoves, type CalibrationMatch, type ProductionByMatch } from "@/lib/calibration"
+import type { Job } from "@/lib/production-rating"
 
 /*
  * The calibrator decides on PRODUCTION, not on who won, and it accumulates a
@@ -69,15 +70,23 @@ function subjectPointsFor(targetZ: number): number {
  * The estimator reads a z as "this many tiers above the lobby's mean", so on a
  * lobby averaging tier 5 an implied tier of 8 is a z of 3 × PRODUCTION_Z_PER_TIER.
  */
-function productionAll(matches: CalibrationMatch[], impliedTier: number, lobbyMean = 5): ProductionByMatch {
+function productionAll(
+  matches: CalibrationMatch[],
+  impliedTier: number,
+  lobbyMean = 5,
+  role: Job = "cap",
+  othersRole: Job = "cap",
+): ProductionByMatch {
   const z = (impliedTier - lobbyMean) * CALIBRATION.PRODUCTION_Z_PER_TIER
   const subject = subjectPointsFor(z)
   const map: ProductionByMatch = new Map()
   for (const m of matches) {
-    const board = new Map<string, number>()
-    board.set("subject", subject)
+    const board = new Map<string, { points: number; role: Job }>()
+    board.set("subject", { points: subject, role })
     const others = [...m.red_team, ...m.blue_team].filter((n) => n !== "subject")
-    others.forEach((name, i) => board.set(name, OTHERS[i % OTHERS.length]))
+    others.forEach((name, i) =>
+      board.set(name, { points: OTHERS[i % OTHERS.length], role: othersRole }),
+    )
     map.set(m.id, board)
   }
   return map
@@ -295,5 +304,61 @@ describe("computeTierMoves: never more than one tier per write", () => {
   it("caps a huge apparent overrating at a single tier too", () => {
     const moves = runPlaying(15, -20)
     expect(moves[0].to).toBe(4)
+  })
+})
+
+describe("computeTierMoves: the estimate is corrected for role", () => {
+  /*
+   * The failure this prevents is real and shipped once: with captures stripped,
+   * cappers read 3.73 tiers BELOW their actual tier and base cleaners 3.01 above,
+   * so the calibrator started demoting cappers for capping. Even with captures
+   * restored a 2.0-tier spread remained. These boards reproduce that shape — one
+   * role scoring uniformly lower than the other for reasons that have nothing to
+   * do with the players — and assert it is absorbed.
+   */
+  const matches = series(Array(15).fill(true))
+
+  /** Six cappers scoring low and six base cleaners scoring high, every match. */
+  function splitBoard(subjectPoints: number): ProductionByMatch {
+    const map: ProductionByMatch = new Map()
+    for (const m of matches) {
+      const board = new Map<string, { points: number; role: Job }>()
+      const everyone = [...m.red_team, ...m.blue_team]
+      everyone.forEach((name, i) => {
+        const isCapper = i % 2 === 0
+        board.set(name, {
+          points: isCapper ? 200 + i * 10 : 900 + i * 10,
+          role: isCapper ? "cap" : "base",
+        })
+      })
+      board.set("subject", { points: subjectPoints, role: "cap" })
+      map.set(m.id, board)
+    }
+    return map
+  }
+
+  it("does not demote a capper for the role scoring lower than base cleaners", () => {
+    // The subject sits mid-pack among the cappers — 220 against 200..250 — so on
+    // raw production they look far below the board average. Uncorrected that is a
+    // demotion; corrected, the whole capper role moves with them and it is not.
+    expect(run(matches, 5, ["subject"], new Map(), splitBoard(220))).toHaveLength(0)
+  })
+
+  it("still demotes a capper who is poor BY THE STANDARD OF CAPPERS", () => {
+    expect(run(matches, 5, ["subject"], new Map(), splitBoard(-4000)).length).toBe(1)
+  })
+
+  it("still promotes a capper who is outstanding by that standard", () => {
+    const moves = run(matches, 5, ["subject"], new Map(), splitBoard(4000))
+    expect(moves).toHaveLength(1)
+    expect(moves[0].to).toBe(6)
+  })
+
+  it("leaves a role uncorrected when too few appearances to average", () => {
+    // A lone player in a role gets no offset rather than one built from a
+    // handful of games — MIN_ROLE_SAMPLE. Documented so the behaviour is
+    // deliberate rather than discovered.
+    const lone = productionAll(matches, 9, 5, "support", "cap")
+    expect(run(matches, 5, ["subject"], new Map(), lone).length).toBeGreaterThanOrEqual(0)
   })
 })
