@@ -176,6 +176,39 @@ function JobBar({ row }: { row: ProductionRow }) {
   )
 }
 
+/**
+ * Each job's share of a player's rating, as whole percentages that sum to 100.
+ *
+ * The Combined table's job columns used to be per-job RATINGS, each standardised
+ * against that job's own spread. They were never addends -- "50" stood for a
+ * different number of points in every column -- but they looked like addends, and
+ * on August adding them up contradicted the actual ranking for 21% of player
+ * pairs: fetchd sat 1st on a column sum of 204 while shax sat 10th on 213.
+ *
+ * Shares cannot do that. They answer the question this view is for -- what is this
+ * rating made of -- and nobody reads a percentage as a skill score. How good a
+ * player is at a job COMPARED TO OTHERS DOING IT is a different question, and it
+ * has its own view: By role.
+ *
+ * Largest-remainder rounding, because "sums to 100" is the entire point and naive
+ * rounding lands on 99 or 101 often enough to undermine it.
+ */
+function jobShares(row: ProductionRow): Record<Job, number> {
+  const total = JOBS.reduce((t, j) => t + row.jobs[j], 0)
+  if (!(total > 0)) return { cap: 0, base: 0, returns: 0, support: 0 }
+
+  const exact = JOBS.map((job) => ({ job, value: (row.jobs[job] / total) * 100 }))
+  const out = { cap: 0, base: 0, returns: 0, support: 0 } as Record<Job, number>
+  for (const { job, value } of exact) out[job] = Math.floor(value)
+
+  let short = 100 - JOBS.reduce((t, j) => t + out[j], 0)
+  const byRemainder = [...exact].sort(
+    (a, b) => (b.value - Math.floor(b.value)) - (a.value - Math.floor(a.value)),
+  )
+  for (let i = 0; short > 0; i++, short--) out[byRemainder[i % byRemainder.length].job]++
+  return out
+}
+
 /** Everything one fetch returns, kept so the day cursor can re-slice it locally. */
 interface Fetched {
   matches: MatchRow[]
@@ -774,14 +807,21 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                     W-L
                   </th>
                   <th className="px-2 py-2 font-medium min-w-[160px]">Roles played</th>
-                  {JOBS.map((job) => (
+                  {JOBS.map((job, i) => (
                     <th
                       key={job}
                       className="px-2 py-2 font-medium text-center"
                       style={{ color: JOB_COLOURS[job] }}
-                      title={JOB_DETAIL[job]}
+                      title={`${JOB_DETAIL[job]} — shown as a share of the rating, so the four add to 100%`}
                     >
                       {JOB_LABELS[job]}
+                      {/* Said once, over the first column, so the row of numbers
+                          reads as a breakdown rather than four separate scores. */}
+                      {i === 0 && (
+                        <span className="block text-[10px] font-normal normal-case tracking-normal text-[var(--color-text-dim)]">
+                          share of rating →
+                        </span>
+                      )}
                     </th>
                   ))}
                 </tr>
@@ -823,27 +863,47 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                     <td className="px-2 py-1.5">
                       <JobBar row={row} />
                     </td>
-                    {JOBS.map((job) => (
-                      <td
-                        key={job}
-                        className="px-2 py-1.5 text-center font-mono tabular-nums"
-                        style={{
-                          color:
-                            row.roleRatings[job] == null
-                              ? "var(--color-border)"
-                              : (row.roleRatings[job] ?? 0) >= 62
-                                ? JOB_COLOURS[job]
-                                : "var(--color-text-dim)",
-                        }}
-                        title={
-                          row.roleRatings[job] != null
-                            ? `${JOB_LABELS[job]} ${row.roleRatings[job]} across ${row.rolesPlayed[job]} matches in that role — ${jobDetail(row, job)}`
-                            : `Barely played this job — ${jobDetail(row, job)}. Costs nothing.`
-                        }
-                      >
-                        {row.roleRatings[job] ?? "–"}
-                      </td>
-                    ))}
+                    {/* ACROSS EVERY MATCH, not only the ones where this was the
+                        player's main job — jobRatings, not roleRatings.
+
+                        These columns used to show the by-role figure, and it made
+                        the table contradict itself. A player who returns heavily
+                        in every match without returning ever being their MAIN job
+                        that game showed a dash under Return, while a player who
+                        returned less overall showed a number off the four matches
+                        where it happened to be their main job. On August that put
+                        original above Interlude on the total with a dash in the
+                        column carrying his second-biggest contribution: 245 points
+                        a match against 204, displayed as nothing at all.
+
+                        The by-role view answers "who is the best BC", and it still
+                        does, on the By role tab. This column has to answer "what is
+                        this player's rating made of", so it has to count every
+                        match. */}
+                    {(() => {
+                      const shares = jobShares(row)
+                      return JOBS.map((job) => (
+                        <td
+                          key={job}
+                          className="px-2 py-1.5 text-center font-mono tabular-nums"
+                          style={{
+                            color:
+                              shares[job] === 0
+                                ? "var(--color-border)"
+                                : shares[job] >= 30
+                                  ? JOB_COLOURS[job]
+                                  : "var(--color-text-dim)",
+                          }}
+                          title={
+                            shares[job] > 0
+                              ? `${shares[job]}% of ${row.name}'s rating, across all ${row.games} matches — ${jobDetail(row, job)}. For how they compare against others whose main job this was, see By role.`
+                              : `Did none of this job — ${jobDetail(row, job)}. Costs nothing.`
+                          }
+                        >
+                          {shares[job] > 0 ? `${shares[job]}%` : "–"}
+                        </td>
+                      ))
+                    })()}
                   </tr>
                   )
                 })}
@@ -854,10 +914,15 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
           </div>
 
           <p className="text-xs italic text-[var(--color-text-dim)]">
-            Every number on this board is the same scale: 50 is an average month, 62 is one
-            standard deviation above. The four job columns each say how you did at that job
-            specifically, so Base 88 means the same thing as Cap 88. A low one means you did
-            little of that job, never a penalty. Hover any of them for the real per-game numbers.
+            Rating is on a fixed scale: 50 is an average month, 62 is one standard deviation
+            above. The four job columns are shares of that rating and add up to 100% — they say
+            what a player&rsquo;s month was <em>made of</em>, not how good they are at each job.
+            A low share means they did little of that job, never a penalty. For how someone
+            compares against others whose main job it was, use <strong>By role</strong>, which
+            rates each job properly within its own cohort. The two answer different questions:
+            a player can contribute more returning than someone rated higher there, by doing it
+            in every game rather than as their main job in a few. Hover any column for the real
+            per-game numbers.
           </p>
         </>
       )}
