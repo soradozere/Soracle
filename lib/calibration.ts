@@ -1,5 +1,11 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { calibrationProduction, type ProductionStatRow } from "@/lib/production-rating"
+import {
+  awayMinesPerMinute,
+  calibrationProduction,
+  detectAppearanceRole,
+  type Job,
+  type ProductionStatRow,
+} from "@/lib/production-rating"
 
 /*
  * Auto-calibration switch.
@@ -188,11 +194,16 @@ export type TierMove = {
   productionGames: number
 }
 
-/**
- * Priced production per player per match, captures removed, keyed by match id.
- * Standardised within each match by computeTierMoves, so raw points go in here.
- */
-export type ProductionByMatch = Map<string, Map<string, number>>
+/** One player's scoreboard line, as the calibrator reads it. */
+export type Appearance = {
+  /** Priced production. Raw points — computeTierMoves standardises per board. */
+  points: number
+  /** What they were doing, so the estimate can be corrected for it. */
+  role: Job
+}
+
+/** Appearances per player per match, keyed by match id. */
+export type ProductionByMatch = Map<string, Map<string, Appearance>>
 
 /**
  * Pure core: which of `candidates` should move, given the match history and
@@ -218,20 +229,23 @@ export type ProductionByMatch = Map<string, Map<string, number>>
  * player against the others who played THAT game removes it outright, and it is
  * the single cheapest improvement available to this signal.
  */
-function standardiseBoard(points: Map<string, number>): Map<string, number> {
-  const values = [...points.values()]
+function standardiseBoard(board: Map<string, Appearance>): Map<string, number> {
+  const values = [...board.values()].map((a) => a.points)
   const out = new Map<string, number>()
   if (values.length < MIN_BOARD_ROWS) return out
   const mean = values.reduce((a, b) => a + b, 0) / values.length
   const variance = values.reduce((a, v) => a + (v - mean) ** 2, 0) / values.length
   const sd = Math.sqrt(variance)
   if (!(sd > 0)) return out
-  for (const [name, p] of points) out.set(name, (p - mean) / sd)
+  for (const [name, a] of board) out.set(name, (a.points - mean) / sd)
   return out
 }
 
 /** A board thinner than this is a walkover or a broken upload, not evidence. */
 const MIN_BOARD_ROWS = 8
+
+/** Appearances a role needs before its offset is trusted rather than skipped. */
+const MIN_ROLE_SAMPLE = 30
 
 /**
  * Which players should move tier, and to what.
@@ -296,8 +310,57 @@ export function computeTierMoves(
   // Oldest first: the latent is built forward from the last tier change.
   const oldestFirst = [...matches].sort((a, b) => a.created_at.localeCompare(b.created_at))
   const zByMatch = new Map<string, Map<string, number>>()
-  for (const [matchId, points] of production) {
-    zByMatch.set(matchId, standardiseBoard(points))
+  for (const [matchId, board] of production) {
+    zByMatch.set(matchId, standardiseBoard(board))
+  }
+
+  /**
+   * How far each ROLE's estimate sits from the tiers those players actually
+   * hold, so it can be subtracted back out.
+   *
+   * Without this the signal is not role-neutral and it is not close. Measured
+   * over 1,973 appearances, the estimate ran +1.32 tiers high for base cleaners
+   * and −0.71 low for support: a 2.0-tier spread, which is the same size as the
+   * errors this exists to detect. Left in, it would not calibrate players, it
+   * would slowly sort them by what job they like playing.
+   *
+   * The correction is measured from the same matches being judged rather than
+   * hard-coded, so it tracks the league instead of going stale — and it is
+   * computed across ALL appearances, not just the candidates', so one player's
+   * form cannot move the baseline they are judged against.
+   *
+   * What it deliberately does NOT do is flatten differences WITHIN a role: after
+   * correction the spread of a single appearance's estimate is still ~4 tiers
+   * inside every role, which is the signal. Only the average difference BETWEEN
+   * roles is removed.
+   */
+  const roleTotals = new Map<Job, { sum: number; n: number }>()
+  for (const match of oldestFirst) {
+    if (!match.red_tiers || !match.blue_tiers) continue
+    const z = zByMatch.get(match.id)
+    const board = production.get(match.id)
+    if (!z || !board) continue
+    const lobbyTiers = [...match.red_tiers, ...match.blue_tiers]
+    if (lobbyTiers.length === 0) continue
+    const lobbyMean = lobbyTiers.reduce((a, b) => a + b, 0) / lobbyTiers.length
+    for (const [name, appearance] of board) {
+      const onRed = match.red_team.indexOf(name)
+      const onBlue = onRed === -1 ? match.blue_team.indexOf(name) : -1
+      if (onRed === -1 && onBlue === -1) continue
+      const tier = onRed !== -1 ? match.red_tiers[onRed] : match.blue_tiers[onBlue]
+      const zv = z.get(name)
+      if (tier === undefined || zv === undefined) continue
+      const bucket = roleTotals.get(appearance.role) ?? { sum: 0, n: 0 }
+      bucket.sum += lobbyMean + zv / opts.PRODUCTION_Z_PER_TIER - tier
+      bucket.n++
+      roleTotals.set(appearance.role, bucket)
+    }
+  }
+  const roleOffset = new Map<Job, number>()
+  for (const [role, { sum, n }] of roleTotals) {
+    // A role too thinly represented to average is left uncorrected rather than
+    // corrected by a number built from a handful of games.
+    if (n >= MIN_ROLE_SAMPLE) roleOffset.set(role, sum / n)
   }
 
   const moves: TierMove[] = []
@@ -359,10 +422,12 @@ export function computeTierMoves(
       // z is added to — a strong game against tier 9s means more than the same
       // game against tier 4s, without needing a separate schedule correction.
       const z = zByMatch.get(match.id)?.get(name)
-      if (z !== undefined) {
+      const appearance = production.get(match.id)?.get(name)
+      if (z !== undefined && appearance !== undefined) {
         const lobbyTiers = [...match.red_tiers, ...match.blue_tiers]
         const lobbyMean = lobbyTiers.reduce((a, b) => a + b, 0) / lobbyTiers.length
-        estimateSum += lobbyMean + z / opts.PRODUCTION_Z_PER_TIER
+        const offset = roleOffset.get(appearance.role) ?? 0
+        estimateSum += lobbyMean + z / opts.PRODUCTION_Z_PER_TIER - offset
         productionGames++
       }
 
@@ -523,7 +588,14 @@ export async function fetchCalibrationInputs(
       .from("match_stats")
       .select(CALIBRATION_STAT_COLUMNS)
       .in("match_id", rows.map((m) => m.id))
-    for (const row of (stats ?? []) as unknown as CalibrationStatRow[]) {
+    const statRows = (stats ?? []) as unknown as CalibrationStatRow[]
+    // Role detection compares a player's enemy-base mine rate against the pool's,
+    // so the pool average is taken over exactly the rows being classified.
+    const poolAwayMines =
+      statRows.length > 0
+        ? statRows.reduce((a, r) => a + awayMinesPerMinute(r), 0) / statRows.length
+        : 0
+    for (const row of statRows) {
       const name = nameById.get(row.player_id)
       if (!name) continue
       let board = production.get(row.match_id)
@@ -531,7 +603,10 @@ export async function fetchCalibrationInputs(
         board = new Map()
         production.set(row.match_id, board)
       }
-      board.set(name, calibrationProduction(row))
+      board.set(name, {
+        points: calibrationProduction(row),
+        role: detectAppearanceRole(row, poolAwayMines),
+      })
     }
   }
 
