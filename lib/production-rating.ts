@@ -23,7 +23,7 @@
  *
  * Production is the half the draw cannot equalise, so this board rates that alone.
  *
- * WHY PER-MINUTE COUNTS, NOT Z-SCORES
+ * WHY NON-NEGATIVE COUNTS, NOT Z-SCORES
  *
  * The obvious build -- z-score each job and add them up -- is wrong in a way that
  * looks fine until you read the board. A z-score measures distance from average, so
@@ -35,53 +35,33 @@
  * -0.66 on base-cleaning does not mean he cleans badly; it means he was in the enemy
  * base, capping, which is the job.
  *
- * Counting events per minute has no such floor: doing none of something scores zero,
- * not negative. Nothing cancels, the specialist keeps his strength, and a player who
+ * Counting priced events has no such floor: doing none of something scores zero, not
+ * negative. Nothing cancels, the specialist keeps his strength, and a player who
  * split a match between two jobs lands in the same range instead of 1.3 sd below
  * both specialists -- one change fixing both failure modes.
  *
- * NO ROLE IS EVER DETECTED AT SCORING TIME. Role groups appear only in the offline
- * calibration that set PRICES below. Nobody is classified when they are ranked, so
- * swapping role mid-match costs nothing.
+ * TOTALS, NOT RATES. A match total, averaged over matches played. Impact means impact
+ * on the match, so half a match of work is half the impact; and averaging over
+ * matches means turning up more often earns nothing. See the note in `scored`.
+ *
+ * NO ROLE IS DETECTED WHEN THE COMBINED BOARD IS SCORED. Every player has all four
+ * jobs priced additively, so nobody is classified where they are ranked and swapping
+ * role mid-match costs nothing. Detection exists (detectRole, CLASSIFIER_PRICE_OF)
+ * but feeds only the By-role tables and the roles-played bar. Changing it cannot move
+ * the combined ordering -- verified, not assumed.
  *
  * WHERE THE PRICES COME FROM
  *
- * Sora ranked the stats by value, most to least: capture, return, BC kill, MINE GRAB,
- * assist, flag grab, mine kill/return, flag hold. That ordering is a judgement about
- * JK2 and is taken as given -- it cannot be derived here, because the only objective
- * arbiter (does it win games) has no signal in a league this balanced.
+ * They are FITTED to Sora's own judgement of real games, not chosen. Ten scoreboards
+ * were labelled player by player into four impact buckets, giving 121 rated rows and
+ * 464 within-match "A had more impact than B" pairs; the prices are the ones that
+ * best order those pairs. Full derivation, measurements and caveats are on PRICES.
  *
- * Mine grabs were moved up from 6th to 4th deliberately, to close a support deficit:
- * a support player's whole measurable output is mine grabs and mine returns, so
- * pricing those near the bottom rated support mains near the bottom. Moving them
- * lifted support from 17% below the other groups to 12%. It does not fully close --
- * 3rd only reaches 10% -- because the scoreboard simply does not see much of what a
- * support player does.
- *
- * Kills were tried for the same purpose and REMOVED. They are a base cleaner stat
- * more than a support one (per minute vs pool: home +28%, support +9%, returns -8%,
- * attack -26%), so they lifted base cleaners hardest and barely moved support: 18%
- * -> 17%, and only 11% with kills priced as the largest item on the board, which
- * would contradict "K/D is not a viable stat to dictate leaderboard positions".
- *
- * What the data settles is the MAGNITUDES, because a ranking alone is ambiguous.
- * Read as price-per-event it buries captures at 3.8% of the board while BC kills
- * take 35.5%, purely because base cleans happen 16 times a game against a capture's
- * 0.87. Read as share-of-the-rating it puts captures at 22.8%, which is what the
- * ranking plainly means. The magnitudes are then tuned -- STRICTLY WITHIN Sora's
- * ordering, never reordering it -- until every role group's median player scores
- * the same:
- *
- *   mine grabs 6th, tuned ....... reliability 0.85, role gap 18%
- *   mine grabs 5th, tuned ....... reliability 0.84, role gap 16%
- *   mine grabs 4th, tuned ....... reliability 0.85, role gap 13%  (SHIPPED)
- *   mine grabs 3rd, tuned ....... reliability 0.84, role gap 11%
- *   Impact, for scale ........... reliability 0.56
- *
- * NOTE: an earlier version of this file claimed a 2% role gap. That figure was
- * measured against role labels that used SENTRY KILLS to identify support players --
- * a stat the board does not score. Measured against labels matching what is actually
- * scored, the honest number is the 13% above.
+ * An earlier build instead took Sora's STAT RANKING as fixed and tuned magnitudes
+ * inside it for role fairness. That is what put a 4th-best base cleaner above the
+ * best returner in the league, and it is superseded. Two later attempts to correct
+ * that downstream -- rating within role cohorts, and equalising the four job pots --
+ * both failed on a real board and are recorded on PRICES so they are not retried.
  *
  * OMISSIONS
  *
@@ -94,9 +74,12 @@
  *
  * Win is NOT in the priced list, but W/L does enter separately at WIN_SHARE below.
  *
- * HONEST LIMIT: this is verified reliable -- it measures something real and stable --
- * but it is NOT verified to predict winning, because in this league nothing does. Do
- * not "improve" it by regressing it against match outcomes; that target is noise.
+ * HONEST LIMIT: this board is verified to AGREE WITH SORA -- 0.924 on labelled games
+ * the fit never saw -- and that is the only external check it has ever had. It is NOT
+ * verified to predict winning, because in this league nothing does. Do not "improve"
+ * it by regressing it against match outcomes; that target is noise. Nor lean on
+ * split-half reliability, which rewards a board for being consistent rather than
+ * right: both superseded designs above scored well on it while being visibly wrong.
  */
 
 import { ALL_TIME_MIN_MATCHES, MONTHLY_MIN_FRACTION } from "@/lib/impact-rating"
@@ -396,6 +379,40 @@ const JOB_OF = {
 
 type Counter = keyof typeof JOB_OF
 
+/**
+ * A SEPARATE price table used only to work out which job someone was doing.
+ *
+ * Scoring and classifying are different questions -- "what is this act worth"
+ * against "what was this player busy doing" -- and the fitted scoring prices are
+ * measurably worse at the second. They price a home mine grab at zero and a flag
+ * grab at 0.5, which is right for value and useless for detection: those are two
+ * of the clearest signals that somebody was holding base or running the flag.
+ *
+ * Measured against the same ten labelled boards, on the 114 rows whose labelled
+ * role maps onto one of the four jobs:
+ *
+ *   scoring prices as classifier ....... 0.895
+ *   these prices as classifier ......... 0.939   (cap 0.82 -> 0.90, base 0.94 -> 1.00)
+ *
+ * A grid search over the two support thresholds found nothing better than 0.939,
+ * so they are left where they are rather than tuned to this small a sample.
+ *
+ * These are the board's own previous scoring prices, kept because they classify
+ * well, NOT because they were ever right about value. Do not read them as prices.
+ */
+const CLASSIFIER_PRICE_OF: Record<Counter, number> = {
+  caps: 100,
+  grabs: 2.576,
+  hold: 1.959,
+  clears: 3.556,
+  homeMines: 5.061,
+  mineKills: 4.045,
+  returns: 10.553,
+  assists: 35.474,
+  awayMines: 5.061,
+  mineReturns: 4.045,
+}
+
 /** Price per counter. One price per counter now — see PRICES on the mine split. */
 const PRICE_OF: Record<Counter, number> = {
   caps: PRICES.caps,
@@ -688,9 +705,14 @@ export function computeProductionBoard(
     for (const r of rs) {
       const counts = countsOf(r)
       const mins = minutesOf(r)
+      // WHICH job, from the classifier prices; HOW MUCH of it, from the real ones.
+      const shape: Record<Job, number> = { cap: 0, base: 0, returns: 0, support: 0 }
       const jobs: Record<Job, number> = { cap: 0, base: 0, returns: 0, support: 0 }
-      for (const c of COUNTERS) jobs[JOB_OF[c]] += PRICE_OF[c] * (counts[c] / mins)
-      const role = detectRole(jobs, awayMinesOf(r) / mins, poolAwayMines)
+      for (const c of COUNTERS) {
+        shape[JOB_OF[c]] += CLASSIFIER_PRICE_OF[c] * (counts[c] / mins)
+        jobs[JOB_OF[c]] += PRICE_OF[c] * (counts[c] / mins)
+      }
+      const role = detectRole(shape, awayMinesOf(r) / mins, poolAwayMines)
       games.push({ role, produced: jobs[role] })
     }
     roleGamesOf.set(name, games)
