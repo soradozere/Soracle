@@ -158,6 +158,19 @@ function JobBar({ row }: { row: ProductionRow }) {
     .join(" · ")
   return (
     <div className="flex items-center gap-2" title={`Matches played in each role — ${title}`}>
+      {/* Naming the main role matters more than it looks. The Support COLUMN is a
+          small percentage for everyone, because the scoreboard records little of
+          what support does — which reads as "support does not pay" unless you can
+          also see that support mains are sitting near the top of the board. They
+          are: in August the best median finish of any role was support's. */}
+      {total > 0 && (
+        <span
+          className="shrink-0 text-[11px] font-medium w-14 text-right"
+          style={{ color: JOB_COLOURS[row.mainRole] }}
+        >
+          {JOB_LABELS[row.mainRole]}
+        </span>
+      )}
       <div
         role="img"
         aria-label={`Matches played in each role: ${title}`}
@@ -437,7 +450,7 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
 
                 <div>
                   <h4 className="font-semibold text-[var(--color-text)] mb-1">
-                    The two rules that make it fair
+                    The three rules that make it fair
                   </h4>
                   <p>
                     <strong className="text-[var(--color-text)]">Not doing a job costs nothing.</strong>{" "}
@@ -452,6 +465,16 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                     role mid-game costs you nothing — you are credited for both halves. This is
                     the reason the board works this way at all: scoring by role punished swappers
                     by a full standard deviation.
+                  </p>
+                  <p className="mt-2">
+                    <strong className="text-[var(--color-text)]">A small Support share does not mean support is worth little.</strong>{" "}
+                    The scoreboard records almost nothing of what a support player actually does —
+                    screening, denying mine switches, holding space — so the Support column is a
+                    small slice of everyone&apos;s rating. What it does record is everything else
+                    those players do, and they do a lot of it: support players post the highest
+                    median production of any role, and in August they had the best median finish
+                    on this board. Play support well and you rank well; you just do it through
+                    your whole line rather than through one column.
                   </p>
                 </div>
 
@@ -532,51 +555,69 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                 </div>
                 <div>
                   <h4 className="font-semibold text-[var(--color-text)] mb-1">
-                    Prices set by judgement, not by data
+                    Resolved: the prices are now measured, not chosen
                   </h4>
                   <p>
-                    The order of the stats is a call about JK2, not a measurement — nothing in the
-                    data can settle what a capture is worth against a base clean. Specifically
-                    unconfirmed: a mine grab is currently worth about two flag grabs, and it is
-                    what carries the top mine-heavy players. W/L counts for {WIN_PCT}, which costs
-                    some accuracy in exchange for reflecting results.
+                    They used to be a judgement call about JK2 with nothing behind them. Sora has
+                    since gone through ten real scoreboards and rated every player on them for how
+                    much they actually swung that game — 121 players, 464 head-to-head judgements.
+                    These are the prices that best reproduce those calls, and on games the fit had
+                    never seen they agree with him 92% of the time against 83% for the old ones.
+                    Two consequences: this <em>reordered</em> his own stat ranking (assists came
+                    out second), and base cleans are now worth about half what they were, which is
+                    what had a fourth-best base cleaner out-ranking the best returner in the
+                    league.
                   </p>
                 </div>
                 <div>
                   <h4 className="font-semibold text-[var(--color-text)] mb-1">
-                    Combat is not measured at all
+                    Resolved: support is not a bad role to play
                   </h4>
                   <p>
-                    Kills, K/D and sentry kills were each tested and left out. Every one of them
-                    turned out to be a base-cleaner stat rather than a general one: per minute,
-                    base cleaners kill 28% above average and support players only 9%. Base
-                    cleaners fight in their own base with mines and a spawn behind them, so this
-                    scoreboard can only see combat through their circumstances. Adding K/D lifts
-                    base cleaners 6.7% and pushes everyone else down.
+                    The Support column is a small share of everyone&apos;s rating, and that is
+                    real — the scoreboard records little of what support actually does. It does
+                    not mean support does not pay. Support players are rated on their whole line,
+                    not their mine grabs, and in August they had the <em>best</em> median finish
+                    of any role: the top of the board included two support mains, one of them on a
+                    50% win record. A player who did nothing but grab enemy mines would score
+                    badly, but that is not a support player.
                   </p>
                 </div>
                 <div>
                   <h4 className="font-semibold text-[var(--color-text)] mb-1">
-                    Support players rate about 13% low
+                    Combat is still not measured at all
                   </h4>
                   <p>
-                    Their only measurable output is mine work. Promoting mine grabs took this from
-                    17% to 12%, and sentry kills, kills and base cleans were all tested as fixes
-                    and rejected. The rest is missing data rather than bad weighting — the
-                    scoreboard does not record most of what a support player actually does.
+                    Kills, K/D and sentry kills were each tested and left out. Every one turned out
+                    to be a base-cleaner stat rather than a general one: per minute, base cleaners
+                    kill 28% above average and support players only 9%. Base cleaners fight in
+                    their own base with mines and a spawn behind them, so this scoreboard can only
+                    see combat through their circumstances. Adding K/D lifts base cleaners 6.7% and
+                    pushes everyone else down.
                   </p>
                 </div>
                 <div>
                   <h4 className="font-semibold text-[var(--color-text)] mb-1">
-                    The fairness check rests on guessed roles
+                    Ten boards is enough to settle direction, not detail
                   </h4>
                   <p>
-                    Weights are tuned until each role&apos;s median player scores the same — but
-                    nobody tells us who plays what, so roles are inferred from the scoreboard and
-                    that guess agrees with the hand-written roster only about 57% of the time.
-                    The measured role gap swung from 2% to 18% purely on a change to how support
-                    players were identified. Treat &ldquo;every role pays the same&rdquo; as
-                    approximately true, not exactly.
+                    The prices come from 464 judgements across ten games. That is plenty to
+                    establish that base cleaning was overpaid and returning underpaid; it is not
+                    enough to be precise about any single number. A second batch of labelled
+                    boards would tighten them, and could move any individual price.
+                  </p>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-[var(--color-text)] mb-1">
+                    Roles are still guessed, but the guess is now measured
+                  </h4>
+                  <p>
+                    Nobody tells the site who played what, so roles are inferred from the
+                    scoreboard. Against the ten hand-labelled boards that guess is right{" "}
+                    <strong>94%</strong> of the time — perfect for returning and base, and
+                    weakest on support at 84%. It used to be an unchecked assumption; it is now a
+                    number. Note the combined board never consults a role at all, so this only
+                    affects the By role tab and the roles-played bar.
                   </p>
                 </div>
                 <div>
@@ -584,7 +625,9 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                   <p>
                     June and July have never been eyeballed, only August. The all-time view has
                     not been reviewed at all. The qualifying bar (30% of the month&apos;s statted
-                    matches) was inherited from the old board rather than chosen for this one.
+                    matches) was inherited from the old board rather than chosen for this one. And
+                    the labelled boards are all recent — the prices may fit today&apos;s meta
+                    better than June&apos;s.
                   </p>
                 </div>
                 <div>
@@ -594,10 +637,12 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                   <p>
                     We cannot check this board against winning. Teams are close enough that win
                     rates come out statistically indistinguishable from coin flips, so there is no
-                    scoreboard for &ldquo;who was actually best&rdquo; to test against. Everything
-                    above is measured for <em>consistency</em> — the board says the same thing
-                    about a player from one half of the month to the other — which is not the same
-                    as being right.
+                    scoreboard for &ldquo;who was actually best&rdquo; to test against. What the
+                    board <em>is</em> now checked against is Sora&apos;s own judgement of real
+                    games — which is a genuine outside standard, and the only one available, but
+                    it is one person&apos;s eye rather than a fact about JK2. If he is
+                    systematically wrong about something, this board is wrong about it too, and
+                    confidently.
                   </p>
                 </div>
               </div>
@@ -860,7 +905,7 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                       {row.wins}-{row.losses}
                       {row.draws > 0 ? `-${row.draws}` : ""}
                     </td>
-                    <td className="px-2 py-1.5">
+                    <td className="px-2 py-1.5 min-w-[190px]">
                       <JobBar row={row} />
                     </td>
                     {/* ACROSS EVERY MATCH, not only the ones where this was the
@@ -921,8 +966,10 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
             compares against others whose main job it was, use <strong>By role</strong>, which
             rates each job properly within its own cohort. The two answer different questions:
             a player can contribute more returning than someone rated higher there, by doing it
-            in every game rather than as their main job in a few. Hover any column for the real
-            per-game numbers.
+            in every game rather than as their main job in a few. The name beside each bar is the
+            role that player spent most of their month in — a small Support share is about what
+            the scoreboard can see, not about what the role is worth. Hover any column for the
+            real per-game numbers.
           </p>
         </>
       )}
