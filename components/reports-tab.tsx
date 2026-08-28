@@ -936,9 +936,9 @@ export function ReportsTab() {
             onSelect={(key) => setAllTimeBoard(key as typeof allTimeBoard)}
             segments={[
               { key: "wins", label: "Wins", hint: "Won and lost across every match on record" },
+              { key: "production", label: "Impact", hint: "Experimental — what players did, with every role priced to pay the same" },
               { key: "elo", label: "ELO", hint: "Running rating across every match ever played" },
               { key: "trueskill", label: "TrueSkill", hint: "Rating with a confidence interval" },
-              { key: "production", label: "Impact", hint: "Experimental — what players did, with every role priced to pay the same" },
             ]}
           />
           <p className="text-sm italic text-[var(--color-text-dim)]">
@@ -958,9 +958,9 @@ export function ReportsTab() {
             onSelect={(key) => setBoardView(key as typeof boardView)}
             segments={[
               { key: "normal", label: "Wins", hint: "Won and lost, this month" },
+              { key: "production", label: "Impact", hint: "Experimental — ranked on what you did, not who you played with" },
               { key: "elo", label: "ELO", hint: "Running rating, replayed from every match" },
               { key: "trueskill", label: "TrueSkill", hint: "Rating with a confidence interval" },
-              { key: "production", label: "Impact", hint: "Experimental — ranked on what you did, not who you played with" },
             ]}
           />
           {isCurrentMonth && boardView === "normal" && (
