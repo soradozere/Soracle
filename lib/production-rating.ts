@@ -493,27 +493,36 @@ function countsOf(r: ProductionStatRow): Record<Counter, number> {
 const COUNTERS = Object.keys(JOB_OF) as Counter[]
 
 /**
- * Priced production for one appearance, WITH CAPTURES REMOVED — the signal the
- * tier calibrator reads. Not used by the board.
+ * Priced production for one appearance — the signal the tier calibrator reads.
+ * Not used by the board.
  *
- * Captures are stripped because they are not merely correlated with the result,
- * they ARE the result: summed by team, player captures reproduce the final score
- * exactly in 163 of 164 statted matches. Since a capture is also the most
- * expensive item here at 100, leaving it in would have the calibrator reading the
- * match outcome a second time under another name, on top of the W/L signal it
- * already has. Assists were considered for removal too and kept: they correlate
- * with scoring but are not identical to it, and dropping them costs a third of
- * the remaining tier signal (slope 44.3 -> 31.8 points per tier).
+ * CAPTURES ARE INCLUDED, and the story of why is worth keeping. They were taken
+ * out first, on the reasoning that summed by team they reproduce the final score
+ * exactly in 163 of 164 statted matches — a capture is not correlated with the
+ * result, it IS the result — so a calibrator reading both production and win rate
+ * would be counting the outcome twice.
  *
- * What is left still tracks tier: +44.3 points per tier against a residual spread
- * of 231, measured over 1,973 appearances.
+ * That reasoning was inherited from a design that no longer exists. The rule that
+ * shipped does not read win rate at all, so there is no second reading to double
+ * up with, and removing captures cost far more than it saved: measured across
+ * 1,973 appearances, the estimated-minus-actual tier bias by role went
+ *
+ *   with captures ....... cap -0.17, base +1.32, returns -0.17, support -0.71
+ *   without captures .... cap -3.73, base +3.01, returns +1.82, support -0.15
+ *
+ * from a 2.0-tier spread to 6.7. Of course it did: capturing is what a capper's
+ * whole game is for, and the rest of the cap job is priced at almost nothing
+ * (flag grab 0.54, carry time 7.66 against a return's 21.11). Strip the captures
+ * and a capper has no measurable output at all, so the calibrator reads their
+ * best game as a bad one and demotes them for doing their job.
+ *
+ * A 2.0-tier spread is still not neutral — base cleaners read about a tier and a
+ * half above support — so this signal should not be treated as role-blind. See
+ * computeTierMoves for what that means for how hard it is allowed to push.
  */
 export function calibrationProduction(r: ProductionStatRow): number {
   const counts = countsOf(r)
-  return COUNTERS.reduce(
-    (sum, c) => (c === "caps" ? sum : sum + PRICE_OF[c] * counts[c]),
-    0,
-  )
+  return COUNTERS.reduce((sum, c) => sum + PRICE_OF[c] * counts[c], 0)
 }
 
 /** The four jobs, in display order. */
