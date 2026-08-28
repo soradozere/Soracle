@@ -52,10 +52,17 @@ export function RankSuggestions() {
         inputs.currentTiers,
         [...inputs.currentTiers.keys()],
         inputs.lastTierChangeAt,
+        inputs.production,
       )
-      // Biggest gap first, name as the tie-break so the order is stable between
-      // refreshes rather than falling to whatever order the roster arrived in.
-      suggested.sort((a, b) => Math.abs(b.gap) - Math.abs(a.gap) || a.name.localeCompare(b.name))
+      // Strongest case first — how far production has pulled the latent tier from
+      // where the player sits, which is what actually drives the move. Name as the
+      // tie-break so the order is stable between refreshes rather than falling to
+      // whatever order the roster arrived in.
+      suggested.sort(
+        (a, b) =>
+          Math.abs(b.latent - b.from) - Math.abs(a.latent - a.from) ||
+          a.name.localeCompare(b.name),
+      )
 
       setLive(enabledAt !== null)
       setMoves(suggested)
@@ -166,28 +173,33 @@ export function RankSuggestions() {
                   </div>
                 </div>
 
-                {/* Stats */}
+                {/* The evidence. Production first, because production is what
+                    decides the move; win rate is shown after it as context, since
+                    it is the number people expect to see and its absence reads as
+                    an omission rather than a design choice. */}
                 <div className="flex flex-wrap items-center gap-4 text-sm">
                   <div className="flex flex-col items-center">
-                    <span className="text-[#8892a0] text-xs uppercase">Actual</span>
-                    <span className="text-[#c5c6c7] font-mono">{Math.round(move.actualWinRate * 100)}%</span>
+                    <span className="text-[#8892a0] text-xs uppercase">Plays like</span>
+                    <span className="text-[#c5c6c7] font-mono">Tier {move.estimatedTier.toFixed(1)}</span>
                   </div>
                   <div className="flex flex-col items-center">
-                    <span className="text-[#8892a0] text-xs uppercase">Expected</span>
-                    <span className="text-[#c5c6c7] font-mono">{Math.round(move.expectedWinRate * 100)}%</span>
-                  </div>
-                  <div className="flex flex-col items-center">
-                    <span className="text-[#8892a0] text-xs uppercase">Gap</span>
+                    <span className="text-[#8892a0] text-xs uppercase">Drift</span>
                     <span
                       className={`font-mono font-bold ${isOverperforming ? "text-[#27ae60]" : "text-[#f39c12]"}`}
                     >
-                      {move.gap > 0 ? "+" : ""}
-                      {Math.round(move.gap * 100)}%
+                      {move.latent - move.from > 0 ? "+" : ""}
+                      {(move.latent - move.from).toFixed(2)}
                     </span>
                   </div>
                   <div className="flex flex-col items-center">
-                    <span className="text-[#8892a0] text-xs uppercase">Matches</span>
-                    <span className="text-[#c5c6c7] font-mono">{move.games}</span>
+                    <span className="text-[#8892a0] text-xs uppercase">Scoreboards</span>
+                    <span className="text-[#c5c6c7] font-mono">{move.productionGames}</span>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className="text-[#8892a0] text-xs uppercase">W/L vs expected</span>
+                    <span className="text-[#8892a0] font-mono">
+                      {Math.round(move.actualWinRate * 100)}% / {Math.round(move.expectedWinRate * 100)}%
+                    </span>
                   </div>
                 </div>
 

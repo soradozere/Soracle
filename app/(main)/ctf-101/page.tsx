@@ -419,17 +419,17 @@ export default function Ctf101Page() {
             <ul className="space-y-3">
               {[
                 [
-                  "Win more than your tier expected",
-                  "Every match records the tiers both sides had when it was played, so the system knows what was expected of you: roughly your team's share of the games. Consistently beat that and you rank up. Consistently fall short and you rank down.",
+                  "Play better than your tier, not just win more",
+                  "It reads what you actually did on the scoreboard — returns, base cleans, flag time, mine work — measured against the other eleven players in that game, so a strong game against tier 9s counts for more than the same game against tier 4s. Captures are deliberately left out: they are the score, and the point is to judge you separately from who won.",
                 ],
                 [`Only your last ${CALIBRATION.WINDOW_CAP} games count`, "It measures current form, not your entire history."],
                 [
-                  `You need ${CALIBRATION.MIN_GAMES} games at a tier before you can move`,
+                  `You need ${CALIBRATION.MIN_GAMES} games at a tier before anything is judged`,
                   "Get moved — by the system or by an admin — and your record starts fresh. Returning to a tier you held before starts a new record too; the games that moved you off it are spent.",
                 ],
                 [
-                  "The gap has to be real",
-                  `Below ${CALIBRATION.FULL_SAMPLE_GAMES} games you need to be about ${Math.round(CALIBRATION.GAP_SMALL * 100)} points clear of expectation — roughly 8–2 where 5–5 was predicted. At ${CALIBRATION.FULL_SAMPLE_GAMES} games the bar eases to ${Math.round(CALIBRATION.GAP_FULL * 100)} points, about 7–3. One lucky night moves nobody.`,
+                  "It nudges, it does not jump",
+                  "Every few games it shifts you a fraction of a tier toward wherever your play suggests you belong. One good night barely registers and the next one cancels it. Only a run that keeps pointing the same way adds up enough to actually move you.",
                 ],
                 [
                   "One tier at a time, always in public",
