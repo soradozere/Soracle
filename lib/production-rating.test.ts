@@ -8,8 +8,8 @@ import type {
 } from "@/lib/production-rating"
 
 /*
- * The Production board prices what a player did per minute, adds the four jobs
- * together, then blends in a minority W/L share.
+ * The Production board prices what a player did in each match, adds the four jobs
+ * together, averages over matches played, then blends in a minority W/L share.
  *
  * These tests pin the behaviours a reader would notice if they broke -- above all
  * the two design promises the whole board rests on: that NOT doing a job costs
@@ -447,5 +447,44 @@ describe("computeProductionBoard: empty and degenerate inputs", () => {
     const board = computeProductionBoard([match("m1")], fullRows("m1"), PLAYERS, { minGames: 1 })
     expect(board.rows).toHaveLength(16)
     for (const row of board.rows) expect(Number.isFinite(row.rating)).toBe(true)
+  })
+})
+
+describe("computeProductionBoard: detection is priced separately from scoring", () => {
+  // Scoring prices a home mine grab at zero, which is right for value and useless
+  // for working out what someone was doing. The classifier keeps its own table, so
+  // a player whose whole match is own-base mine grabs is still filed under base.
+  const matches = [match("m1"), match("m2"), match("m3")]
+  const stats = matches.flatMap((m) => fullRows(m.id, { a: { mine_grabs_red: 12 } }))
+  const board = computeProductionBoard(matches, stats, PLAYERS, { minGames: 1 })
+  const row = rowFor(board.rows, "a")
+
+  it("files the match by the classifier, not by what the act is worth", () => {
+    expect(row.rolesPlayed.base).toBe(3)
+    expect(row.rolesPlayed.support).toBe(0)
+  })
+
+  it("still scores it at the fitted price — which for a home grab is nothing", () => {
+    expect(row.jobs.base).toBe(0)
+  })
+})
+
+describe("computeProductionBoard: the combined rating never consults a role", () => {
+  it("ranks identically whoever the classifier would call these players", () => {
+    // Same counters, opposite ends of the map, so the classifier files them
+    // differently while the priced production is untouched.
+    const matches = [match("m1"), match("m2"), match("m3")]
+    const board = computeProductionBoard(
+      matches,
+      matches.flatMap((m) =>
+        fullRows(m.id, {
+          a: { captures: 2, returns: 6, base_cleaner: 9 },
+          b: { captures: 2, returns: 6, base_cleaner: 9 },
+        }),
+      ),
+      PLAYERS,
+      { minGames: 1 },
+    )
+    expect(rowFor(board.rows, "a").value).toBeCloseTo(rowFor(board.rows, "b").value, 10)
   })
 })
