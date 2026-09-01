@@ -363,7 +363,7 @@ function PeopleCard({
   blurb: string
   icon: LucideIcon
   accent: string
-  rows: { name: string; primary: string; secondary: string }[]
+  rows: { name: string; primary: string; secondary: string; hint?: string }[]
   empty: string
 }) {
   return (
@@ -401,7 +401,11 @@ function PeopleCard({
                   {row.name}
                 </Link>
               </div>
-              <div className="text-xs shrink-0 tabular-nums" style={{ color: "var(--color-text-dim)" }}>
+              <div
+                className="text-xs shrink-0 tabular-nums"
+                style={{ color: "var(--color-text-dim)" }}
+                title={row.hint}
+              >
                 <b style={{ color: accent }}>{row.primary}</b>
                 {row.secondary && <> · {row.secondary}</>}
               </div>
@@ -411,6 +415,27 @@ function PeopleCard({
       )}
     </section>
   )
+}
+
+/**
+ * One row of a duel card, always written from the card owner's point of view:
+ * their own kills first, then the margin.
+ *
+ * The old "63 · 53 back" gave neither a unit nor a direction — whose 63, and
+ * back from what — and Rivals' bare "29–28" never said it was counting kills at
+ * all. Writing all three cards as the same record, with the blurb naming the
+ * unit and the order, means one format to learn instead of three to guess at.
+ * The margin doubles as the sort key made visible: without it a prey list
+ * reading 95, 47, 62 looks unsorted.
+ */
+function duelRow(d: { name: string; for: number; against: number }) {
+  const margin = d.for - d.against
+  return {
+    name: d.name,
+    primary: `${d.for}–${d.against}`,
+    secondary: margin === 0 ? "level" : `${margin > 0 ? "+" : "−"}${Math.abs(margin)}`,
+    hint: `You killed ${d.name} ${d.for} times · ${d.name} killed you ${d.against} times`,
+  }
 }
 
 /**
@@ -1363,27 +1388,27 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
               <PeopleCard
                 title="Prey"
-                blurb="You killed them most."
+                blurb="Kills traded, yours first — you came out ahead."
                 icon={Target}
                 accent="#27ae60"
                 empty="No kills recorded yet."
-                rows={card.prey.map((d) => ({ name: d.name, primary: `${d.for}`, secondary: `${d.against} back` }))}
+                rows={card.prey.map(duelRow)}
               />
               <PeopleCard
                 title="Rivals"
-                blurb="Closest record — the ones you actually trade with."
+                blurb="Kills traded, yours first — too close to call."
                 icon={Crosshair}
                 accent="var(--color-primary)"
                 empty="No close duels yet."
-                rows={card.rivals.map((d) => ({ name: d.name, primary: `${d.for}–${d.against}`, secondary: "" }))}
+                rows={card.rivals.map(duelRow)}
               />
               <PeopleCard
                 title="Bullies"
-                blurb="They killed you most."
+                blurb="Kills traded, yours first — they came out ahead."
                 icon={Skull}
                 accent="#ff4757"
                 empty="Nobody has your number yet."
-                rows={card.bullies.map((d) => ({ name: d.name, primary: `${d.against}`, secondary: `${d.for} back` }))}
+                rows={card.bullies.map(duelRow)}
               />
             </div>
           )}
