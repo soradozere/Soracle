@@ -226,6 +226,10 @@ const MEDAL_FOIL = [
 /** Duels need more than a couple of recorded games to mean anything. */
 const DUEL_MIN_KILLS = 3
 
+/** supabase-js caps a select at 1000 rows; the kill matrix outgrows that in a
+ *  fortnight, so it is paged rather than fetched flat. */
+const KILL_PAGE_SIZE = 1000
+
 function formatFlagHold(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
   const minutes = Math.floor(totalSeconds / 60)
@@ -528,13 +532,31 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
       // The per-opponent matrix only exists for JSON-era scoreboards, so this is
       // deliberately allowed to come back empty -- the duel sections hide
       // themselves rather than inventing rivalries out of two recorded games.
-      const { data: killRows } = await supabase
-        .from("match_kills")
-        .select("match_id, killer_player_id, victim_player_id, kills")
-        .in("match_id", matchIds)
+      //
+      // Paged, because this is the one table here that outgrows the 1000-row
+      // select cap: it holds a full killer x victim grid per match (~65 rows),
+      // so a normal month is ~3000. Fetching it flat silently kept the first
+      // 1000 and built every duel card from a third of the month. Ordered on
+      // the full primary key, not for presentation but because .range() over an
+      // unordered query has no stable row order between pages -- the same trap
+      // documented in lib/cap-conversion.ts.
+      const killRows: KillRow[] = []
+      for (let from = 0; ; from += KILL_PAGE_SIZE) {
+        const { data: page } = await supabase
+          .from("match_kills")
+          .select("match_id, killer_player_id, victim_player_id, kills")
+          .in("match_id", matchIds)
+          .order("match_id")
+          .order("killer_player_id")
+          .order("victim_player_id")
+          .range(from, from + KILL_PAGE_SIZE - 1)
+        if (cancelled) return
+        killRows.push(...((page ?? []) as KillRow[]))
+        if (!page || page.length < KILL_PAGE_SIZE) break
+      }
       if (cancelled) return
       setStats((statRows ?? []) as StatRow[])
-      setKills((killRows ?? []) as KillRow[])
+      setKills(killRows)
       setLoading(false)
     })
 
@@ -738,6 +760,14 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
      *   rival   -- the closest record between you, i.e. who you actually trade
      *              with rather than who you beat or lose to
      *
+     * All three rank on MARGIN, not on raw volume. Ranking prey by kills-for
+     * alone just surfaces whoever you played most, win or lose -- it put the
+     * same opponent at the top of both prey and bullies for 42 of 46 players in
+     * August, and listed 55 matchups under "you killed them most" that the
+     * player had actually lost. A card that names someone has to be true about
+     * them, so prey needs a winning record and bullies a losing one; a player
+     * who beat nobody gets a short card or none, which is the honest answer.
+     *
      * Rivals are ranked by margin first and volume second, so a 9-8 outranks a
      * 2-2: both are level, but only one of them is a rivalry.
      */
@@ -765,13 +795,14 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
     for (const [name, opps] of duels) {
       const c = ensure(name)
       const rows = Array.from(opps.entries()).map(([opp, rec]) => ({ name: opp, ...rec }))
+      const margin = (r: { for: number; against: number }) => r.for - r.against
       c.prey = rows
-        .filter((r) => r.for >= DUEL_MIN_KILLS)
-        .sort((a, b) => b.for - a.for || a.against - b.against)
+        .filter((r) => r.for >= DUEL_MIN_KILLS && margin(r) > 0)
+        .sort((a, b) => margin(b) - margin(a) || b.for - a.for)
         .slice(0, 3)
       c.bullies = rows
-        .filter((r) => r.against >= DUEL_MIN_KILLS)
-        .sort((a, b) => b.against - a.against || a.for - b.for)
+        .filter((r) => r.against >= DUEL_MIN_KILLS && margin(r) < 0)
+        .sort((a, b) => margin(a) - margin(b) || b.against - a.against)
         .slice(0, 3)
       c.rivals = rows
         .filter((r) => r.for + r.against >= DUEL_MIN_KILLS * 2)
