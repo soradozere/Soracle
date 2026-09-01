@@ -226,6 +226,10 @@ const MEDAL_FOIL = [
 /** Duels need more than a couple of recorded games to mean anything. */
 const DUEL_MIN_KILLS = 3
 
+/** supabase-js caps a select at 1000 rows; the kill matrix outgrows that in a
+ *  fortnight, so it is paged rather than fetched flat. */
+const KILL_PAGE_SIZE = 1000
+
 function formatFlagHold(ms: number): string {
   const totalSeconds = Math.round(ms / 1000)
   const minutes = Math.floor(totalSeconds / 60)
@@ -359,7 +363,7 @@ function PeopleCard({
   blurb: string
   icon: LucideIcon
   accent: string
-  rows: { name: string; primary: string; secondary: string }[]
+  rows: { name: string; primary: string; secondary: string; hint?: string }[]
   empty: string
 }) {
   return (
@@ -397,7 +401,11 @@ function PeopleCard({
                   {row.name}
                 </Link>
               </div>
-              <div className="text-xs shrink-0 tabular-nums" style={{ color: "var(--color-text-dim)" }}>
+              <div
+                className="text-xs shrink-0 tabular-nums"
+                style={{ color: "var(--color-text-dim)" }}
+                title={row.hint}
+              >
                 <b style={{ color: accent }}>{row.primary}</b>
                 {row.secondary && <> · {row.secondary}</>}
               </div>
@@ -407,6 +415,27 @@ function PeopleCard({
       )}
     </section>
   )
+}
+
+/**
+ * One row of a duel card, always written from the card owner's point of view:
+ * their own kills first, then the margin.
+ *
+ * The old "63 · 53 back" gave neither a unit nor a direction — whose 63, and
+ * back from what — and Rivals' bare "29–28" never said it was counting kills at
+ * all. Writing all three cards as the same record, with the blurb naming the
+ * unit and the order, means one format to learn instead of three to guess at.
+ * The margin doubles as the sort key made visible: without it a prey list
+ * reading 95, 47, 62 looks unsorted.
+ */
+function duelRow(d: { name: string; for: number; against: number }) {
+  const margin = d.for - d.against
+  return {
+    name: d.name,
+    primary: `${d.for}–${d.against}`,
+    secondary: margin === 0 ? "level" : `${margin > 0 ? "+" : "−"}${Math.abs(margin)}`,
+    hint: `You killed ${d.name} ${d.for} times · ${d.name} killed you ${d.against} times`,
+  }
 }
 
 /**
@@ -528,13 +557,31 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
       // The per-opponent matrix only exists for JSON-era scoreboards, so this is
       // deliberately allowed to come back empty -- the duel sections hide
       // themselves rather than inventing rivalries out of two recorded games.
-      const { data: killRows } = await supabase
-        .from("match_kills")
-        .select("match_id, killer_player_id, victim_player_id, kills")
-        .in("match_id", matchIds)
+      //
+      // Paged, because this is the one table here that outgrows the 1000-row
+      // select cap: it holds a full killer x victim grid per match (~65 rows),
+      // so a normal month is ~3000. Fetching it flat silently kept the first
+      // 1000 and built every duel card from a third of the month. Ordered on
+      // the full primary key, not for presentation but because .range() over an
+      // unordered query has no stable row order between pages -- the same trap
+      // documented in lib/cap-conversion.ts.
+      const killRows: KillRow[] = []
+      for (let from = 0; ; from += KILL_PAGE_SIZE) {
+        const { data: page } = await supabase
+          .from("match_kills")
+          .select("match_id, killer_player_id, victim_player_id, kills")
+          .in("match_id", matchIds)
+          .order("match_id")
+          .order("killer_player_id")
+          .order("victim_player_id")
+          .range(from, from + KILL_PAGE_SIZE - 1)
+        if (cancelled) return
+        killRows.push(...((page ?? []) as KillRow[]))
+        if (!page || page.length < KILL_PAGE_SIZE) break
+      }
       if (cancelled) return
       setStats((statRows ?? []) as StatRow[])
-      setKills((killRows ?? []) as KillRow[])
+      setKills(killRows)
       setLoading(false)
     })
 
@@ -738,6 +785,14 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
      *   rival   -- the closest record between you, i.e. who you actually trade
      *              with rather than who you beat or lose to
      *
+     * All three rank on MARGIN, not on raw volume. Ranking prey by kills-for
+     * alone just surfaces whoever you played most, win or lose -- it put the
+     * same opponent at the top of both prey and bullies for 42 of 46 players in
+     * August, and listed 55 matchups under "you killed them most" that the
+     * player had actually lost. A card that names someone has to be true about
+     * them, so prey needs a winning record and bullies a losing one; a player
+     * who beat nobody gets a short card or none, which is the honest answer.
+     *
      * Rivals are ranked by margin first and volume second, so a 9-8 outranks a
      * 2-2: both are level, but only one of them is a rivalry.
      */
@@ -765,13 +820,14 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
     for (const [name, opps] of duels) {
       const c = ensure(name)
       const rows = Array.from(opps.entries()).map(([opp, rec]) => ({ name: opp, ...rec }))
+      const margin = (r: { for: number; against: number }) => r.for - r.against
       c.prey = rows
-        .filter((r) => r.for >= DUEL_MIN_KILLS)
-        .sort((a, b) => b.for - a.for || a.against - b.against)
+        .filter((r) => r.for >= DUEL_MIN_KILLS && margin(r) > 0)
+        .sort((a, b) => margin(b) - margin(a) || b.for - a.for)
         .slice(0, 3)
       c.bullies = rows
-        .filter((r) => r.against >= DUEL_MIN_KILLS)
-        .sort((a, b) => b.against - a.against || a.for - b.for)
+        .filter((r) => r.against >= DUEL_MIN_KILLS && margin(r) < 0)
+        .sort((a, b) => margin(a) - margin(b) || b.against - a.against)
         .slice(0, 3)
       c.rivals = rows
         .filter((r) => r.for + r.against >= DUEL_MIN_KILLS * 2)
@@ -1332,27 +1388,27 @@ export function WrappedView({ year, month, selectedName, onSelectName }: Wrapped
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
               <PeopleCard
                 title="Prey"
-                blurb="You killed them most."
+                blurb="Kills traded, yours first — you came out ahead."
                 icon={Target}
                 accent="#27ae60"
                 empty="No kills recorded yet."
-                rows={card.prey.map((d) => ({ name: d.name, primary: `${d.for}`, secondary: `${d.against} back` }))}
+                rows={card.prey.map(duelRow)}
               />
               <PeopleCard
                 title="Rivals"
-                blurb="Closest record — the ones you actually trade with."
+                blurb="Kills traded, yours first — too close to call."
                 icon={Crosshair}
                 accent="var(--color-primary)"
                 empty="No close duels yet."
-                rows={card.rivals.map((d) => ({ name: d.name, primary: `${d.for}–${d.against}`, secondary: "" }))}
+                rows={card.rivals.map(duelRow)}
               />
               <PeopleCard
                 title="Bullies"
-                blurb="They killed you most."
+                blurb="Kills traded, yours first — they came out ahead."
                 icon={Skull}
                 accent="#ff4757"
                 empty="Nobody has your number yet."
-                rows={card.bullies.map((d) => ({ name: d.name, primary: `${d.against}`, secondary: `${d.for} back` }))}
+                rows={card.bullies.map(duelRow)}
               />
             </div>
           )}
