@@ -266,86 +266,6 @@ export async function uploadCSV(formData: FormData) {
   }
 }
 
-export async function logMatch(data: {
-  red_team: string[]
-  blue_team: string[]
-  red_score: number
-  blue_score: number
-  match_type: "algorithm" | "manual"
-  /** Raw evaluator score, or null when no balancer ran. Never 0 for "unknown". */
-  balance_confidence: number | null
-  notes?: string
-  played_at?: string
-}) {
-  try {
-    const supabase = await createClient()
-
-    // Look up tier values for all players
-    const allPlayers = [...data.red_team, ...data.blue_team]
-    const { data: playerData, error: playerError } = await supabase
-      .from("players")
-      .select("name, tier_value")
-      .in("name", allPlayers)
-
-    if (playerError) {
-      return { success: false, error: playerError.message }
-    }
-
-    // Create a map of player name to tier value
-    const tierMap = new Map<string, number>()
-    for (const player of playerData || []) {
-      tierMap.set(player.name, player.tier_value)
-    }
-
-    // Build tier arrays in the same order as team arrays
-    // Default to 5 if player not found (shouldn't happen, but safe fallback)
-    const red_tiers = data.red_team.map(name => tierMap.get(name) ?? 5)
-    const blue_tiers = data.blue_team.map(name => tierMap.get(name) ?? 5)
-
-    const { error } = await supabase.from("matches").insert({
-      red_team: data.red_team,
-      blue_team: data.blue_team,
-      red_tiers,
-      blue_tiers,
-      red_score: data.red_score,
-      blue_score: data.blue_score,
-      match_type: data.match_type,
-      balance_confidence: data.balance_confidence,
-      notes: data.notes || null,
-      ...(data.played_at ? { created_at: data.played_at } : {}),
-    })
-
-    if (error) {
-      return { success: false, error: error.message }
-    }
-
-    // Keep players.last_match_at current (see touchLastMatchAt).
-    await touchLastMatchAt(
-      supabase,
-      [...data.red_team, ...data.blue_team],
-      data.played_at ?? new Date().toISOString(),
-    )
-
-    // The achievement ledger is cached across every page that reads it (see
-    // HISTORY_TAG in achievements-server.ts) precisely so a new match doesn't
-    // pay for a full recompute on each one's own clock -- which means this is
-    // now the thing that tells them a match landed, not the clock.
-    updateTag(HISTORY_TAG)
-
-    // Auto-calibration pass over this match's twelve (no-op unless the admin
-    // switch is on; never throws). Service client on purpose: the calibrator is
-    // a system behaviour, not something riding the logging user's permissions.
-    await runAutoCalibrationSafely(createServiceClient(), allPlayers)
-
-    return { success: true }
-  } catch (error) {
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : "Failed to log match",
-    }
-  }
-}
-
 type MatchWithStatsPayload = {
   uuid: string
   red_team: string[]
@@ -503,7 +423,7 @@ async function persistMatchWithStats(
     }
   }
 
-  // 2. Insert the matches row (same tier-lookup logic as logMatch), tagged with
+  // 2. Insert the matches row (look up each player's current tier), tagged with
   //    stats_csv_uploaded_at = now() and match_played_at = parsed timestamp.
   const allPlayers = [...payload.red_team, ...payload.blue_team]
   const { data: playerData, error: playerError } = await supabase

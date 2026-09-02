@@ -1,8 +1,8 @@
 import { createClient } from "@/lib/supabase/server"
 import { requireFullAdminPage } from "@/lib/player-role"
 import { PlayerManagementTable } from "@/components/player-management-table"
-import { AdminMatchLog } from "@/components/admin-match-log"
 import { RankSuggestions } from "@/components/rank-suggestions"
+import { RoleSuggestions } from "@/components/role-suggestions"
 import { AutoCalibrationToggle } from "@/components/auto-calibration-toggle"
 import { AdminHeader, AdminSection } from "@/components/admin-header"
 import { Button } from "@/components/ui/button"
@@ -73,15 +73,18 @@ export default async function AdminPage() {
           <PlayerManagementTable />
         </AdminSection>
 
-        <AdminSection title="Log Match" description="Record match results to track win/loss statistics for players.">
-          <AdminMatchLog />
-        </AdminSection>
-
         <AdminSection
           title="Rank Suggestions"
           description="Players who are consistently over- or under-performing relative to their tier, based on match history analysis."
         >
           <RankSuggestions />
+        </AdminSection>
+
+        <AdminSection
+          title="Role Rating Suggestions"
+          description="Where a player's production in a role diverges from their hand-set role rating — sorted with pending tier moves first. Advisory only: apply changes in Player Management above. Camp is not covered (no scoreboard signal for it)."
+        >
+          <RoleSuggestions />
         </AdminSection>
       </main>
     </div>
