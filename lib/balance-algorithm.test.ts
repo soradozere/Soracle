@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest"
-import { balanceTeamsWithOptions, evaluateTeams } from "@/lib/balance-algorithm"
+import { afterEach, describe, expect, it } from "vitest"
+import { balanceTeamsWithOptions, CONFIG, evaluateTeams } from "@/lib/balance-algorithm"
 import type { Player } from "@/lib/types"
 
 function mk(
@@ -459,5 +459,62 @@ describe("odd clusters must not force the anchor's companions together", () => {
     // players the only affordable shape. Anything under the 4000 band means the
     // search is choosing rather than being forced.
     expect(bestSeparating - bestTogether).toBeLessThan(4000)
+  })
+})
+
+describe("floor balance — the weak-floor team loses too often", () => {
+  // Real 23 Aug 2026 lobby (2-7 loss). fetchd is a cap/chase dual threat; the lobby's
+  // floor is ben (tier 3) and two tier-4s (vee, devy). The widened bottom cluster is
+  // {ben, vee, devy}, so the draft-anchor rule permits a 2-1 split of it — and the old
+  // build's Perfect Balance pooled ben with a tier-4 (floor-drag gap 4 between teams)
+  // while the tier SUMS stayed level. Replayed over the 155-lobby history the team the
+  // balancer rated a shade lighter, or handed the worse floor, lost ~2/3 of its games;
+  // FLOOR_WEIGHT is what makes that shortfall cost something.
+  const lobby = [
+    mk("fetchd", 10, 10, 10, 0, 0, 0),
+    mk("Interlude", 9, 0, 0, 0, 10, 10),
+    mk("twinblade", 8, 8, 7, 8, 0, 0),
+    mk("original", 8, 0, 0, 0, 8, 9),
+    mk("glempa", 7, 6, 0, 7, 6, 0),
+    mk("jin", 7, 7, 7, 7, 8, 7),
+    mk("flawless", 6, 0, 0, 6, 6, 5),
+    mk("levi", 6, 0, 6, 6, 6, 0),
+    mk("sora", 5, 4, 0, 3, 5, 5),
+    mk("vee", 4, 0, 0, 4, 4, 4),
+    mk("devy", 4, 3, 0, 4, 0, 3),
+    mk("ben", 3, 0, 0, 3, 4, 3),
+  ]
+  const floorDragGap = (o: { result: { teamRed: string[]; teamBlue: string[] } }) => {
+    const drag = (names: string[]) =>
+      names.reduce((s, n) => s + Math.pow(Math.max(0, 5 - lobby.find((p) => p.name === n)!.tierValue), 2), 0)
+    return Math.abs(drag(o.result.teamRed) - drag(o.result.teamBlue))
+  }
+
+  afterEach(() => {
+    CONFIG.tier.FLOOR_WEIGHT = 15
+  })
+
+  it("spreads the tier-3 away from the tier-4s in the recommendation", () => {
+    const options = balanceTeamsWithOptions(
+      lobby.map((p) => p.name),
+      lobby,
+    )
+    expect(sameTeam(options[0], "ben", "devy")).toBe(false)
+    expect(sameTeam(options[0], "ben", "vee")).toBe(false)
+  })
+
+  it("is the term doing it — zeroing FLOOR_WEIGHT brings the pooled floor back", () => {
+    const withTerm = floorDragGap(
+      balanceTeamsWithOptions(lobby.map((p) => p.name), lobby)[0],
+    )
+
+    CONFIG.tier.FLOOR_WEIGHT = 0
+    const withoutTerm = floorDragGap(
+      balanceTeamsWithOptions(lobby.map((p) => p.name), lobby)[0],
+    )
+
+    // Old build recommended a 4-point floor-drag gap here; the term pulls it to 2.
+    expect(withTerm).toBeLessThan(withoutTerm)
+    expect(withTerm).toBeLessThanOrEqual(2)
   })
 })

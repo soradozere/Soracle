@@ -20,8 +20,17 @@
  * 0% reads as "this is broken" rather than "this is the best of a bad set".
  */
 
-/** Decay rate. Score ~175 lands near 65%; 500+ is effectively at the floor. */
-const DECAY = 0.004
+/**
+ * Decay rate. Score ~190 lands near 65%; 600+ is close to the floor.
+ *
+ * Trimmed from 0.004 to 0.0035 in September 2026 alongside the balancer's heavier tier
+ * and new floor terms (see CONFIG.tier in balance-algorithm.ts). Those raised every
+ * split's raw score by roughly 8% — a clean lobby's Perfect Balance went from ~530 to
+ * ~575 — with no change in how good the split actually is, so the curve is stretched to
+ * match: replayed over the 155-lobby history the mean displayed confidence holds at
+ * ~49% and the median at ~45%, the same as before the balancer change.
+ */
+const DECAY = 0.0035
 /** Even the worst split reads 30%, never 0% — see the note above. */
 const FLOOR_PCT = 30
 

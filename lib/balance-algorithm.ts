@@ -2,13 +2,29 @@ import type { Player, BalanceResult, BalanceOption } from "./types"
 
 const ROLES = ["Capper", "Chase", "Camp", "Cleaner", "Support"] as const
 
-const CONFIG = {
+export const CONFIG = {
   tier: {
-    WEIGHT: 3.0,
+    // Raised from 3.0 (Sep 2026). At 3 a full 2-point gap between team tier TOTALS
+    // scored just 12 — a rounding error next to the role terms — so the search would
+    // routinely trade a flatter tier split for a marginal role-sum gain. Replayed over
+    // the 155-lobby history, the team the balancer rated 1-2 points lighter went on to
+    // lose roughly two thirds of its games. At 8 a 2-point gap costs 32, and the replay
+    // cut 2-point-gap recommendations from 35 to 21 without touching the hard wall below.
+    WEIGHT: 8.0,
     MAX_DIFF: 2,
     OVER_MAX_PENALTY: 2000,
     TOP_3_WEIGHT: 3.0,
     BOTTOM_3_WEIGHT: 2.5,
+    // Floor balance (section 4c). A gap between the two teams' WEAKEST players matters
+    // more than the same gap higher up: tier 3 vs 5 on the bottom board decides games in
+    // a way tier 7 vs 9 does not. Each player's shortfall below FLOOR_REF is squared —
+    // so a tier-3 is four times the drag of a tier-4 — then the team totals are compared
+    // linearly. This is the term that stops one side quietly absorbing both the tier-3
+    // and a tier-4 while the tier SUMS still read level (the bottom-3 sum term at
+    // weight 2.5 priced exactly that at ~10 points). Over the replay this cut the
+    // "weak-floor team is also the lighter team" compounding case from 58 lobbies to 46.
+    FLOOR_REF: 5,
+    FLOOR_WEIGHT: 15,
   },
   elite: {
     THRESHOLD: 8,
@@ -220,6 +236,16 @@ function monopolyPenalty(count1: number, count2: number, penalty: number): numbe
   return count1 === total || count2 === total ? penalty : 0
 }
 
+// A team's "floor drag": the sum of each player's SQUARED shortfall below
+// CONFIG.tier.FLOOR_REF. Convex on purpose — a tier-3 contributes 4, a tier-4 only 1 —
+// so the term reacts to how far the weakest bodies sit below the pack, not just how
+// many there are. See CONFIG.tier.FLOOR_WEIGHT for why the sum-of-tiers balance above
+// isn't enough. Players at or above FLOOR_REF contribute nothing.
+function floorDrag(team: Player[]): number {
+  const ref = CONFIG.tier.FLOOR_REF
+  return team.reduce((s, p) => s + Math.pow(Math.max(0, ref - p.tierValue), 2), 0)
+}
+
 // Best-capper / best-chaser separation — keep one team from owning BOTH pivotal duel
 // roles. Shared by the tier and ELO evaluators, which differ only in penalty scale.
 //
@@ -382,7 +408,13 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const bottom3sum2 = sortedTier2.slice(-3).reduce((a, b) => a + b, 0)
   score += Math.pow(bottom3sum1 - bottom3sum2, 2) * CONFIG.tier.BOTTOM_3_WEIGHT
 
-  // 4c. Elite stack penalty — one team must not hoard the tier-8+ players. Flat and
+  // 4c. Floor balance — see CONFIG.tier.FLOOR_*. The bottom-3 SUM above misses the shape
+  // of the floor: {6,4,3} and {6,5,2} both sum to 13, but the tier-2 lineup is worse off.
+  // Squaring each player's shortfall below FLOOR_REF captures that, and comparing the
+  // team totals catches one side pooling the weak bodies even when the tier sums match.
+  score += Math.abs(floorDrag(team1) - floorDrag(team2)) * CONFIG.tier.FLOOR_WEIGHT
+
+  // 4d. Elite stack penalty — one team must not hoard the tier-8+ players. Flat and
   // constraint-like on purpose: a graduated count-difference term is worth only single
   // digits at 3-v-1 and gets routinely outbid by role-sum smoothing; the flat penalty
   // is what actually enforces the rule.
@@ -427,6 +459,9 @@ function evaluateOffRoleSplit(team1: Player[], team2: Player[], topPlayer: Playe
   const bottom3Diff =
     sortedTier1.slice(-3).reduce((a, b) => a + b, 0) - sortedTier2.slice(-3).reduce((a, b) => a + b, 0)
   score += Math.pow(bottom3Diff, 2) * CONFIG.tier.BOTTOM_3_WEIGHT
+
+  // Floor balance — a pure tier term, so it applies to the role-blind card too. See 4c.
+  score += Math.abs(floorDrag(team1) - floorDrag(team2)) * CONFIG.tier.FLOOR_WEIGHT
 
   const elites1 = team1.filter((p) => p.tierValue >= CONFIG.elite.THRESHOLD).length
   const elites2 = team2.filter((p) => p.tierValue >= CONFIG.elite.THRESHOLD).length
