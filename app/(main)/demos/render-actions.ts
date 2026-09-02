@@ -124,7 +124,17 @@ export async function requestRender(demoId: string, params: RenderRequestParams)
 
   const startMs = Math.round(params.startMs)
   const endMs = Math.round(params.endMs)
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs) || startMs < 0 || endMs <= startMs) {
+  // The common cause of a zero here is a demo the library never recorded a
+  // duration for -- the dialog sends 0..0 and there is nothing to render. Say
+  // that rather than the generic message, which sent people looking in the
+  // wrong place.
+  if (!Number.isFinite(endMs) || endMs <= 0) {
+    return {
+      success: false,
+      error: "This demo's length isn't recorded yet. Play it through to the end once, then queue the render.",
+    }
+  }
+  if (!Number.isFinite(startMs) || startMs < 0 || endMs <= startMs) {
     return { success: false, error: "That segment doesn't make sense." }
   }
 

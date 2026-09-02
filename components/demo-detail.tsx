@@ -42,6 +42,7 @@ import {
   deleteDemo,
   recordDemoView,
   removeDemoMoment,
+  reportDemoDuration,
   reportDemoMap,
   setDemoPlaylists,
   updateDemo,
@@ -936,6 +937,11 @@ export function DemoDetail({
             // Fills in a map nobody typed at upload. Only ever fills a blank,
             // so a demo that already knows its map is never overwritten.
             onMapDetected={demo.map ? undefined : (map) => void reportDemoMap(demo.id, map)}
+            // Same idea as the map: fill the blank the format leaves, the first
+            // time someone watches a demo the length was never recorded for.
+            onDurationDetected={
+              demo.durationMs != null ? undefined : (ms) => void reportDemoDuration(demo.id, ms)
+            }
             onPositionChange={(ms) => {
               playbackMsRef.current = ms
             }}

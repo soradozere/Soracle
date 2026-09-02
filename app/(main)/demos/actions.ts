@@ -667,6 +667,28 @@ export async function reportDemoMap(demoId: string, map: string): Promise<void> 
   await supabase.from("demos").update({ map: name }).eq("id", demoId)
 }
 
+/**
+ * Record a demo's real length, as the engine measured it playing to the end.
+ *
+ * A .dm_15 states no duration, and upload cannot read one out of the file, so
+ * every recording starts with duration_ms null. The viewer knows the exact
+ * figure once it has played through, and hands it back here. Same anonymous
+ * caller and same fill-a-blank rule as reportDemoMap: the first full watch sets
+ * it, nobody can overwrite it, and a garbage value can only widen the range the
+ * check below already allows.
+ */
+export async function reportDemoDuration(demoId: string, durationMs: number): Promise<void> {
+  const ms = Math.round(durationMs)
+  // A demo is at least a few seconds and, per the render job's own limit, well
+  // under six hours. Anything outside that is a bad reading, not a demo.
+  if (!Number.isFinite(ms) || ms < 2000 || ms > 6 * 60 * 60 * 1000) return
+
+  const supabase = createServiceClient()
+  const { data: demo } = await supabase.from("demos").select("duration_ms").eq("id", demoId).maybeSingle()
+  if (!demo || (demo.duration_ms as number | null) != null) return
+  await supabase.from("demos").update({ duration_ms: ms }).eq("id", demoId)
+}
+
 const VIEWER_COOKIE = "soracle_viewer"
 
 /**
