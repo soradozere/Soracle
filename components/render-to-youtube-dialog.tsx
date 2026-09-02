@@ -24,6 +24,12 @@ export interface RenderCameraState {
   /** Engine client number, -1 for the recorder's own view. */
   follow: number
   players: DemoPlayerInfo[]
+  /**
+   * The demo's length as the engine currently has it -- exact once it has
+   * played to the end, a record-count estimate before then. Used in place of
+   * the database figure, which is absent on any upload that was never trimmed.
+   */
+  durationMs: number
 }
 
 /**
@@ -39,6 +45,7 @@ const LADDER = [
 ]
 
 function estimate(endMs: number): { fps: 30 | 60; height: number; minutes: number } | null {
+  if (!Number.isFinite(endMs) || endMs <= 0) return null
   const budget = 6 * 60 * 60 * 1000 * 0.8
   for (const s of LADDER) {
     const throughput = 38.2 / ((s.width * s.height) / (1280 * 720))
@@ -74,6 +81,9 @@ export function RenderToYoutubeDialog({
   const [camera, setCamera] = useState<CameraMode>("follow")
   const [follow, setFollow] = useState(-1)
   const [players, setPlayers] = useState<DemoPlayerInfo[]>([])
+  // The length the engine reported when the dialog opened. Preferred over the
+  // `durationMs` prop, which is 0 for any demo the database has no duration for.
+  const [engineMs, setEngineMs] = useState(0)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [done, setDone] = useState(false)
@@ -87,6 +97,7 @@ export function RenderToYoutubeDialog({
         setCamera(state.camera)
         setFollow(state.follow)
         setPlayers(state.players)
+        setEngineMs(state.durationMs)
       }
       setError(null)
       setDone(false)
@@ -94,7 +105,10 @@ export function RenderToYoutubeDialog({
     setOpen(next)
   }
 
-  const est = estimate(durationMs)
+  // Engine figure first, prop as the fallback for a dialog opened before the
+  // player has started. Zero means neither source knows yet.
+  const renderMs = engineMs > 0 ? engineMs : durationMs
+  const est = estimate(renderMs)
   const target = players.find((p) => p.clientNum === follow)
 
   /*
@@ -117,7 +131,7 @@ export function RenderToYoutubeDialog({
       camMode: camera === "free" ? "free" : "follow",
       followClientId: camera === "free" ? null : follow >= 0 ? follow : null,
       startMs: 0,
-      endMs: durationMs,
+      endMs: renderMs,
     })
     setPending(false)
     if (result.success) setDone(true)
@@ -217,6 +231,12 @@ export function RenderToYoutubeDialog({
                   {est.height < 1440 || est.fps === 30
                     ? "Longer demos step down so the job finishes inside its time limit."
                     : ""}
+                </>
+              ) : renderMs <= 0 ? (
+                <>
+                  This demo&apos;s length hasn&apos;t been worked out yet. Let it play through to the
+                  end once, then reopen this — the render covers the whole demo, so it needs to know
+                  how long that is.
                 </>
               ) : (
                 <>This demo is too long to render in one job, even at 30fps.</>

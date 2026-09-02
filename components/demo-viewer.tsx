@@ -195,6 +195,14 @@ interface DemoViewerProps {
    */
   onMapDetected?: (map: string) => void
   /**
+   * The demo's real total length in milliseconds, handed over once playback has
+   * run all the way to the end and the engine knows the exact figure. The
+   * .dm_15 states no duration, so an upload has none until this fills it in --
+   * and until it does, the scrubber, the render dialog and the queue list all
+   * work off a guess. Only ever fires with the exact end-of-file value.
+   */
+  onDurationDetected?: (ms: number) => void
+  /**
    * The moments worth watching for, in milliseconds from the first frame.
    * Drawn onto the scrubber and clickable, so a two-minute clip says where
    * its two seconds of interest are.
@@ -228,7 +236,9 @@ interface DemoViewerProps {
    * dialog opens.
    */
   onCameraStateReady?: (
-    read: (() => { camera: CameraMode; follow: number; players: DemoPlayerInfo[] }) | null,
+    read:
+      | (() => { camera: CameraMode; follow: number; players: DemoPlayerInfo[]; durationMs: number })
+      | null,
   ) => void
   /**
    * Where to go when this one finishes. Named rather than just arrows, because
@@ -255,6 +265,7 @@ export function DemoViewer({
   followName,
   onPlaybackStarted,
   onMapDetected,
+  onDurationDetected,
   moments = [],
   onRemoveMoment,
   onPositionChange,
@@ -466,10 +477,13 @@ export function DemoViewer({
   onStartedRef.current = onPlaybackStarted
   const onMapRef = useRef(onMapDetected)
   onMapRef.current = onMapDetected
+  const onDurationRef = useRef(onDurationDetected)
+  onDurationRef.current = onDurationDetected
   const onPositionRef = useRef(onPositionChange)
   onPositionRef.current = onPositionChange
   // Reported once per loaded recording, not once per poll.
   const mapReportedRef = useRef(false)
+  const durationReportedRef = useRef(false)
 
   const base =
     engineBaseUrl ?? process.env.NEXT_PUBLIC_DEMO_ENGINE_URL ?? "http://127.0.0.1:8090"
@@ -706,7 +720,16 @@ export function DemoViewer({
       },
       onPlaybackEnded: (real) => {
         if (cancelled || restartingRef.current || !playedRef.current) return
-        if (real > 0) setSpan(real)
+        if (real > 0) {
+          setSpan(real)
+          // The one moment the exact length is known: the file has been read to
+          // its end. Hand it up so an upload that started with no duration can
+          // record one.
+          if (!durationReportedRef.current) {
+            durationReportedRef.current = true
+            onDurationRef.current?.(Math.round(real))
+          }
+        }
         setEnded(true)
       },
     })
@@ -796,6 +819,7 @@ export function DemoViewer({
     playedRef.current = false
     startedNotifiedRef.current = false
     mapReportedRef.current = false
+    durationReportedRef.current = false
     setFailed(null)
     setStatus("Loading demo…")
 
@@ -1089,6 +1113,10 @@ export function DemoViewer({
       camera: cameraRef.current,
       follow: followRef.current,
       players: playersRef.current,
+      // Best figure the engine has right now: the exact length once the demo
+      // has played out, a solid record-count estimate before then. Either beats
+      // the zero an un-trimmed upload carries in the database.
+      durationMs: engineRef.current?.getDuration(durationMs) ?? durationMs,
     }))
 
     if (!engine?.canTrim) {
