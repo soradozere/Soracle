@@ -25,9 +25,13 @@ import { rankByName } from "./rank-order"
  * and it flatters everyone equally, but it is not nothing.
  *
  * DATA WINDOW: match_kills only exists from 9 Aug 2026 (migration 037) and
- * cannot be backfilled — the CSV era has no kill matrix. Callers must present
- * this as "since tracking began", never as a monthly stat, or the numbers imply
- * a history they do not have.
+ * cannot be backfilled — the CSV era has no kill matrix. Month-scoping is fine
+ * (the Reports tab and the =caps bot endpoint both do it) BECAUSE
+ * computeCapConversion limits itself to matches the matrix actually covers:
+ * captures and returns are always drawn from the same covered matches, so the
+ * ratio is honest even when a month is only partly covered. What breaks the
+ * ratio is counting whole-career captures against a partial return history —
+ * which is why the all-time path is gone.
  */
 
 /** Fraction of the top player's resolved runs needed to make the board. */
