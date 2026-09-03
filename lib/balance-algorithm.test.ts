@@ -518,3 +518,56 @@ describe("floor balance — the weak-floor team loses too often", () => {
     expect(withTerm).toBeLessThanOrEqual(2)
   })
 })
+
+describe("mid-core balance — a carry plus a passenger hides a lopsided core", () => {
+  // Real 2 Sep 2026 lobby, lost 0-7 as the balancer's own Perfect Balance. bizzle
+  // (tier 10, sole star) and besty (tier 1, non-player) cancel out in the tier sum,
+  // so a 36-35 split was reached by handing Red the five weakest bodies and Blue the
+  // five strongest. Drop each team's best and worst and the working cores were 22 v 27.
+  const lobby = [
+    mk("bizzle", 10, 10, 10, 0, 0, 0),
+    mk("jin", 7, 7, 7, 7, 8, 7),
+    mk("shax", 7, 8, 7, 0, 7, 0),
+    mk("phoenix", 7, 7, 0, 0, 0, 8),
+    mk("retpecs", 7, 8, 0, 0, 0, 0),
+    mk("flawless", 6, 0, 0, 6, 6, 5),
+    mk("luke", 6, 6, 0, 0, 7, 5),
+    mk("eze", 6, 0, 0, 8, 7, 0),
+    mk("viktor", 5, 4, 0, 0, 5, 0),
+    mk("sora", 5, 4, 0, 3, 5, 5),
+    mk("Voodoo", 4, 0, 0, 0, 4, 0),
+    mk("besty", 1, 0, 0, 0, 1, 1),
+  ]
+  const midCoreGap = (o: { result: { teamRed: string[]; teamBlue: string[] } }) => {
+    const core = (names: string[]) => {
+      const t = names.map((n) => lobby.find((p) => p.name === n)!.tierValue).sort((a, b) => a - b)
+      return t.slice(1, -1).reduce((s, x) => s + x, 0)
+    }
+    return Math.abs(core(o.result.teamRed) - core(o.result.teamBlue))
+  }
+
+  afterEach(() => {
+    CONFIG.tier.MID_CORE_WEIGHT = 4
+  })
+
+  it("does not recommend the split that pools the weak bodies with the carry", () => {
+    const options = balanceTeamsWithOptions(
+      lobby.map((p) => p.name),
+      lobby,
+    )
+    // the split that was played and lost 0-7
+    expect(sameTeam(options[0], "bizzle", "Voodoo") && sameTeam(options[0], "bizzle", "viktor")).toBe(false)
+    expect(midCoreGap(options[0])).toBeLessThanOrEqual(2)
+  })
+
+  it("is the term doing it — zeroing MID_CORE_WEIGHT brings the lopsided core back", () => {
+    const withTerm = midCoreGap(balanceTeamsWithOptions(lobby.map((p) => p.name), lobby)[0])
+
+    CONFIG.tier.MID_CORE_WEIGHT = 0
+    const withoutTerm = midCoreGap(balanceTeamsWithOptions(lobby.map((p) => p.name), lobby)[0])
+
+    // Old build recommended a middle-four gap of 5 here; the term pulls it to 1.
+    expect(withTerm).toBeLessThan(withoutTerm)
+    expect(withoutTerm).toBeGreaterThanOrEqual(4)
+  })
+})

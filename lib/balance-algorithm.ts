@@ -25,6 +25,16 @@ export const CONFIG = {
     // "weak-floor team is also the lighter team" compounding case from 58 lobbies to 46.
     FLOOR_REF: 5,
     FLOOR_WEIGHT: 15,
+    // Mid-core balance (section 4d). The tier TOTAL, the top-3 and the bottom-3 all
+    // still let a carry and a passenger cancel out: bizzle (10) and besty (1) sum to 11,
+    // so a 36-35 split can be reached by handing one team the five weakest bodies and
+    // the other the five strongest. Drop each team's single best and single worst
+    // player and compare the four who are left — the ones who decide the game once the
+    // star is contained and the passenger is irrelevant. For a lobby with no real
+    // outlier this removes two near-average players from each side and barely moves,
+    // so it only bites when there genuinely is a carry or a passenger. Squared diff,
+    // same shape as the other tier terms.
+    MID_CORE_WEIGHT: 4.0,
   },
   elite: {
     THRESHOLD: 8,
@@ -246,6 +256,16 @@ function floorDrag(team: Player[]): number {
   return team.reduce((s, p) => s + Math.pow(Math.max(0, ref - p.tierValue), 2), 0)
 }
 
+// A team's "mid core": its tier sum with the single highest and single lowest player
+// dropped. For the standard six-player team that is the middle four. See
+// CONFIG.tier.MID_CORE_WEIGHT — this is the part of the roster the tier total, top-3
+// and bottom-3 all fail to protect when a carry and a passenger cancel out in the sum.
+function midCore(team: Player[]): number {
+  if (team.length < 3) return team.reduce((s, p) => s + p.tierValue, 0)
+  const sorted = team.map((p) => p.tierValue).sort((a, b) => a - b)
+  return sorted.slice(1, -1).reduce((s, t) => s + t, 0)
+}
+
 // Best-capper / best-chaser separation — keep one team from owning BOTH pivotal duel
 // roles. Shared by the tier and ELO evaluators, which differ only in penalty scale.
 //
@@ -414,7 +434,12 @@ export function evaluateSplit(team1: Player[], team2: Player[], topPlayer: Playe
   // team totals catches one side pooling the weak bodies even when the tier sums match.
   score += Math.abs(floorDrag(team1) - floorDrag(team2)) * CONFIG.tier.FLOOR_WEIGHT
 
-  // 4d. Elite stack penalty — one team must not hoard the tier-8+ players. Flat and
+  // 4d. Mid-core balance — see CONFIG.tier.MID_CORE_WEIGHT. Drop each team's best and
+  // worst player and balance the four who remain, so a carry and a passenger can't
+  // cancel out in the total while the working core is lopsided.
+  score += Math.pow(midCore(team1) - midCore(team2), 2) * CONFIG.tier.MID_CORE_WEIGHT
+
+  // 4e. Elite stack penalty — one team must not hoard the tier-8+ players. Flat and
   // constraint-like on purpose: a graduated count-difference term is worth only single
   // digits at 3-v-1 and gets routinely outbid by role-sum smoothing; the flat penalty
   // is what actually enforces the rule.
@@ -460,8 +485,10 @@ function evaluateOffRoleSplit(team1: Player[], team2: Player[], topPlayer: Playe
     sortedTier1.slice(-3).reduce((a, b) => a + b, 0) - sortedTier2.slice(-3).reduce((a, b) => a + b, 0)
   score += Math.pow(bottom3Diff, 2) * CONFIG.tier.BOTTOM_3_WEIGHT
 
-  // Floor balance — a pure tier term, so it applies to the role-blind card too. See 4c.
+  // Floor + mid-core balance — pure tier terms, so they apply to the role-blind card
+  // too. See 4c / 4d.
   score += Math.abs(floorDrag(team1) - floorDrag(team2)) * CONFIG.tier.FLOOR_WEIGHT
+  score += Math.pow(midCore(team1) - midCore(team2), 2) * CONFIG.tier.MID_CORE_WEIGHT
 
   const elites1 = team1.filter((p) => p.tierValue >= CONFIG.elite.THRESHOLD).length
   const elites2 = team2.filter((p) => p.tierValue >= CONFIG.elite.THRESHOLD).length
