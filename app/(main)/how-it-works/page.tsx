@@ -119,7 +119,22 @@ export default function HowItWorksPage() {
                 <span className="text-primary font-mono font-bold">•</span>
                 <div>
                   <strong className="text-text-bright">Bottom-3 vs Bottom-3</strong>
-                  <p className="text-sm text-text-dim mt-1">Same idea for the three weakest, so one team doesn&apos;t get a much lower floor.</p>
+                  <p className="text-sm text-text-dim mt-1">
+                    Same idea for the three weakest, so one team doesn&apos;t get a much lower floor — and the gap
+                    between each team&apos;s single weakest player is weighted extra, because a tier 3 drags a team
+                    down more than the flat one-point difference to a tier 4 suggests.
+                  </p>
+                </div>
+              </li>
+              <li className="flex items-start gap-3">
+                <span className="text-primary font-mono font-bold">•</span>
+                <div>
+                  <strong className="text-text-bright">The middle of the roster</strong>
+                  <p className="text-sm text-text-dim mt-1">
+                    Set each team&apos;s single best and single worst player aside, and the four in between should
+                    still be even. A star on one side and a very weak player on the other can otherwise cancel out
+                    in the totals while the players who actually decide the game are lopsided.
+                  </p>
                 </div>
               </li>
               <li className="flex items-start gap-3">
