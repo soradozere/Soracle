@@ -330,6 +330,13 @@ export function ScoreboardReview({
       resolution: SubResolution
       droppedKeys: number[]
       droppedRowIndices: number[]
+      // For keep-starter/keep-finisher: the team and capture count the dropped
+      // row carried. The capture genuinely happened and still counts toward
+      // the team score, but it is NOT folded into the kept player's own
+      // match_stats row — that would credit them with a capture (and kills,
+      // deaths, etc) that belonged to whoever they were subbed for/by.
+      team: TeamClass | null
+      droppedCaptures: number
     }>
   >([])
   const [showSubPanel, setShowSubPanel] = useState(false)
@@ -587,11 +594,21 @@ export function ScoreboardReview({
     if (effective !== "keep-both" && rows.length !== 2) effective = "keep-both"
 
     let droppedRows: DisplayRow[] = []
+    let droppedCaptures = 0
     if (effective === "keep-starter" || effective === "keep-finisher") {
       const [a, b] = rows
       const ta = toInt(effectiveData(a)["TIME-SUM"])
       const tb = toInt(effectiveData(b)["TIME-SUM"])
-      droppedRows = effective === "keep-starter" ? [ta >= tb ? b : a] : [ta >= tb ? a : b]
+      const dropped = effective === "keep-starter" ? (ta >= tb ? b : a) : ta >= tb ? a : b
+      droppedRows = [dropped]
+
+      // Dropping the other row picks who gets individual credit for the
+      // slot — it must not also erase a capture that genuinely happened. The
+      // capture still counts toward the team score, but it is NOT folded into
+      // the kept player's own row: that would credit them with someone
+      // else's capture (and kills, deaths, etc), corrupting their personal
+      // stats to fix the team total.
+      droppedCaptures = toInt(effectiveData(dropped)["CAPTURES-SUM"])
     }
 
     setSubstitutionResolutions((prev) => [
@@ -601,6 +618,8 @@ export function ScoreboardReview({
         resolution: effective,
         droppedKeys: droppedRows.map(flagKeyOf),
         droppedRowIndices: droppedRows.flatMap(indicesOf),
+        team: droppedRows.length > 0 ? team : null,
+        droppedCaptures,
       },
     ])
     setRowFlags((prev) => {
@@ -662,6 +681,14 @@ export function ScoreboardReview({
         blueScore += captures
       }
       matchStats.push(buildMatchStat(data, playerId, d.team, d.partial))
+    }
+
+    // A dropped substitution row still contributed real captures to the final
+    // score even though nobody's individual match_stats row carries them —
+    // add them back in at the team level so score stays true to the match.
+    for (const r of substitutionResolutions) {
+      if (r.team === "Red") redScore += r.droppedCaptures
+      else if (r.team === "Blue") blueScore += r.droppedCaptures
     }
 
     return {
