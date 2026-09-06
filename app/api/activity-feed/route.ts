@@ -47,5 +47,11 @@ export async function GET() {
     .sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
     .slice(0, FEED_SIZE)
 
-  return NextResponse.json({ activityFeed })
+  // For the launcher's Home "community pulse" line - cheap, since both are
+  // already-computed fields off data this route fetches anyway.
+  const activePlayers = Object.values(home.monthlyPlayerStats).filter(
+    (s) => s.wins + s.losses + s.draws > 0,
+  ).length
+
+  return NextResponse.json({ activityFeed, totalMatches, activePlayers })
 }
