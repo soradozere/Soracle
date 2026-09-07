@@ -304,7 +304,20 @@ async function impact(request: Request) {
   // board.rows is already sorted best-first (production + W/L adjustment, then
   // games, then name); `rating` is that same quantity on a 50/12 scale, so
   // handing back the rows in order preserves the board's order.
-  const top = board.rows.map((r) => ({ name: r.name, value: r.rating }))
+  //
+  // `matches` is the count that fed the rating (statted games only — impact is a
+  // per-match total averaged over matches played, and this is that denominator).
+  // `wins`/`losses` are over every match in scope, statted or not, so they can
+  // sum past `matches`. `role` is the board's own detected main role for the
+  // period (detectRole in lib/production-rating.ts): cap | base | returns | support.
+  const top = board.rows.map((r) => ({
+    name: r.name,
+    value: r.rating,
+    matches: r.games,
+    role: r.mainRole,
+    wins: r.wins,
+    losses: r.losses,
+  }))
 
   return NextResponse.json({
     stat: "impact",
