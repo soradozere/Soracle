@@ -119,7 +119,18 @@ export const CALIBRATION = {
    * hand tiers left alone scored 67.8%, beating EVERY calibrator setting.
    */
   MIN_GAMES: 5,
-  /** Only the most recent N games at the current tier count — form, not history. */
+  /**
+   * How many of the most recent games a check reads. Form, not history.
+   *
+   * Until 12 Sep 2026 this bounded the number of CHECKS rather than the window
+   * they read: checks fired at 5, 10 and 15 games on a mean accumulated from
+   * the tier change, and then stopped forever. A player past 15 games at one
+   * tier became unreachable — eight of them on the live roster, one sitting
+   * 0.146 off a demotion with 19 games and no way to ever get there — and the
+   * games that counted were the OLDEST fifteen, on a cumulative average, which
+   * is the opposite of what this comment promised. Identical behaviour under 15
+   * games, which is why it went unnoticed for so long.
+   */
   WINDOW_CAP: 15,
 
   /**
@@ -217,22 +228,20 @@ export type CalibrationState = {
   latent: number
   /** The latent after each evaluation, starting from `tier`. Their trajectory. */
   trajectory: number[]
-  /** What production says their tier is, averaged over the window. Null before any scoreboard. */
+  /**
+   * What production says their tier is, over the most recent WINDOW_CAP
+   * appearances — the same window the next check will read. Null before any
+   * scoreboard.
+   */
   estimatedTier: number | null
   /** Appearances at this tier since their last tier change. */
   games: number
   /** Those appearances carrying a usable scoreboard — the evidence a move rests on. */
   productionGames: number
-  /** Nudges that have fired. At most WINDOW_CAP / MIN_GAMES of them per placement. */
+  /** Nudges that have fired since the last tier change. One per MIN_GAMES games. */
   evaluations: number
-  /**
-   * True once productionGames has passed WINDOW_CAP: later games still feed the
-   * running mean, but no further evaluation reads it, so the latent is final
-   * until a tier change resets the window.
-   */
-  frozen: boolean
-  /** Scoreboards until the next nudge, or null once frozen. */
-  gamesToNextEvaluation: number | null
+  /** Scoreboards until the next check. */
+  gamesToNextEvaluation: number
   actualWinRate: number
   expectedWinRate: number
   gap: number
@@ -416,7 +425,8 @@ export function computeCalibrationStates(
     let games = 0
     let wins = 0
     let expectedSum = 0
-    let estimateSum = 0
+    /** The most recent WINDOW_CAP per-appearance estimates — what a check reads. */
+    const window: number[] = []
     let productionGames = 0
     let latent = currentTier
     // Seeded with the tier itself so the array reads as the path from where the
@@ -468,15 +478,20 @@ export function computeCalibrationStates(
         const lobbyTiers = [...match.red_tiers, ...match.blue_tiers]
         const lobbyMean = lobbyTiers.reduce((a, b) => a + b, 0) / lobbyTiers.length
         const offset = roleOffset.get(appearance.role) ?? 0
-        estimateSum += lobbyMean + z / opts.PRODUCTION_Z_PER_TIER - offset
+        window.push(lobbyMean + z / opts.PRODUCTION_Z_PER_TIER - offset)
+        // Only the most recent WINDOW_CAP appearances vote. Dropping the oldest
+        // here rather than capping the checks is the whole point: a player is
+        // never out of reach of a correction, and their form from three months
+        // ago never outvotes last week's.
+        if (window.length > opts.WINDOW_CAP) window.shift()
         productionGames++
       }
 
-      // One evaluation per MIN_GAMES games, on the evidence gathered so far.
-      // Capped at WINDOW_CAP so a long unbroken run at one tier does not let
-      // ancient form keep voting.
-      if (productionGames > 0 && productionGames % opts.MIN_GAMES === 0 && productionGames <= opts.WINDOW_CAP) {
-        const estimate = estimateSum / productionGames
+      // One check every MIN_GAMES games, on the window as it stands. Checks do
+      // not stop: a player whose form changes after a long run at one tier is
+      // corrected like anyone else, which is what the cap above always claimed.
+      if (productionGames > 0 && productionGames % opts.MIN_GAMES === 0) {
+        const estimate = window.reduce((a, b) => a + b, 0) / window.length
         const stepped = latent + opts.NUDGE_RATE * (estimate - latent)
         latent = Math.min(
           currentTier + opts.MAX_DRIFT,
@@ -497,15 +512,13 @@ export function computeCalibrationStates(
       tier: currentTier,
       latent,
       trajectory,
-      estimatedTier: productionGames > 0 ? estimateSum / productionGames : null,
+      // The window the NEXT check will read, which is also the number an admin
+      // means by "what are they playing like lately".
+      estimatedTier: window.length > 0 ? window.reduce((a, b) => a + b, 0) / window.length : null,
       games,
       productionGames,
       evaluations: trajectory.length - 1,
-      // At or past the cap, the next multiple of MIN_GAMES is already out of
-      // reach, so no further nudge can ever fire at this tier.
-      frozen: productionGames >= opts.WINDOW_CAP,
-      gamesToNextEvaluation:
-        productionGames >= opts.WINDOW_CAP ? null : opts.MIN_GAMES - (productionGames % opts.MIN_GAMES),
+      gamesToNextEvaluation: opts.MIN_GAMES - (productionGames % opts.MIN_GAMES),
       actualWinRate,
       expectedWinRate,
       gap: actualWinRate - expectedWinRate,
