@@ -206,9 +206,47 @@ export type Appearance = {
 export type ProductionByMatch = Map<string, Map<string, Appearance>>
 
 /**
- * Pure core: which of `candidates` should move, given the match history and
- * current tiers. No I/O — the save-path runner, the tests, and the history
- * replay all call this same function.
+ * Where one player stands with the calibrator right now — the working state
+ * computeTierMoves reduces to a yes/no, kept whole so it can also be displayed.
+ */
+export type CalibrationState = {
+  name: string
+  /** The tier they hold, and the tier the latent is measured against. */
+  tier: number
+  /** The fractional tier after nudging. A move is written when this rounds off `tier`. */
+  latent: number
+  /** The latent after each evaluation, starting from `tier`. Their trajectory. */
+  trajectory: number[]
+  /** What production says their tier is, averaged over the window. Null before any scoreboard. */
+  estimatedTier: number | null
+  /** Appearances at this tier since their last tier change. */
+  games: number
+  /** Those appearances carrying a usable scoreboard — the evidence a move rests on. */
+  productionGames: number
+  /** Nudges that have fired. At most WINDOW_CAP / MIN_GAMES of them per placement. */
+  evaluations: number
+  /**
+   * True once productionGames has passed WINDOW_CAP: later games still feed the
+   * running mean, but no further evaluation reads it, so the latent is final
+   * until a tier change resets the window.
+   */
+  frozen: boolean
+  /** Scoreboards until the next nudge, or null once frozen. */
+  gamesToNextEvaluation: number | null
+  actualWinRate: number
+  expectedWinRate: number
+  gap: number
+}
+
+/**
+ * Pure core: where each of `candidates` currently stands, given the match
+ * history and current tiers. No I/O — the save-path runner, the admin panels,
+ * the tests and the history replay all reach this same function, most of them
+ * through computeTierMoves below.
+ *
+ * It reports every candidate it can evaluate, including the ones going nowhere:
+ * a latent that has drifted a third of a tier is invisible in the move list but
+ * is exactly what an admin watching for a coming move needs to see.
  *
  * `matches` may arrive in any order; evaluation walks newest-first so the
  * WINDOW_CAP keeps recent form. Draws are skipped outright: a draw is evidence
@@ -299,14 +337,14 @@ const MIN_ROLE_SAMPLE = 30
  * nothing automatic helps, this included. Every measurement taken on the real
  * league points that way, which is why NUDGE_RATE is set timid.
  */
-export function computeTierMoves(
+export function computeCalibrationStates(
   matches: CalibrationMatch[],
   currentTiers: Map<string, number>,
   candidates: string[],
   lastTierChangeAt: Map<string, string>,
   production: ProductionByMatch = new Map(),
   opts: typeof CALIBRATION = CALIBRATION,
-): TierMove[] {
+): CalibrationState[] {
   // Oldest first: the latent is built forward from the last tier change.
   const oldestFirst = [...matches].sort((a, b) => a.created_at.localeCompare(b.created_at))
   const zByMatch = new Map<string, Map<string, number>>()
@@ -363,7 +401,7 @@ export function computeTierMoves(
     if (n >= MIN_ROLE_SAMPLE) roleOffset.set(role, sum / n)
   }
 
-  const moves: TierMove[] = []
+  const states: CalibrationState[] = []
 
   for (const name of new Set(candidates)) {
     const currentTier = currentTiers.get(name)
@@ -381,6 +419,9 @@ export function computeTierMoves(
     let estimateSum = 0
     let productionGames = 0
     let latent = currentTier
+    // Seeded with the tier itself so the array reads as the path from where the
+    // admin put them to where production has pulled them.
+    const trajectory: number[] = [currentTier]
 
     for (const match of oldestFirst) {
       if (!match.red_tiers || !match.blue_tiers) continue
@@ -441,13 +482,72 @@ export function computeTierMoves(
           currentTier + opts.MAX_DRIFT,
           Math.max(currentTier - opts.MAX_DRIFT, stepped),
         )
+        trajectory.push(latent)
       }
     }
 
-    if (games < opts.MIN_GAMES) continue
+    // Everyone evaluable is reported, including the players going nowhere —
+    // computeTierMoves applies the floors and the rounding. A player with no
+    // games at all still yields a row so the panel can say "no evidence yet"
+    // rather than omitting them without explanation.
+    const actualWinRate = games > 0 ? wins / games : 0
+    const expectedWinRate = games > 0 ? expectedSum / games : 0
+    states.push({
+      name,
+      tier: currentTier,
+      latent,
+      trajectory,
+      estimatedTier: productionGames > 0 ? estimateSum / productionGames : null,
+      games,
+      productionGames,
+      evaluations: trajectory.length - 1,
+      // At or past the cap, the next multiple of MIN_GAMES is already out of
+      // reach, so no further nudge can ever fire at this tier.
+      frozen: productionGames >= opts.WINDOW_CAP,
+      gamesToNextEvaluation:
+        productionGames >= opts.WINDOW_CAP ? null : opts.MIN_GAMES - (productionGames % opts.MIN_GAMES),
+      actualWinRate,
+      expectedWinRate,
+      gap: actualWinRate - expectedWinRate,
+    })
+  }
+
+  return states
+}
+
+/**
+ * Which of `candidates` should move. The decision layer over
+ * computeCalibrationStates: the evidence floors, the rounding, and the one-tier
+ * clamp, and nothing else.
+ *
+ * Split out so the admin panels can read the same latent this acts on instead of
+ * recomputing it. That split is not cosmetic — the rank panel carried its own
+ * copy of this maths for months and silently disagreed with the engine about
+ * draws, the evidence window and duplicate names in a roster.
+ */
+export function computeTierMoves(
+  matches: CalibrationMatch[],
+  currentTiers: Map<string, number>,
+  candidates: string[],
+  lastTierChangeAt: Map<string, string>,
+  production: ProductionByMatch = new Map(),
+  opts: typeof CALIBRATION = CALIBRATION,
+): TierMove[] {
+  const moves: TierMove[] = []
+
+  for (const state of computeCalibrationStates(
+    matches,
+    currentTiers,
+    candidates,
+    lastTierChangeAt,
+    production,
+    opts,
+  )) {
+    if (state.games < opts.MIN_GAMES) continue
     // No scoreboard, no move. Falling back to the win-rate rule here would
-    // reinstate exactly the behaviour this replaced.
-    if (productionGames < opts.MIN_GAMES) continue
+    // reinstate exactly the behaviour this replaced. `estimatedTier` is null on
+    // exactly the rows with no scoreboard at all, and the floor covers the rest.
+    if (state.estimatedTier === null || state.productionGames < opts.MIN_GAMES) continue
 
     // One tier per write, always. The latent may sit up to MAX_DRIFT away — a
     // genuinely two-tier misplacement needs to keep earning it — but a player
@@ -455,23 +555,21 @@ export function computeTierMoves(
     // both alarming to the person it happens to and harder for an admin to
     // sanity-check. After the move the evidence window resets and the latent
     // restarts from the new tier, so the second step has to be earned again.
-    const rounded = Math.max(1, Math.min(10, Math.round(latent)))
-    const to = Math.max(currentTier - 1, Math.min(currentTier + 1, rounded))
-    if (to === currentTier) continue
+    const rounded = Math.max(1, Math.min(10, Math.round(state.latent)))
+    const to = Math.max(state.tier - 1, Math.min(state.tier + 1, rounded))
+    if (to === state.tier) continue
 
-    const actualWinRate = wins / games
-    const expectedWinRate = expectedSum / games
     moves.push({
-      name,
-      from: currentTier,
+      name: state.name,
+      from: state.tier,
       to,
-      actualWinRate,
-      expectedWinRate,
-      gap: actualWinRate - expectedWinRate,
-      games,
-      estimatedTier: estimateSum / productionGames,
-      latent,
-      productionGames,
+      actualWinRate: state.actualWinRate,
+      expectedWinRate: state.expectedWinRate,
+      gap: state.gap,
+      games: state.games,
+      estimatedTier: state.estimatedTier,
+      latent: state.latent,
+      productionGames: state.productionGames,
     })
   }
 

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest"
-import { CALIBRATION, computeTierMoves, type CalibrationMatch, type ProductionByMatch } from "@/lib/calibration"
+import {
+  CALIBRATION,
+  computeCalibrationStates,
+  computeTierMoves,
+  type CalibrationMatch,
+  type ProductionByMatch,
+} from "@/lib/calibration"
 import type { Job } from "@/lib/production-rating"
 
 /*
@@ -360,5 +366,112 @@ describe("computeTierMoves: the estimate is corrected for role", () => {
     // deliberate rather than discovered.
     const lone = productionAll(matches, 9, 5, "support", "cap")
     expect(run(matches, 5, ["subject"], new Map(), lone).length).toBeGreaterThanOrEqual(0)
+  })
+})
+
+/*
+ * computeCalibrationStates is the same accumulation computeTierMoves reduces to
+ * a yes/no, exposed whole so the admin panel can show the run-up to a move
+ * rather than only its arrival. These pin the parts a move never reveals: the
+ * trajectory, the check countdown, and the freeze at WINDOW_CAP.
+ */
+const runStates = (
+  matches: CalibrationMatch[],
+  tier = 5,
+  candidates = ["subject"],
+  lastTierChangeAt = new Map<string, string>(),
+  production: ProductionByMatch = new Map(),
+) => computeCalibrationStates(matches, new Map([["subject", tier]]), candidates, lastTierChangeAt, production)
+
+const statesPlaying = (n: number, impliedTier: number, tier = 5) => {
+  const matches = series(Array(n).fill(true), tier)
+  return runStates(matches, tier, ["subject"], new Map(), productionAll(matches, impliedTier))
+}
+
+describe("computeCalibrationStates: the trajectory", () => {
+  it("starts at the admin-set tier and records the latent after each check", () => {
+    const [state] = statesPlaying(15, 9)
+    expect(state.trajectory[0]).toBe(5)
+    expect(state.trajectory).toHaveLength(4) // the tier, then a check every 5 games
+    expect(state.evaluations).toBe(3)
+    // Played like a 9 throughout, so every check pulls the same way.
+    expect(state.trajectory[1]).toBeGreaterThan(state.trajectory[0])
+    expect(state.trajectory[2]).toBeGreaterThan(state.trajectory[1])
+    expect(state.trajectory[3]).toBeGreaterThan(state.trajectory[2])
+    expect(state.trajectory.at(-1)).toBeCloseTo(state.latent, 12)
+  })
+
+  it("has no checks before the floor, and leaves the latent on the tier", () => {
+    const [state] = statesPlaying(4, 9)
+    expect(state.evaluations).toBe(0)
+    expect(state.trajectory).toEqual([5])
+    expect(state.latent).toBe(5)
+    expect(state.games).toBe(4)
+    expect(state.gamesToNextEvaluation).toBe(1)
+  })
+})
+
+describe("computeCalibrationStates: the freeze at WINDOW_CAP", () => {
+  it("stops checking past the cap and says so", () => {
+    const [state] = statesPlaying(22, 9)
+    expect(state.productionGames).toBe(22)
+    expect(state.evaluations).toBe(CALIBRATION.WINDOW_CAP / CALIBRATION.MIN_GAMES)
+    expect(state.frozen).toBe(true)
+    expect(state.gamesToNextEvaluation).toBeNull()
+  })
+
+  it("freezes on the latent it held at the cap, so later games cannot move it", () => {
+    const [atCap] = statesPlaying(15, 9)
+    const [wellPast] = statesPlaying(22, 9)
+    expect(wellPast.latent).toBeCloseTo(atCap.latent, 12)
+    expect(atCap.frozen).toBe(true)
+  })
+
+  it("counts down to the next check while there are still checks left", () => {
+    expect(statesPlaying(7, 9)[0].gamesToNextEvaluation).toBe(3)
+    expect(statesPlaying(9, 9)[0].gamesToNextEvaluation).toBe(1)
+    expect(statesPlaying(10, 9)[0].gamesToNextEvaluation).toBe(5)
+  })
+})
+
+describe("computeCalibrationStates: what it reports that a move does not", () => {
+  it("reports a drifting player the move list omits", () => {
+    const matches = series(Array(5).fill(true), 5)
+    const production = productionAll(matches, 6)
+    const moves = run(matches, 5, ["subject"], new Map(), production)
+    const [state] = runStates(matches, 5, ["subject"], new Map(), production)
+    expect(moves).toHaveLength(0)
+    expect(state.latent).toBeGreaterThan(5)
+    expect(state.latent).toBeLessThan(5.5)
+    expect(state.estimatedTier).toBeCloseTo(6, 6)
+  })
+
+  it("agrees with the move it produces, to the last decimal", () => {
+    const matches = series(Array(15).fill(true), 5)
+    const production = productionAll(matches, 9)
+    const [move] = run(matches, 5, ["subject"], new Map(), production)
+    const [state] = runStates(matches, 5, ["subject"], new Map(), production)
+    expect(move).toBeDefined()
+    expect(state.latent).toBe(move.latent)
+    expect(state.estimatedTier).toBe(move.estimatedTier)
+    expect(state.productionGames).toBe(move.productionGames)
+    expect(state.games).toBe(move.games)
+  })
+
+  it("reports a player with games but no scoreboards as having no estimate", () => {
+    const [state] = runStates(series(Array(8).fill(true), 5), 5)
+    expect(state.games).toBe(8)
+    expect(state.productionGames).toBe(0)
+    expect(state.estimatedTier).toBeNull()
+    expect(state.evaluations).toBe(0)
+    expect(state.latent).toBe(5)
+  })
+
+  it("reports a candidate with no games at all rather than dropping them", () => {
+    const [state] = runStates([], 5)
+    expect(state.name).toBe("subject")
+    expect(state.games).toBe(0)
+    expect(state.frozen).toBe(false)
+    expect(state.gamesToNextEvaluation).toBe(CALIBRATION.MIN_GAMES)
   })
 })
