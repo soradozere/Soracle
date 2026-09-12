@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { ExportDataButton } from "@/components/export-data-button"
 import { readAutoCalibrationEnabled } from "@/lib/calibration"
 import Link from "next/link"
-import { LogOut, Home, Settings, Youtube } from "lucide-react"
+import { LogOut, Home, Settings, Youtube, Activity } from "lucide-react"
 
 export default async function AdminPage() {
   // Full-admin only (a Supabase Auth admin, or a player login promoted to
@@ -28,6 +28,12 @@ export default async function AdminPage() {
         actions={
           <>
             <ExportDataButton />
+            <Link href="/admin/progress">
+              <Button variant="outline" size="sm">
+                <Activity className="h-4 w-4 mr-2" />
+                Progress
+              </Button>
+            </Link>
             <Link href="/admin/renders">
               <Button variant="outline" size="sm">
                 <Youtube className="h-4 w-4 mr-2" />
@@ -75,7 +81,7 @@ export default async function AdminPage() {
 
         <AdminSection
           title="Rank Suggestions"
-          description="Players who are consistently over- or under-performing relative to their tier, based on match history analysis."
+          description="Players the calibrator would move right now. For the run-up — who is drifting toward a move, and how close they are — see Calibration Progress."
         >
           <RankSuggestions />
         </AdminSection>

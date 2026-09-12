@@ -126,6 +126,39 @@ export function mergeRowData(rows: CsvRow[]): CsvRow {
   return merged
 }
 
+// TomArrow's scoreboard writes every counter twice: `-CURRENT` is the stint the
+// player is on right now, `-SUM` every stint they had in this match. We store the
+// SUM, because a player who drops and reconnects has the first half of their match
+// only in there.
+//
+// BC-SUM alone comes back inflated, on rows where the player never left: 19 of the
+// 2,162 rows uploaded to date carry a BC-SUM above their BC-CURRENT while
+// TIME-CURRENT and TIME-SUM agree — no earlier stint exists for the extra cleans to
+// have come from. In 7 of those the inflated figure is larger than the player's
+// total KILLS, which is impossible for a counter of kills: BC <= KILLS holds on all
+// 2,065 rows the divergence doesn't touch, and BC-CURRENT never breaks it on the
+// ones it does. Reported by Sora, 12 Sep 2026 — Flawless's 121 against a real 94.
+//
+// So BC-SUM is trusted only where the row evidences an earlier stint. Without one,
+// BC-CURRENT is the number the scoreboard showed at intermission and the excess is
+// the exporter's own accumulator having drifted. Deliberately BC-only: SCORE-SUM
+// also runs a point or two ahead of SCORE-CURRENT on this kind of row, but a score
+// can't be checked against anything, the gap is noise, and rewriting it would be a
+// guess. Rows from the old CSV export carry no `-CURRENT` at all and are untouched.
+export function repairBcOvercount(row: CsvRow): { row: CsvRow; warning: string | null } {
+  if (row["BC-CURRENT"] === undefined) return { row, warning: null }
+  const current = toInt(row["BC-CURRENT"])
+  const sum = toInt(row["BC-SUM"])
+  if (sum <= current) return { row, warning: null }
+  // An earlier stint is real, and only the SUM carries it.
+  if (toInt(row["TIME-SUM"]) > toInt(row["TIME-CURRENT"])) return { row, warning: null }
+  const name = (row["NAME-CLEAN"] ?? "").trim() || "(blank name)"
+  return {
+    row: { ...row, "BC-SUM": String(current) },
+    warning: `${name}: base cleans corrected ${sum} \u2192 ${current} \u2014 the scoreboard's BC-SUM over-counted (no reconnect on this row).`,
+  }
+}
+
 // Map a finished row to a match_stats insert payload. CSV counter columns map
 // 1:1 to DB fields; player_id, team and played_partial come from the review UI.
 export function buildMatchStat(
@@ -286,9 +319,19 @@ export function summarizeParsedRows(
     (row) => (row["LAST-NONSPEC-TEAM"] ?? "").trim() !== "Spectator",
   )
 
+  // Repair the exporter's inflated BC-SUM here, before anything reads a row: the
+  // review table, the match_stats payload and the stored `parsed` JSON all take
+  // their numbers from this list, and they have to agree.
+  const rows: CsvRow[] = []
+  for (const row of nonSpec) {
+    const repaired = repairBcOvercount(row)
+    rows.push(repaired.row)
+    if (repaired.warning) warnings.push(repaired.warning)
+  }
+
   // Surface any unexpected team values (not Red/Blue/Spectator).
   const unexpected = new Map<string, number>()
-  for (const row of nonSpec) {
+  for (const row of rows) {
     const team = (row["LAST-NONSPEC-TEAM"] ?? "").trim()
     if (team !== "Red" && team !== "Blue") {
       const label = team === "" ? "(empty)" : team
@@ -313,7 +356,7 @@ export function summarizeParsedRows(
   let blueCount = 0
   let redScore = 0
   let blueScore = 0
-  for (const row of nonSpec) {
+  for (const row of rows) {
     const team = (row["LAST-NONSPEC-TEAM"] ?? "").trim()
     const captures = toInt(row["CAPTURES-SUM"])
     if (team === "Red") {
@@ -326,9 +369,9 @@ export function summarizeParsedRows(
   }
 
   // Low-row-count warning.
-  if (nonSpec.length < 12) {
+  if (rows.length < 12) {
     warnings.push(
-      `Only ${nonSpec.length} non-spectator rows found — expected at least 12. Continuing anyway.`,
+      `Only ${rows.length} non-spectator rows found — expected at least 12. Continuing anyway.`,
     )
   }
 
@@ -337,7 +380,7 @@ export function summarizeParsedRows(
     summary: {
       filename,
       timestampIso,
-      rows: nonSpec,
+      rows,
       redCount,
       blueCount,
       redScore,
