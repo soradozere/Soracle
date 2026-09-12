@@ -245,11 +245,16 @@ describe("computeTierMoves: the evidence window", () => {
     expect(run(matches, 5, ["subject"], reset, production)).toHaveLength(1)
   })
 
-  it("counts only the most recent WINDOW_CAP evaluations", () => {
-    // Evaluations stop at WINDOW_CAP, so a very long run cannot keep nudging.
+  it("keeps nudging over a long run, bounded by MAX_DRIFT rather than by a checks limit", () => {
+    // This used to assert the opposite — that 60 games and 15 landed on the same
+    // latent, because checks stopped at WINDOW_CAP and a player past it could
+    // never move again. That was a bug against what WINDOW_CAP documents (the
+    // most recent N games, form not history), fixed 12 Sep 2026. A sustained run
+    // now keeps pulling, and MAX_DRIFT is what stops it.
     const long = runPlaying(60, 8)
     const capped = runPlaying(15, 8)
-    expect(long[0].latent).toBeCloseTo(capped[0].latent, 10)
+    expect(long[0].latent).toBeGreaterThan(capped[0].latent)
+    expect(long[0].latent).toBeCloseTo(5 + CALIBRATION.MAX_DRIFT, 10)
   })
 
   it("skips draws entirely", () => {
@@ -411,26 +416,51 @@ describe("computeCalibrationStates: the trajectory", () => {
   })
 })
 
-describe("computeCalibrationStates: the freeze at WINDOW_CAP", () => {
-  it("stops checking past the cap and says so", () => {
+describe("computeCalibrationStates: the window rolls, it does not stop", () => {
+  it("keeps checking past WINDOW_CAP", () => {
     const [state] = statesPlaying(22, 9)
     expect(state.productionGames).toBe(22)
-    expect(state.evaluations).toBe(CALIBRATION.WINDOW_CAP / CALIBRATION.MIN_GAMES)
-    expect(state.frozen).toBe(true)
-    expect(state.gamesToNextEvaluation).toBeNull()
+    // A check every MIN_GAMES games, forever: 5, 10, 15, 20.
+    expect(state.evaluations).toBe(4)
+    expect(state.gamesToNextEvaluation).toBe(3)
   })
 
-  it("freezes on the latent it held at the cap, so later games cannot move it", () => {
-    const [atCap] = statesPlaying(15, 9)
-    const [wellPast] = statesPlaying(22, 9)
-    expect(wellPast.latent).toBeCloseTo(atCap.latent, 12)
-    expect(atCap.frozen).toBe(true)
+  it("reads only the most recent WINDOW_CAP games, so old form stops voting", () => {
+    // Fifteen games playing like a 9, then fifteen playing like a 2. By the end
+    // the window holds nothing but the recent collapse.
+    const matches = series(Array(30).fill(true), 5)
+    const production: ProductionByMatch = new Map([
+      ...productionAll(matches.slice(0, 15), 9),
+      ...productionAll(matches.slice(15), 2),
+    ])
+    const [state] = runStates(matches, 5, ["subject"], new Map(), production)
+
+    // The window holds only the collapse, so that is what the next check reads.
+    expect(state.estimatedTier).toBeCloseTo(2, 6)
+    // It rose on the strong half, peaked, and is now being pulled back down —
+    // a turn a cumulative mean could not make and a frozen window never sees.
+    // The nudge is timid by design, so one bad window bends the latent rather
+    // than reversing it outright.
+    const peak = Math.max(...state.trajectory)
+    expect(peak).toBeGreaterThan(5)
+    expect(state.trajectory.at(-1)).toBeLessThan(peak)
+    expect(state.trajectory.at(-1)).toBeLessThan(state.trajectory.at(-2)!)
   })
 
-  it("counts down to the next check while there are still checks left", () => {
+  it("is unchanged for a player inside the window", () => {
+    const [state] = statesPlaying(15, 9)
+    expect(state.evaluations).toBe(3)
+    expect(state.latent).toBeGreaterThan(5)
+    // Under WINDOW_CAP the trailing window IS every game played, so the
+    // estimate is still the plain average — this is the case that always worked.
+    expect(state.estimatedTier).toBeCloseTo(9, 6)
+  })
+
+  it("counts down to the next check and never stops", () => {
     expect(statesPlaying(7, 9)[0].gamesToNextEvaluation).toBe(3)
-    expect(statesPlaying(9, 9)[0].gamesToNextEvaluation).toBe(1)
     expect(statesPlaying(10, 9)[0].gamesToNextEvaluation).toBe(5)
+    expect(statesPlaying(18, 9)[0].gamesToNextEvaluation).toBe(2)
+    expect(statesPlaying(31, 9)[0].gamesToNextEvaluation).toBe(4)
   })
 })
 
@@ -471,7 +501,6 @@ describe("computeCalibrationStates: what it reports that a move does not", () =>
     const [state] = runStates([], 5)
     expect(state.name).toBe("subject")
     expect(state.games).toBe(0)
-    expect(state.frozen).toBe(false)
     expect(state.gamesToNextEvaluation).toBe(CALIBRATION.MIN_GAMES)
   })
 })

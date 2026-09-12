@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { RefreshCw, TrendingUp, TrendingDown, Lock, Minus } from "lucide-react"
+import { RefreshCw, TrendingUp, TrendingDown, Minus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   CALIBRATION,
@@ -131,7 +131,6 @@ export function CalibrationProgress() {
   }
 
   const evaluated = rows.filter((r) => r.evaluations > 0)
-  const frozen = rows.filter((r) => r.frozen)
 
   return (
     <div className="space-y-4">
@@ -146,7 +145,6 @@ export function CalibrationProgress() {
             ) : (
               "none would move now"
             )}
-            {frozen.length > 0 && ` · ${frozen.length} frozen`}
           </p>
           {!live && (
             <p className="text-xs text-[#8892a0] italic">
@@ -217,13 +215,11 @@ export function CalibrationProgress() {
                       {r.estimatedTier === null ? "—" : r.estimatedTier.toFixed(1)}
                     </td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums text-[#8892a0]">
-                      {r.productionGames}/{CALIBRATION.WINDOW_CAP}
-                      <span className="ml-1 text-[10px] text-[#8892a0]/70">({r.evaluations}/3 checks)</span>
+                      {r.productionGames}
+                      <span className="ml-1 text-[10px] text-[#8892a0]/70">({r.evaluations} check{r.evaluations === 1 ? "" : "s"})</span>
                     </td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums text-[#8892a0]">
-                      {r.gamesToNextEvaluation === null
-                        ? "—"
-                        : `${r.gamesToNextEvaluation} game${r.gamesToNextEvaluation === 1 ? "" : "s"}`}
+                      {r.gamesToNextEvaluation} game{r.gamesToNextEvaluation === 1 ? "" : "s"}
                     </td>
                     <td className="px-3 py-2 text-right font-mono tabular-nums text-[#c5c6c7]">
                       {unevaluated || capped ? "—" : distanceToMove(r).toFixed(3)}
@@ -231,10 +227,6 @@ export function CalibrationProgress() {
                     <td className="px-3 py-2">
                       {moving ? (
                         <span className="text-[#66fcf1] font-medium">Moves on the next save</span>
-                      ) : r.frozen ? (
-                        <span className="flex items-center gap-1 text-[#8892a0]">
-                          <Lock className="w-3 h-3" /> Frozen — no checks left
-                        </span>
                       ) : capped ? (
                         <span className="text-[#8892a0]">At the tier cap</span>
                       ) : unevaluated ? (
@@ -267,10 +259,9 @@ export function CalibrationProgress() {
           each check, starting from the tier an admin set.
         </p>
         <p>
-          A check fires every {CALIBRATION.MIN_GAMES} scoreboards and stops after {CALIBRATION.WINDOW_CAP}, so each
-          placement gets {CALIBRATION.WINDOW_CAP / CALIBRATION.MIN_GAMES} of them. Past that a player is{" "}
-          <span className="text-[#c5c6c7]">frozen</span>: later games still feed the average but nothing reads it again
-          until their tier changes. Every tier change — an admin edit included — resets the window and the latent.
+          A check fires every {CALIBRATION.MIN_GAMES} scoreboards and reads the most recent{" "}
+          {CALIBRATION.WINDOW_CAP}, so form from a month ago stops voting but nobody ever falls out of reach. Every tier
+          change — an admin edit included — resets the window and the latent.
         </p>
       </div>
     </div>
