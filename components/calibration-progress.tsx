@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import { createClient } from "@/lib/supabase/client"
-import { RefreshCw, TrendingUp, TrendingDown, Minus } from "lucide-react"
+import { RefreshCw, RotateCcw, TrendingUp, TrendingDown, Minus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
   CALIBRATION,
@@ -59,6 +59,8 @@ function sortRows(rows: CalibrationState[]) {
 export function CalibrationProgress() {
   const [rows, setRows] = useState<CalibrationState[]>([])
   const [movers, setMovers] = useState<Set<string>>(new Set())
+  /** When each player's window last reset, for the rows that have no games yet. */
+  const [resets, setResets] = useState<Map<string, string>>(new Map())
   const [live, setLive] = useState(true)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -92,9 +94,13 @@ export function CalibrationProgress() {
 
       setLive(enabledAt !== null)
       setMovers(new Set(moves.map((m) => m.name)))
-      // A player with no games at all in the window is a roster entry, not a
-      // participant — they'd be 40 rows of "no evidence" above the ones that matter.
-      setRows(sortRows(states.filter((s) => s.games > 0)))
+      setResets(inputs.lastTierChangeAt)
+      // A player with no games and no recent tier change is a roster entry, not
+      // a participant — they'd be 40 rows of "no evidence" above the ones that
+      // matter. A player whose window just RESET is the opposite: they vanish
+      // from the table at the exact moment they are most interesting, which is
+      // how flawless came to be missing from this page the morning he was moved.
+      setRows(sortRows(states.filter((s) => s.games > 0 || inputs.lastTierChangeAt.has(s.name))))
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to read calibration state")
     }
@@ -131,6 +137,13 @@ export function CalibrationProgress() {
   }
 
   const evaluated = rows.filter((r) => r.evaluations > 0)
+  const waiting = rows.filter((r) => r.games === 0)
+  const resetDate = (name: string) => {
+    const iso = resets.get(name)
+    if (!iso) return null
+    const ms = Date.parse(iso)
+    return Number.isFinite(ms) ? new Date(ms).toLocaleDateString(undefined, { day: "numeric", month: "short" }) : null
+  }
 
   return (
     <div className="space-y-4">
@@ -145,6 +158,7 @@ export function CalibrationProgress() {
             ) : (
               "none would move now"
             )}
+            {waiting.length > 0 && ` · ${waiting.length} waiting on a first game since a tier change`}
           </p>
           {!live && (
             <p className="text-xs text-[#8892a0] italic">
@@ -229,6 +243,11 @@ export function CalibrationProgress() {
                         <span className="text-[#66fcf1] font-medium">Moves on the next save</span>
                       ) : capped ? (
                         <span className="text-[#8892a0]">At the tier cap</span>
+                      ) : r.games === 0 ? (
+                        <span className="flex items-center gap-1 text-[#8892a0]">
+                          <RotateCcw className="w-3 h-3" />
+                          {resetDate(r.name) ? `Window reset ${resetDate(r.name)} — no games since` : "No games yet"}
+                        </span>
                       ) : unevaluated ? (
                         <span className="flex items-center gap-1 text-[#8892a0]">
                           <Minus className="w-3 h-3" /> No check yet
@@ -261,7 +280,8 @@ export function CalibrationProgress() {
         <p>
           A check fires every {CALIBRATION.MIN_GAMES} scoreboards and reads the most recent{" "}
           {CALIBRATION.WINDOW_CAP}, so form from a month ago stops voting but nobody ever falls out of reach. Every tier
-          change — an admin edit included — resets the window and the latent.
+          change — an admin edit included — resets the window and the latent, which is why a player who has just moved
+          shows no games: their earlier matches are stamped with the tier they used to hold and cannot count again.
         </p>
       </div>
     </div>
