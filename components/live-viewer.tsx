@@ -347,7 +347,9 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
     }
   }, [])
 
-  const connect = useCallback(async () => {
+  // Takes the index explicitly for the picker: it sets serverIndex and connects
+  // in the same click, and this closure would still hold the previous one.
+  const connect = useCallback(async (index: number = serverIndex) => {
     setError(null)
     intentionalRef.current = false
     lastActivityRef.current = Date.now()
@@ -366,7 +368,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
       const res = await fetch("/api/live/token", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ serverIndex }),
+        body: JSON.stringify({ serverIndex: index }),
       })
       if (res.status === 401) {
         setError("Sign in to watch live.")
@@ -385,7 +387,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
       engine.releaseChatKeys()
       engine.applyLiveDefaults()
 
-      if (!engine.connectLive(serverIndex, token)) {
+      if (!engine.connectLive(index, token)) {
         throw new Error("That server is not available.")
       }
     } catch (e) {
@@ -858,7 +860,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
                 <button
                   onClick={() => {
                     setServerIndex(s.index)
-                    void connect()
+                    void connect(s.index)
                   }}
                   className="rounded border px-3 py-1 text-sm"
                 >
@@ -971,7 +973,7 @@ export function LiveViewer({ signedIn, playerName }: LiveViewerProps) {
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
             {phase !== "unsupported" && (
               <button
-                onClick={connect}
+                onClick={() => void connect()}
                 disabled={booting}
                 className="rounded bg-primary px-6 py-2.5 text-base font-medium text-primary-foreground disabled:opacity-70"
               >

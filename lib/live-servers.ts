@@ -30,6 +30,18 @@ export const LIVE_SERVERS: LiveServer[] = [
     statusUrl:
       process.env.NEXT_PUBLIC_LIVE_STATUS_URL ?? "https://34-182-186-217.sslip.io/status",
   },
+  // New Jersey, 208.167.239.201:28070. Listed only once its bridge exists: with no
+  // default URL to fall back on, an unset variable would otherwise put a row
+  // in the picker that can never connect.
+  ...(process.env.NEXT_PUBLIC_LIVE_STATUS_URL_2
+    ? [
+        {
+          index: 1,
+          name: "New Jersey",
+          statusUrl: process.env.NEXT_PUBLIC_LIVE_STATUS_URL_2,
+        },
+      ]
+    : []),
 ]
 
 /** What a bridge's /status endpoint returns. */
