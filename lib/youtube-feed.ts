@@ -35,34 +35,86 @@ const ENTITIES: Record<string, string> = {
 }
 const decode = (s: string) => s.replace(/&(?:amp|lt|gt|quot|#39|apos);/g, (m) => ENTITIES[m] ?? m)
 
+/*
+ * Both of the channel's Atom feeds, in the order tried.
+ *
+ * The per-channel feed is the documented one, but YouTube has been known to
+ * answer it with a 404 or an empty body for requests from cloud hosts while
+ * still serving the same uploads as a playlist feed. The uploads playlist's id
+ * is the channel id with "UC" swapped for "UU" -- a long-standing YouTube
+ * convention rather than a documented contract, which is why it's the second
+ * try and not the only one.
+ */
+export const CHANNEL_FEED_URLS = [
+  FEED_URL,
+  `https://www.youtube.com/feeds/videos.xml?playlist_id=UU${CHANNEL_ID.slice(2)}`,
+]
+
+export interface ChannelVideo {
+  videoId: string
+  title: string
+  published: string | null
+}
+
+/** Every entry in one feed document, newest first. Exported for tests. */
+export function parseChannelFeed(xml: string, max: number): ChannelVideo[] {
+  // Regex rather than an XML parser on purpose: this is one fixed,
+  // machine-generated document and a parser dependency would be the heaviest
+  // thing in the path.
+  return xml
+    .split("<entry>")
+    .slice(1, max + 1)
+    .map((entry): ChannelVideo | null => {
+      const videoId = /<yt:videoId>([^<]+)<\/yt:videoId>/.exec(entry)?.[1]
+      if (!videoId) return null
+      const title = /<title>([^<]*)<\/title>/.exec(entry)?.[1]
+      const published = /<published>([^<]+)<\/published>/.exec(entry)?.[1]
+      return { videoId, title: decode(title ?? "").trim(), published: published ?? null }
+    })
+    .filter((v): v is ChannelVideo => v !== null)
+}
+
+/**
+ * The channel's latest uploads, trying each feed URL in turn.
+ *
+ * Throws, with what each URL answered, when none of them produce a video --
+ * so a caching caller keeps its last good result instead of caching the
+ * failure, and a caller that wants to can say why the list is empty.
+ */
+export async function fetchChannelVideos(max: number): Promise<ChannelVideo[]> {
+  const outcomes: string[] = []
+  for (const url of CHANNEL_FEED_URLS) {
+    try {
+      // 10s ceiling per attempt: nothing that renders this may hang on a third party.
+      const res = await fetch(url, {
+        signal: AbortSignal.timeout(10_000),
+        headers: { accept: "application/atom+xml" },
+      })
+      if (!res.ok) {
+        outcomes.push(`HTTP ${res.status}`)
+        continue
+      }
+      const videos = parseChannelFeed(await res.text(), max)
+      if (videos.length > 0) return videos
+      outcomes.push("no entries")
+    } catch (e) {
+      // "timed out" or fetch's own message ("fetch failed"), plus the
+      // network-level cause (ECONNREFUSED, ENOTFOUND, ...) when there is one.
+      const cause = (e as { cause?: { code?: string } })?.cause?.code
+      const what = e instanceof Error && e.name === "TimeoutError" ? "timed out" : e instanceof Error ? e.message : "fetch failed"
+      outcomes.push(cause ? `${what} (${cause})` : what)
+    }
+  }
+  throw new Error(`YouTube feeds: ${outcomes.join(", ")}`)
+}
+
 async function fetchLatestVideoUncached(): Promise<FeaturedVideo | null> {
   try {
-    // 10s ceiling: the homepage must not hang on a third party. On failure the
-    // caller falls back to its pinned video id, so a dead feed is invisible.
-    const res = await fetch(FEED_URL, {
-      signal: AbortSignal.timeout(10_000),
-      headers: { accept: "application/atom+xml" },
-    })
-    if (!res.ok) return null
-    const xml = await res.text()
-
-    // Entries are newest-first, so the first one is the latest upload. Regex
-    // rather than an XML parser on purpose: this is one fixed, machine-generated
-    // document and a parser dependency would be the heaviest thing in the path.
-    const entry = xml.split("<entry>")[1]
-    if (!entry) return null
-    const videoId = /<yt:videoId>([^<]+)<\/yt:videoId>/.exec(entry)?.[1]
-    const title = /<title>([^<]*)<\/title>/.exec(entry)?.[1]
-    const published = /<published>([^<]+)<\/published>/.exec(entry)?.[1]
-    if (!videoId) return null
-
-    return {
-      videoId,
-      title: decode(title ?? "").trim(),
-      published: published ?? new Date().toISOString(),
-    }
+    const [latest] = await fetchChannelVideos(1)
+    return { ...latest, published: latest.published ?? new Date().toISOString() }
   } catch {
-    // Timeout, DNS, a shape change at YouTube's end — all the same to the caller.
+    // Timeout, DNS, a shape change at YouTube's end -- all the same here: the
+    // homepage falls back to its pinned video id, so a dead feed is invisible.
     return null
   }
 }

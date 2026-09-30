@@ -35,6 +35,18 @@ const LAUNCHER: Entry[] = [
     a: "A small desktop app that installs and updates JK2 client mods for you - no more manually copying files into your Jedi Outcast folder. It finds your Steam install automatically.",
   },
   {
+    q: "Where do I get it?",
+    a: (
+      <>
+        From the{" "}
+        <a href="/launcher" className="text-[#66fcf1] hover:underline">
+          JK2 Launcher page
+        </a>{" "}
+        - downloads for Windows, macOS and Linux, plus a step-by-step setup guide.
+      </>
+    ),
+  },
+  {
     q: "Which clients can I install?",
     a: "JK2MV (the modernised engine most other clients build on), TomArrow's Tommyternal fork (defrag/FFA-focused), and OpenJO (a stability-focused rebuild of the single-player campaign). All three run natively on macOS and Windows.",
   },
