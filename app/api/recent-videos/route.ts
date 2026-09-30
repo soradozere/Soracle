@@ -1,54 +1,26 @@
 import { NextResponse } from "next/server"
+import { unstable_cache } from "next/cache"
+import { fetchChannelVideos } from "@/lib/youtube-feed"
 
-// Same channel feed as lib/youtube-feed.ts's single-video fetch (see that
-// file for why an Atom feed + regex instead of the Data API), just kept
-// across every entry instead of only the first - for the JK2 Launcher's
-// Home screen "Recent Highlights" strip.
-const CHANNEL_ID = "UCeyBUO4DiHBxuW6xPgDiHGQ" // youtube.com/@jk2ctf
-const FEED_URL = `https://www.youtube.com/feeds/videos.xml?channel_id=${CHANNEL_ID}`
+// The channel's recent uploads, for the JK2 Launcher's Home screen "Recent
+// Highlights" strip. Same feeds as the homepage's featured video (see
+// lib/youtube-feed.ts), kept across every entry instead of only the first.
 const MAX_VIDEOS = 10
 
-export const revalidate = 1800
-
-const ENTITIES: Record<string, string> = {
-  "&amp;": "&",
-  "&lt;": "<",
-  "&gt;": ">",
-  "&quot;": '"',
-  "&#39;": "'",
-  "&apos;": "'",
-}
-const decode = (s: string) => s.replace(/&(?:amp|lt|gt|quot|#39|apos);/g, (m) => ENTITIES[m] ?? m)
-
-interface VideoEntry {
-  videoId: string
-  title: string
-  published: string | null
-}
+// fetchChannelVideos throws when YouTube gives nothing back, which
+// unstable_cache treats as "keep serving the last good list" -- rather than
+// caching an empty strip for the whole half hour, as this route used to.
+const getRecentVideos = unstable_cache(() => fetchChannelVideos(MAX_VIDEOS), ["youtube-recent-videos"], {
+  revalidate: 1800,
+})
 
 export async function GET() {
   try {
-    const res = await fetch(FEED_URL, {
-      signal: AbortSignal.timeout(10_000),
-      headers: { accept: "application/atom+xml" },
-    })
-    if (!res.ok) return NextResponse.json({ videos: [] })
-    const xml = await res.text()
-
-    const videos = xml
-      .split("<entry>")
-      .slice(1, MAX_VIDEOS + 1)
-      .map((entry): VideoEntry | null => {
-        const videoId = /<yt:videoId>([^<]+)<\/yt:videoId>/.exec(entry)?.[1]
-        if (!videoId) return null
-        const title = /<title>([^<]*)<\/title>/.exec(entry)?.[1]
-        const published = /<published>([^<]+)<\/published>/.exec(entry)?.[1]
-        return { videoId, title: decode(title ?? "").trim(), published: published ?? null }
-      })
-      .filter((v): v is VideoEntry => v !== null)
-
-    return NextResponse.json({ videos })
-  } catch {
-    return NextResponse.json({ videos: [] })
+    return NextResponse.json({ videos: await getRecentVideos() })
+  } catch (e) {
+    // Still { videos: [] } for the launcher, which hides the strip on an
+    // empty list; `error` says what YouTube actually answered, so an empty
+    // strip can be diagnosed by opening this URL rather than guessed at.
+    return NextResponse.json({ videos: [], error: e instanceof Error ? e.message : String(e) })
   }
 }
