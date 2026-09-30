@@ -22,7 +22,7 @@ export const revalidate = 600
 const PLATFORM_LABELS: Record<LauncherPlatform, { label: string; note: string }> = {
   windows: { label: "Windows", note: "64-bit installer" },
   mac: { label: "macOS", note: "Apple Silicon" },
-  linux: { label: "Linux", note: "AppImage · Steam Deck" },
+  linux: { label: "Linux", note: "AppImage" },
 }
 
 interface Step {
@@ -67,7 +67,7 @@ const STEPS: Step[] = [
         The launcher looks for your Steam copy of Jedi Outcast by itself. A green dot and{" "}
         <strong className="text-[#c5c6c7]">Steam install</strong>{" "}under Clients in the sidebar means you&apos;re
         set. If it says <em>Not found</em>, click <strong className="text-[#c5c6c7]">Change...</strong>{" "}and
-        point it at your game folder. Don&apos;t own the game yet? There&apos;s a link to it on Steam right there.
+        point it at your game folder.
       </p>
     ),
     image: { src: "/launcher/home.webp", alt: "The launcher's Home screen, with Steam install detected in the sidebar" },
@@ -90,7 +90,11 @@ const STEPS: Step[] = [
           </li>
           <li>
             <strong className="text-[#c5c6c7]">Capture the Flag - NWH</strong>, the anti-cheat client organised
-            CTF runs on. Linux-only for now.
+            CTF runs on, for Windows and Linux. The launcher installs it on Linux; on Windows, get it from the{" "}
+            <a href="https://jk2t.ddns.net/#nwh" className="text-[#66fcf1] hover:underline">
+              NWH download
+            </a>{" "}
+            for now.
           </li>
           <li>
             <strong className="text-[#c5c6c7]">OpenJO</strong>{" "}for the single-player campaign.
@@ -144,17 +148,6 @@ const STEPS: Step[] = [
       </p>
     ),
     image: { src: "/launcher/mods.webp", alt: "The Mods page with two PK3s, one for all clients and one for a single client" },
-  },
-  {
-    title: "Staying up to date",
-    body: (
-      <p>
-        The launcher checks for its own updates when it starts. To check by hand, open{" "}
-        <strong className="text-[#c5c6c7]">Support / FAQ</strong>{" "}and click{" "}
-        <strong className="text-[#c5c6c7]">Check for Updates</strong>{" "}at the bottom.
-      </p>
-    ),
-    image: { src: "/launcher/updates.webp", alt: "The Support page with the Check for Updates button" },
   },
 ]
 
