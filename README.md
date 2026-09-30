@@ -45,6 +45,11 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
 # Server-side only (admin actions, scripts)
 SUPABASE_URL=your-project-url
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key
+
+# Optional: YouTube Data API key for the channel's latest videos (homepage
+# featured video, JK2 Launcher highlights). Without it the site falls back to
+# YouTube's RSS feeds, which 404 for the channel as of September 2026.
+YOUTUBE_API_KEY=your-youtube-data-api-key
 ```
 
 Set up the database by running the SQL in `scripts/` against your Supabase project, in order:

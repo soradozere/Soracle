@@ -2,13 +2,18 @@ import { unstable_cache } from "next/cache"
 import { createAnonClient } from "@/lib/supabase/anon"
 
 /*
- * The channel's latest video, for the homepage's featured panel.
+ * The channel's latest uploads, for the homepage's featured panel and the
+ * JK2 Launcher's Recent Highlights strip.
  *
- * Read from YouTube's per-channel Atom feed rather than the Data API: no API key
- * to store or rotate, no quota to blow through, and no OAuth. The Data API's
- * search.list costs 100 quota units per call for the same answer; this costs
- * nothing and needs no credential that can silently lapse (the render pipeline
- * has taught us what that failure looks like).
+ * Read from the YouTube Data API when YOUTUBE_API_KEY is set, falling back to
+ * the channel's Atom feeds. The feeds were the only source until September
+ * 2026, when YouTube started answering both of them with a 404 for this
+ * channel -- from Vercel and from an ordinary browser alike, with 19 public
+ * videos on the channel. The API call used (playlistItems.list on the uploads
+ * playlist) costs 1 unit of the 10,000 free daily quota, not search.list's
+ * 100, and a plain API key needs no OAuth. The key is still a credential
+ * that can lapse, which is why the feeds stay as a fallback rather than
+ * being removed.
  *
  * The feed is keyed by channel ID, not the @handle — handles aren't accepted.
  * Resolved once from the channel page's externalId:
@@ -45,9 +50,11 @@ const decode = (s: string) => s.replace(/&(?:amp|lt|gt|quot|#39|apos);/g, (m) =>
  * convention rather than a documented contract, which is why it's the second
  * try and not the only one.
  */
+const UPLOADS_PLAYLIST_ID = `UU${CHANNEL_ID.slice(2)}`
+
 export const CHANNEL_FEED_URLS = [
   FEED_URL,
-  `https://www.youtube.com/feeds/videos.xml?playlist_id=UU${CHANNEL_ID.slice(2)}`,
+  `https://www.youtube.com/feeds/videos.xml?playlist_id=${UPLOADS_PLAYLIST_ID}`,
 ]
 
 export interface ChannelVideo {
@@ -74,8 +81,70 @@ export function parseChannelFeed(xml: string, max: number): ChannelVideo[] {
     .filter((v): v is ChannelVideo => v !== null)
 }
 
+interface PlaylistItemsResponse {
+  items?: {
+    snippet?: { title?: string; publishedAt?: string; resourceId?: { videoId?: string } }
+    status?: { privacyStatus?: string }
+    contentDetails?: { videoId?: string; videoPublishedAt?: string }
+  }[]
+}
+
 /**
- * The channel's latest uploads, trying each feed URL in turn.
+ * Public videos from a playlistItems.list response, in playlist order (the
+ * uploads playlist is newest first). Private and unlisted uploads are in the
+ * playlist too -- the render pipeline uploads as private until YouTube's audit
+ * passes -- so anything not public is dropped rather than shown as a card that
+ * can't play. Exported for tests.
+ */
+export function parsePlaylistItems(body: PlaylistItemsResponse, max: number): ChannelVideo[] {
+  return (body.items ?? [])
+    .filter((item) => item.status?.privacyStatus === "public")
+    .map((item): ChannelVideo | null => {
+      const videoId = item.contentDetails?.videoId ?? item.snippet?.resourceId?.videoId
+      if (!videoId) return null
+      return {
+        videoId,
+        title: (item.snippet?.title ?? "").trim(),
+        published: item.contentDetails?.videoPublishedAt ?? item.snippet?.publishedAt ?? null,
+      }
+    })
+    .filter((v): v is ChannelVideo => v !== null)
+    .slice(0, max)
+}
+
+async function fetchFromDataApi(key: string, max: number): Promise<ChannelVideo[]> {
+  const params = new URLSearchParams({
+    part: "snippet,status,contentDetails",
+    playlistId: UPLOADS_PLAYLIST_ID,
+    // Over-asked, since private uploads are filtered out afterwards; 50 is
+    // the API's per-page cap and costs the same single unit as 1.
+    maxResults: "50",
+    key,
+  })
+  const res = await fetch(`https://www.googleapis.com/youtube/v3/playlistItems?${params}`, {
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) {
+    // Google's own reason (keyInvalid, quotaExceeded, accessNotConfigured...)
+    // is what makes a failure fixable, and it never contains the key.
+    const reason = ((await res.json().catch(() => null)) as { error?: { errors?: { reason?: string }[] } } | null)
+      ?.error?.errors?.[0]?.reason
+    throw new Error(`HTTP ${res.status}${reason ? ` ${reason}` : ""}`)
+  }
+  return parsePlaylistItems((await res.json()) as PlaylistItemsResponse, max)
+}
+
+function describeFailure(e: unknown): string {
+  // "timed out" or fetch's own message ("fetch failed"), plus the
+  // network-level cause (ECONNREFUSED, ENOTFOUND, ...) when there is one.
+  const cause = (e as { cause?: { code?: string } })?.cause?.code
+  const what = e instanceof Error && e.name === "TimeoutError" ? "timed out" : e instanceof Error ? e.message : "fetch failed"
+  return cause ? `${what} (${cause})` : what
+}
+
+/**
+ * The channel's latest uploads: the Data API if a key is configured, then
+ * each feed URL in turn.
  *
  * Throws, with what each URL answered, when none of them produce a video --
  * so a caching caller keeps its last good result instead of caching the
@@ -83,6 +152,18 @@ export function parseChannelFeed(xml: string, max: number): ChannelVideo[] {
  */
 export async function fetchChannelVideos(max: number): Promise<ChannelVideo[]> {
   const outcomes: string[] = []
+  const key = process.env.YOUTUBE_API_KEY
+  if (key) {
+    try {
+      const videos = await fetchFromDataApi(key, max)
+      if (videos.length > 0) return videos
+      outcomes.push("Data API: no public videos")
+    } catch (e) {
+      outcomes.push(`Data API: ${describeFailure(e)}`)
+    }
+  } else {
+    outcomes.push("Data API: no YOUTUBE_API_KEY")
+  }
   for (const url of CHANNEL_FEED_URLS) {
     try {
       // 10s ceiling per attempt: nothing that renders this may hang on a third party.
@@ -98,14 +179,10 @@ export async function fetchChannelVideos(max: number): Promise<ChannelVideo[]> {
       if (videos.length > 0) return videos
       outcomes.push("no entries")
     } catch (e) {
-      // "timed out" or fetch's own message ("fetch failed"), plus the
-      // network-level cause (ECONNREFUSED, ENOTFOUND, ...) when there is one.
-      const cause = (e as { cause?: { code?: string } })?.cause?.code
-      const what = e instanceof Error && e.name === "TimeoutError" ? "timed out" : e instanceof Error ? e.message : "fetch failed"
-      outcomes.push(cause ? `${what} (${cause})` : what)
+      outcomes.push(describeFailure(e))
     }
   }
-  throw new Error(`YouTube feeds: ${outcomes.join(", ")}`)
+  throw new Error(`YouTube: ${outcomes.join(", ")}`)
 }
 
 async function fetchLatestVideoUncached(): Promise<FeaturedVideo | null> {
