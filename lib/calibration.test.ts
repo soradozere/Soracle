@@ -3,7 +3,9 @@ import {
   CALIBRATION,
   computeCalibrationStates,
   computeTierMoves,
+  projectTierChange,
   type CalibrationMatch,
+  type CalibrationState,
   type ProductionByMatch,
 } from "@/lib/calibration"
 import type { Job } from "@/lib/production-rating"
@@ -502,5 +504,50 @@ describe("computeCalibrationStates: what it reports that a move does not", () =>
     expect(state.name).toBe("subject")
     expect(state.games).toBe(0)
     expect(state.gamesToNextEvaluation).toBe(CALIBRATION.MIN_GAMES)
+  })
+})
+
+describe("projectTierChange: the simple view's forecast", () => {
+  const state = (over: Partial<CalibrationState>): CalibrationState => ({
+    name: "subject",
+    tier: 5,
+    latent: 5,
+    trajectory: [5],
+    estimatedTier: 5,
+    games: 10,
+    productionGames: 10,
+    evaluations: 2,
+    gamesToNextEvaluation: 5,
+    actualWinRate: 0.5,
+    expectedWinRate: 0.5,
+    gap: 0,
+    ...over,
+  })
+
+  it("has nothing to say before a scoreboard", () => {
+    expect(projectTierChange(state({ estimatedTier: null }))).toEqual({ kind: "no-data" })
+  })
+
+  it("reports a latent that already rounds off the tier as moving", () => {
+    expect(projectTierChange(state({ latent: 5.5, estimatedTier: 6 }))).toEqual({ kind: "moving", direction: "up" })
+    expect(projectTierChange(state({ latent: 4.49, estimatedTier: 4 }))).toEqual({ kind: "moving", direction: "down" })
+  })
+
+  it("holds a player whose form sits inside the rounding boundary", () => {
+    expect(projectTierChange(state({ latent: 5.2, estimatedTier: 5.4 }))).toEqual({ kind: "steady", leaning: "up" })
+    expect(projectTierChange(state({ estimatedTier: 5.01 }))).toEqual({ kind: "steady", leaning: null })
+  })
+
+  it("replays the nudge until the latent rounds off, counting games to the first check", () => {
+    // 5 → 5.2 → 5.38 → 5.542: the third check crosses 5.5.
+    const p = projectTierChange(state({ estimatedTier: 7, gamesToNextEvaluation: 2 }))
+    expect(p).toEqual({ kind: "projected", direction: "up", checks: 3, games: 2 + 2 * CALIBRATION.MIN_GAMES })
+  })
+
+  it("never projects past the ends of the ladder", () => {
+    expect(projectTierChange(state({ tier: 10, latent: 10, estimatedTier: 12 }))).toEqual({
+      kind: "capped",
+      direction: "up",
+    })
   })
 })

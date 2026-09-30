@@ -589,6 +589,65 @@ export function computeTierMoves(
   return moves
 }
 
+/**
+ * When a player's tier would change if they kept playing exactly as they are.
+ *
+ * A projection for the admin panel's simple view, not a promise: it assumes the
+ * window the next check reads (`estimatedTier`) stays where it is, and replays
+ * the same nudge computeCalibrationStates applies, one check per MIN_GAMES
+ * scoreboards, until the latent rounds off the tier. The window will move as
+ * they play, so this is only as good as their form is steady.
+ *
+ * The latent approaches the estimate geometrically and never reaches it, so a
+ * player whose estimate sits inside the rounding boundary holds their tier
+ * forever at current form. That is "steady", and it is most of the roster.
+ */
+export type TierProjection =
+  | { kind: "no-data" }
+  | { kind: "moving"; direction: "up" | "down" }
+  | { kind: "capped"; direction: "up" | "down" }
+  | { kind: "steady"; leaning: "up" | "down" | null }
+  | { kind: "projected"; direction: "up" | "down"; checks: number; games: number }
+
+/** Beyond this many checks a projection is noise; report the player as steady. */
+const PROJECTION_MAX_CHECKS = 20
+
+export function projectTierChange(
+  state: CalibrationState,
+  opts: typeof CALIBRATION = CALIBRATION,
+): TierProjection {
+  const { tier, estimatedTier } = state
+  if (estimatedTier === null) return { kind: "no-data" }
+
+  // Same rounding and floors as computeTierMoves: Math.round sends x.5 up.
+  const rounds = (latent: number) => Math.max(1, Math.min(10, Math.round(latent)))
+  if (state.productionGames >= opts.MIN_GAMES && rounds(state.latent) !== tier) {
+    return { kind: "moving", direction: rounds(state.latent) > tier ? "up" : "down" }
+  }
+
+  const direction = estimatedTier > state.latent ? "up" : "down"
+  if ((direction === "up" && tier >= 10) || (direction === "down" && tier <= 1)) {
+    return { kind: "capped", direction }
+  }
+
+  let latent = state.latent
+  for (let check = 1; check <= PROJECTION_MAX_CHECKS; check++) {
+    const stepped = latent + opts.NUDGE_RATE * (estimatedTier - latent)
+    latent = Math.min(tier + opts.MAX_DRIFT, Math.max(tier - opts.MAX_DRIFT, stepped))
+    if (rounds(latent) !== tier) {
+      return {
+        kind: "projected",
+        direction,
+        checks: check,
+        games: state.gamesToNextEvaluation + (check - 1) * opts.MIN_GAMES,
+      }
+    }
+  }
+
+  const lean = estimatedTier - tier
+  return { kind: "steady", leaning: Math.abs(lean) < 0.05 ? null : lean > 0 ? "up" : "down" }
+}
+
 /** How many snapshot-bearing matches the runner fetches. WINDOW_CAP games per
  * player is the most that can matter; 300 recent matches is months of play. */
 /** Exactly the columns calibrationProduction reads. */
