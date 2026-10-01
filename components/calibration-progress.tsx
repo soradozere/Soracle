@@ -9,10 +9,8 @@ import {
   computeCalibrationStates,
   computeTierMoves,
   fetchCalibrationInputs,
-  projectTierChange,
   readAutoCalibrationEnabledAt,
   type CalibrationState,
-  type TierProjection,
 } from "@/lib/calibration"
 import { AUTO_CALIBRATION_CHANGED } from "@/lib/calibration-events"
 import { cn } from "@/lib/utils"
@@ -294,9 +292,9 @@ export function CalibrationProgress() {
       {view === "simple" ? (
         <p className="text-xs text-[#8892a0]">
           The bar shows how far each player has leaned toward the tier below or above; a full bar is a move.{" "}
-          <span className="text-[#c5c6c7]">Likely change</span> assumes they keep playing the way their last{" "}
-          {CALIBRATION.WINDOW_CAP} scoreboards say, so it shifts as their form does. Games means games with a
-          scoreboard, played at their current tier.
+          <span className="text-[#c5c6c7]">To move</span> is how much of that distance is left. It only changes at a
+          check, which fires every {CALIBRATION.MIN_GAMES} games with a scoreboard at their current tier, and each
+          check can push them either way.
         </p>
       ) : (
       <div className="space-y-1 text-xs text-[#8892a0]">
@@ -319,8 +317,8 @@ export function CalibrationProgress() {
 
 /**
  * The same states, for someone who wants the answer rather than the working:
- * alphabetical, one lean bar instead of four decimals, and a plain-language
- * forecast from projectTierChange.
+ * alphabetical, one lean bar instead of four decimals, and "To move" as a share
+ * of the half-tier a player has to cover rather than as a raw latent distance.
  */
 function SimpleView({ rows, movers }: { rows: CalibrationState[]; movers: Set<string> }) {
   const sorted = [...rows].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }))
@@ -331,24 +329,18 @@ function SimpleView({ rows, movers }: { rows: CalibrationState[]; movers: Set<st
           <tr className="bg-[#1a1a2e]/80 text-left text-[11px] uppercase tracking-wide text-[#8892a0]">
             <th className="px-3 py-2 font-medium">Player</th>
             <th className="px-3 py-2 font-medium text-center">Tier</th>
-            <th className="px-3 py-2 font-medium min-w-[220px]">Progress in tier</th>
-            <th className="px-3 py-2 font-medium">Likely change</th>
+            <th className="px-3 py-2 font-medium min-w-[200px]">Progress in tier</th>
+            <th className="px-3 py-2 font-medium">To move</th>
+            <th className="px-3 py-2 font-medium text-right">Next check</th>
           </tr>
         </thead>
         <tbody>
           {sorted.map((r) => {
-            // movers is the engine's own verdict; the projection agrees with it
-            // by construction, but the panel should never contradict the engine.
-            const projection: TierProjection = movers.has(r.name)
-              ? { kind: "moving", direction: r.latent > r.tier ? "up" : "down" }
-              : projectTierChange(r)
+            const moving = movers.has(r.name)
             return (
               <tr
                 key={r.name}
-                className={cn(
-                  "border-t border-[#3d4855]/60",
-                  projection.kind === "moving" ? "bg-[#66fcf1]/10" : "bg-[#1a1a2e]/40",
-                )}
+                className={cn("border-t border-[#3d4855]/60", moving ? "bg-[#66fcf1]/10" : "bg-[#1a1a2e]/40")}
               >
                 <td className="px-3 py-2 font-bold text-[#c5c6c7]">{r.name}</td>
                 <td className="px-3 py-2 text-center tabular-nums text-[#c5c6c7]">{r.tier}</td>
@@ -356,7 +348,10 @@ function SimpleView({ rows, movers }: { rows: CalibrationState[]; movers: Set<st
                   <LeanBar state={r} />
                 </td>
                 <td className="px-3 py-2">
-                  <Forecast projection={projection} state={r} />
+                  <ToMove state={r} moving={moving} />
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums text-[#8892a0]">
+                  {moving ? "—" : `${r.gamesToNextEvaluation} game${r.gamesToNextEvaluation === 1 ? "" : "s"}`}
                 </td>
               </tr>
             )
@@ -367,7 +362,7 @@ function SimpleView({ rows, movers }: { rows: CalibrationState[]; movers: Set<st
   )
 }
 
-/** A centred bar from "down a tier" to "up a tier"; the fill is the latent's lean. */
+/** A centred bar from the tier below to the tier above; the fill is the latent's lean. */
 function LeanBar({ state }: { state: CalibrationState }) {
   const lean = Math.max(-1, Math.min(1, (state.latent - state.tier) / 0.5))
   const pct = Math.round(Math.abs(lean) * 100)
@@ -386,41 +381,29 @@ function LeanBar({ state }: { state: CalibrationState }) {
         )}
       </div>
       <span className="w-4 text-[10px] tabular-nums text-[#8892a0]">{state.tier < 10 ? state.tier + 1 : ""}</span>
-      <span className={cn("w-10 text-right text-xs tabular-nums", pct === 0 ? "text-[#8892a0]" : up ? "text-[#27ae60]" : "text-[#f39c12]")}>
-        {pct === 0 ? "—" : `${up ? "+" : "−"}${pct}%`}
-      </span>
     </div>
   )
 }
 
-function Forecast({ projection: p, state }: { projection: TierProjection; state: CalibrationState }) {
-  const games = (n: number) => `${n} game${n === 1 ? "" : "s"}`
-  switch (p.kind) {
-    case "no-data":
-      return <span className="text-[#8892a0]">No scoreboards yet</span>
-    case "moving":
-      return (
-        <span className="font-medium text-[#66fcf1]">
-          {p.direction === "up" ? "Up" : "Down"} to {state.tier + (p.direction === "up" ? 1 : -1)} on the next save
-        </span>
-      )
-    case "capped":
-      return <span className="text-[#8892a0]">Already at the {p.direction === "up" ? "top" : "bottom"} tier</span>
-    case "steady":
-      return (
-        <span className="flex items-center gap-1 text-[#8892a0]">
-          <Minus className="w-3 h-3" /> Staying at {state.tier}
-          {p.leaning && <span className="text-[#8892a0]/70">· leaning {p.leaning}</span>}
-        </span>
-      )
-    case "projected": {
-      const up = p.direction === "up"
-      const Icon = up ? TrendingUp : TrendingDown
-      return (
-        <span className={cn("flex items-center gap-1", up ? "text-[#27ae60]" : "text-[#f39c12]")}>
-          <Icon className="w-3 h-3" /> {up ? "Up" : "Down"} to {state.tier + (up ? 1 : -1)} in ~{games(p.games)}
-        </span>
-      )
-    }
+/** The detailed view's "To move", as the share of the half-tier still to cover. */
+function ToMove({ state, moving }: { state: CalibrationState; moving: boolean }) {
+  const up = state.latent >= state.tier
+  const target = state.tier + (up ? 1 : -1)
+  if (moving) return <span className="font-medium text-[#66fcf1]">Moves to {target} on the next save</span>
+  if (atTierCap(state)) return <span className="text-[#8892a0]">At the {up ? "top" : "bottom"} tier</span>
+  if (state.evaluations === 0) {
+    return (
+      <span className="flex items-center gap-1 text-[#8892a0]">
+        <Minus className="w-3 h-3" /> No check yet
+      </span>
+    )
   }
+  const toGo = Math.max(1, Math.round((distanceToMove(state) / 0.5) * 100))
+  const Icon = up ? TrendingUp : TrendingDown
+  return (
+    <span className={cn("flex items-center gap-1 tabular-nums", up ? "text-[#27ae60]" : "text-[#f39c12]")}>
+      <Icon className="w-3 h-3" /> {toGo}% to go
+      <span className="text-[#8892a0]">· {up ? "up" : "down"} to {target}</span>
+    </span>
+  )
 }
