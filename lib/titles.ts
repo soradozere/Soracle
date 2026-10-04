@@ -131,19 +131,24 @@ export const SEASONS: Record<string, Season> = {
       ],
     },
   },
+  // Halloween escalation, street zombie to the thing that comes for everyone.
+  // Renamed mid-month from the "Season 4 — TBC" scaffold: any rows already
+  // banked under the s2026-10-N ids are remapped by
+  // scripts/048_rename_october_season.sql — run it wherever October matches
+  // have landed.
   "2026-10": {
     key: "2026-10",
-    name: "Season 4 — TBC",
+    name: "Halloween 2026",
     ladder: {
       id: "s2026-10",
-      label: "Season 4 — TBC",
+      label: "Halloween 2026",
       metric: "month_score",
       tiers: [
-        { id: "s2026-10-1", title: "Tier One", threshold: 5000, rarity: "common" },
-        { id: "s2026-10-2", title: "Tier Two", threshold: 12500, rarity: "rare" },
-        { id: "s2026-10-3", title: "Tier Three", threshold: 20000, rarity: "epic" },
-        { id: "s2026-10-4", title: "Tier Four", threshold: 27500, rarity: "legendary" },
-        { id: "s2026-10-5", title: "Tier Five", threshold: 35000, rarity: "mythic" },
+        { id: "bones", title: "Bones", threshold: 5000, rarity: "common" },
+        { id: "fent-zombie", title: "Fent Zombie", threshold: 12500, rarity: "rare" },
+        { id: "vampire", title: "Vampire", threshold: 20000, rarity: "epic" },
+        { id: "forsaken", title: "Forsaken", threshold: 27500, rarity: "legendary" },
+        { id: "reaper", title: "The Reaper", threshold: 35000, rarity: "mythic" },
       ],
     },
   },
