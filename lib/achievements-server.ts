@@ -2,6 +2,7 @@ import { unstable_cache } from "next/cache"
 import { createAnonClient } from "@/lib/supabase/anon"
 import {
   computeAchievements,
+  computeMeritTitles,
   resolveSecretHolders,
   resolveScoreSecretHolders,
   resolveMonthlySecretHolders,
@@ -77,6 +78,11 @@ export interface PlayerAchievements {
   playerId: string
   name: string
   views: AchievementView[]
+  // Resolved off MERIT_TITLES, not ACHIEVEMENTS — see computeMeritTitles. Kept
+  // out of `views` so these feats never reach scoreFromViews or an
+  // earned-crest-rank map; the player-profile route turns the earned ones into
+  // titles via meritTitlesFor.
+  meritViews: AchievementView[]
 }
 
 // The whole history, reshaped into what every achievement computation needs: each
@@ -327,6 +333,7 @@ export async function computeAllPlayerAchievements(): Promise<Map<string, Player
       playerId: pid,
       name: nameById.get(pid) ?? "Unknown",
       views: computeAchievements(seq, secretViewsFor(pid, holders)),
+      meritViews: computeMeritTitles(seq),
     })
   }
   return result

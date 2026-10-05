@@ -674,29 +674,15 @@ export const ACHIEVEMENTS: AchievementDef[] = [
     ],
   },
   {
-    // The scoreboard has no DOOM-RETURNS column, only DOOM-KILLS — so this counts
-    // doom kills. Nobody has ever managed two in one match (33 doom kills exist in
-    // the whole database), which is what makes it Mythic.
-    // Icon deliberately reused (shares DOOM's crest, no spare SVGs).
-    id: "bonebreaker",
-    title: "Bonebreaker",
-    category: "match",
-    icon: "sith-era",
-    condition: "3+ doom kills in a single match",
-    metric: { type: "matchMax", get: (s) => s.doom_kills },
-    threshold: 3,
-    rarity: "mythic",
-  },
-  {
-    // blubs_returns = returns landed with a blue-stance backstab. Non-zero in only
-    // 3 of 811 scoreboard rows, and never above 1 — three in one match is a feat.
+    // blubs_kills = kills landed with a blue-stance backstab (not blubs_returns,
+    // which is a different stat — flag returns made with a blue backstab).
     // Icon deliberately reused (shares BSer's crest, no spare SVGs).
     id: "zorro",
     title: "Zorro",
     category: "match",
     icon: "dark-lord-of-the-sith",
-    condition: "3+ blue-backstab returns in a single match",
-    metric: { type: "matchMax", get: (s) => s.blubs_returns },
+    condition: "3+ blue-backstab kills in a single match",
+    metric: { type: "matchMax", get: (s) => s.blubs_kills },
     threshold: 3,
     rarity: "legendary",
   },
@@ -771,21 +757,6 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       { threshold: 1000, rarity: "rare" },
       { threshold: 2500, rarity: "epic", title: "Yellow Swordsman" },
       { threshold: 5000, rarity: "legendary", title: "Yellow Maestro" },
-    ],
-  },
-  {
-    // TELE-KILLS (migration 023) is unconfirmed against a real scoreboard build
-    // yet, same caveat DFA-ATTEMPTS/BLOCKS-ENEMY carried at launch — it just
-    // accrues 0 until a CSV that carries the header gets uploaded.
-    id: "otherworldly",
-    title: "Otherworldly",
-    category: "career",
-    icon: "confederancy-of-independent-system", // the network/portal crest
-    condition: "Career teleport kills",
-    metric: { type: "careerSum", get: (s) => s.tele_kills },
-    ranks: [
-      { threshold: 1, rarity: "rare" },
-      { threshold: 5, rarity: "epic" },
     ],
   },
   {
@@ -1149,6 +1120,49 @@ export const ACHIEVEMENTS: AchievementDef[] = [
       { threshold: 25, rarity: "epic" },
       { threshold: 50, rarity: "legendary" },
     ],
+  },
+]
+
+// ---------------------------------------------------------------------------
+// Merit titles
+// ---------------------------------------------------------------------------
+
+// NOT in ACHIEVEMENTS: no crest, no Achievement Score, nothing on the
+// achievements page or the ledger. These two feats were pulled out of there
+// because their numbers are driven by opportunity (did a teleporter exist on
+// the maps you happened to play; did doom RNG line up) rather than by
+// anything resembling skill — which makes them a bad fit for a score that's
+// supposed to measure the latter. They still use the exact same AchievementDef
+// shape and resolution machinery (progressionFor/viewFor in lib/achievements.ts),
+// just surfaced as an equippable title instead of a crest: see
+// computeMeritTitles there and meritTitlesFor in lib/titles.ts. Anyone who
+// clears the bar gets to wear it — this is not a one-of-one.
+export const MERIT_TITLES: AchievementDef[] = [
+  {
+    // Doom kills. The scoreboard has no DOOM-RETURNS column, only DOOM-KILLS.
+    // Nobody has ever managed two in one match (33 doom kills exist in the
+    // whole database), which is what makes a threshold of three Mythic.
+    id: "bonebreaker",
+    title: "Bonebreaker",
+    category: "match",
+    icon: "sith-era",
+    condition: "3+ doom kills in a single match",
+    metric: { type: "matchMax", get: (s) => s.doom_kills },
+    threshold: 3,
+    rarity: "mythic",
+  },
+  {
+    // TELE-KILLS (migration 023) is unconfirmed against a real scoreboard build
+    // yet, same caveat DFA-ATTEMPTS/BLOCKS-ENEMY carried at launch — it just
+    // accrues 0 until a CSV that carries the header gets uploaded.
+    id: "otherworldly",
+    title: "Otherworldly",
+    category: "career",
+    icon: "confederancy-of-independent-system", // the network/portal crest
+    condition: "5+ career teleport kills",
+    metric: { type: "careerSum", get: (s) => s.tele_kills },
+    threshold: 5,
+    rarity: "epic",
   },
 ]
 

@@ -42,6 +42,7 @@ import {
   THEMES,
   PREVIEW_THEME_IDS,
   earnedTitles,
+  meritTitlesFor,
   oneOfOneTitles,
   isPreviewTheme,
   mergeRecordedTitles,
@@ -1433,6 +1434,7 @@ export function PlayerProfile({ player, allPlayers, isAdmin = false, isOwner = f
         [
           ...earnedTitles(achievementScore, monthScore, season),
           ...oneOfOneTitles(data.achievements.filter((v) => v.earned).map((v) => v.id)),
+          ...meritTitlesFor(data.meritTitles),
         ],
         data.recordedTitles,
       )
