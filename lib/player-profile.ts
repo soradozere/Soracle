@@ -6,6 +6,7 @@ import { applyMatchElo, seedFromTier } from "@/lib/elo"
 import { BADGE_PRIORITY } from "@/lib/badge-meta"
 import {
   computeAchievements,
+  computeMeritTitles,
   resolveSecretHolders,
   resolveMonthlySecretHolders,
   secretViewsFor,
@@ -207,6 +208,11 @@ export interface PlayerProfileData {
   nemeses: OppRecord[]
   badges: ProfileBadge[]
   achievements: AchievementView[]
+  // Resolved off MERIT_TITLES (lib/achievement-meta.ts), not ACHIEVEMENTS — see
+  // computeMeritTitles. Kept separate so these never feed Achievement Score or
+  // an earned-crest-rank map; callers turn the earned ones into titles via
+  // meritTitlesFor in lib/titles.ts.
+  meritTitles: AchievementView[]
   totals: ProfileTotals
   matches: ProfileMatchEntry[]
   // Seasonal titles this player has banked. Read rather than computed: past
@@ -1017,6 +1023,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
     secretHolders.set(id, holder)
   }
   const achievements = computeAchievements(achSeq, secretViewsFor(player.id, secretHolders))
+  const meritTitles = computeMeritTitles(achSeq)
 
   const honours = computeMonthlyHonours(playable, stats, nameById, tierByName, killPairs)
 
@@ -1049,6 +1056,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
     nemeses: topNemeses(name, playable),
     badges,
     achievements,
+    meritTitles,
     matches: matchHistory,
     recordedTitles,
     totals: {

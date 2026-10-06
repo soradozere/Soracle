@@ -5,7 +5,15 @@ import { createServiceClient } from "@/lib/supabase/admin"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
 import { computeAllPlayerAchievements, HISTORY_TAG } from "@/lib/achievements-server"
 import { scoreFromViews } from "@/lib/achievement-score"
-import { earnedTitles, mergeRecordedTitles, oneOfOneTitles, seasonFor, unlockedThemes, type ThemeId } from "@/lib/titles"
+import {
+  earnedTitles,
+  mergeRecordedTitles,
+  meritTitlesFor,
+  oneOfOneTitles,
+  seasonFor,
+  unlockedThemes,
+  type ThemeId,
+} from "@/lib/titles"
 import { fetchRecordedTitles, recordTitleChangeSafely } from "@/lib/titles-server"
 import { findModelSkin, findPlayerModel, isKnownModel, unlockedModelIds } from "@/lib/player-models"
 import { isKnownHandSlot } from "@/lib/saber-colours"
@@ -83,7 +91,8 @@ export async function POST(request: Request) {
   // and the crest-gated profile themes — computed server-side so a crafted POST
   // can't claim a theme/title the player hasn't actually earned.
   const allAchievements = await computeAllPlayerAchievements()
-  const views = allAchievements.get(playerId)?.views ?? []
+  const playerAchievements = allAchievements.get(playerId)
+  const views = playerAchievements?.views ?? []
   const achievementScore = scoreFromViews(views)
   const earnedCrestRanks = new Map(views.filter((v) => v.earned).map((v) => [v.id, v.rank] as const))
 
@@ -95,7 +104,11 @@ export async function POST(request: Request) {
     // One-of-one crest titles are equippable too; earnedCrestRanks only holds
     // this player's earned crests, so no one else's secrets can validate here.
     const earned = mergeRecordedTitles(
-      [...earnedTitles(achievementScore, monthScore, season), ...oneOfOneTitles(earnedCrestRanks.keys())],
+      [
+        ...earnedTitles(achievementScore, monthScore, season),
+        ...oneOfOneTitles(earnedCrestRanks.keys()),
+        ...meritTitlesFor(playerAchievements?.meritViews ?? []),
+      ],
       recorded,
     )
     if (!earned.some((t) => t.id === titleId)) {

@@ -1,5 +1,6 @@
 import {
   ACHIEVEMENTS,
+  MERIT_TITLES,
   RARITY_META,
   SECRET_ACHIEVEMENTS,
   SECRET_RARITY,
@@ -576,4 +577,14 @@ export function secretViewsFor(playerId: string, holders: Map<string, SecretHold
 // sort to the front for free: RARITY_META.oneofone has the highest order.
 export function computeAchievements(seq: AchMatch[], secrets: AchievementView[] = []): AchievementView[] {
   return [...ACHIEVEMENTS.map((def) => viewFor(def, seq)), ...secrets].sort(compareViews)
+}
+
+// MERIT_TITLES reuses the exact same per-def resolution as ACHIEVEMENTS (same
+// AchievementDef shape, same progressionFor walk), but deliberately kept out of
+// computeAchievements: its views must never reach scoreFromViews or an earned-
+// crest-rank map, since these feats aren't meant to touch Achievement Score or
+// gate anything else. Callers turn the earned ones into wearable titles via
+// meritTitlesFor in lib/titles.ts.
+export function computeMeritTitles(seq: AchMatch[]): AchievementView[] {
+  return MERIT_TITLES.map((def) => viewFor(def, seq))
 }
