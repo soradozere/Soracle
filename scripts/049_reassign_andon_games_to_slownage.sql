@@ -16,8 +16,11 @@
 --
 --   select m.created_at, m.match_type, m.red_score, m.blue_score
 --   from public.matches m
---   where 'Andon' = any(m.red_team) or 'Andon' = any(m.blue_team)
+--   where 'andon' = any(m.red_team) or 'andon' = any(m.blue_team)
 --   order by m.created_at desc;
+--
+-- Names are looked up case-insensitively (the live roster has "andon"), and
+-- the exact stored spelling is then used for the name-keyed team arrays.
 --
 -- STEP 2 — set the cutoff at the top of the `params` table below, then run the
 -- rest of the file. It raises (and rolls back) if either player is missing or
@@ -32,14 +35,20 @@ begin;
 create temporary table params on commit drop as
 select
   timestamptz '2026-08-01 00:00:00+00' as cutoff,   -- <-- EDIT ME after step 1
-  (select id from public.players where name = 'Andon')    as andon_id,
-  (select id from public.players where name = 'Slownage') as slownage_id;
+  a.id as andon_id,    a.name as andon_name,
+  s.id as slownage_id, s.name as slownage_name
+from (select 1) x
+left join public.players a on lower(btrim(a.name)) = 'andon'
+left join public.players s on lower(btrim(s.name)) = 'slownage';
 
 do $$
 declare
   p record;
   clash int;
 begin
+  if (select count(*) from params) > 1 then
+    raise exception 'more than one player matches "andon" or "slownage" ignoring case — fix by hand';
+  end if;
   select * into p from params;
   if p.andon_id is null then raise exception 'no player named "Andon"'; end if;
   if p.slownage_id is null then raise exception 'no player named "Slownage" — create the player first'; end if;
@@ -47,8 +56,8 @@ begin
   select count(*) into clash
   from public.matches m
   where m.created_at >= p.cutoff
-    and ('Andon' = any(m.red_team) or 'Andon' = any(m.blue_team))
-    and ('Slownage' = any(m.red_team) or 'Slownage' = any(m.blue_team));
+    and (p.andon_name = any(m.red_team) or p.andon_name = any(m.blue_team))
+    and (p.slownage_name = any(m.red_team) or p.slownage_name = any(m.blue_team));
   if clash > 0 then
     raise exception '% match(es) after the cutoff have both Andon and Slownage — fix those by hand', clash;
   end if;
@@ -58,13 +67,14 @@ create temporary table affected on commit drop as
 select m.id
 from public.matches m, params p
 where m.created_at >= p.cutoff
-  and ('Andon' = any(m.red_team) or 'Andon' = any(m.blue_team));
+  and (p.andon_name = any(m.red_team) or p.andon_name = any(m.blue_team));
 
 -- 1. Team rosters (drives ELO, win/loss, match history).
-update public.matches
-set red_team  = array_replace(red_team,  'Andon', 'Slownage'),
-    blue_team = array_replace(blue_team, 'Andon', 'Slownage')
-where id in (select id from affected);
+update public.matches m
+set red_team  = array_replace(m.red_team,  p.andon_name, p.slownage_name),
+    blue_team = array_replace(m.blue_team, p.andon_name, p.slownage_name)
+from params p
+where m.id in (select id from affected);
 
 -- 2. Per-match scoreboard stats.
 update public.match_stats s
@@ -106,7 +116,7 @@ set last_match_at = (
   from public.matches m
   where pl.name = any(m.red_team) or pl.name = any(m.blue_team)
 )
-where pl.name in ('Andon', 'Slownage');
+where pl.id in (select andon_id from params union select slownage_id from params);
 
 -- Summary of what moved.
 select
