@@ -11,7 +11,6 @@ import {
   type AchievementView,
   type SecretCandidate,
   type KillPairRow,
-  unansweredKillsByMatchPlayer,
   type SecretHolder,
   type UnlockEvent,
 } from "@/lib/achievements"
@@ -170,10 +169,9 @@ async function fetchHistoryRowsUncached(): Promise<RawHistory> {
   const [matches, stats, killPairs, players] = await Promise.all([
     fetchAll<ServerMatch>(supabase, "matches", "id, red_team, blue_team, red_score, blue_score, created_at"),
     fetchAll<ServerStat>(supabase, "match_stats", STAT_COLUMNS),
-    // The kill matrix, for crests about who beat whom rather than raw totals
-    // (Bully), and for `rets` — returns made AGAINST a carrier, which is the
-    // denominator half of Wesley's Prodigy's cap conversion and exists nowhere
-    // else. Small on purpose: it only exists for JSON-era matches.
+    // The kill matrix, for `rets` — returns made AGAINST a carrier, which is
+    // the denominator half of Wesley's Prodigy's cap conversion and exists
+    // nowhere else. Small on purpose: it only exists for JSON-era matches.
     fetchAll<KillPairRow>(
       supabase,
       "match_kills",
@@ -267,7 +265,6 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
   // sequence can answer.
   const seqByPlayer = new Map<string, AchMatch[]>()
   const candidates: SecretCandidate[] = []
-  const unanswered = unansweredKillsByMatchPlayer(killPairs)
   for (const m of matches) {
     if (!m.red_team?.length || !m.blue_team?.length) continue
     for (const [team, other, myScore, oppScore] of [
@@ -307,7 +304,7 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
             playerId: pid,
             matchId: m.id,
             date: m.created_at,
-            ctx: { won, lost, myScore, oppScore, maxUnansweredKills: unanswered.get(`${m.id}:${pid}`) ?? 0 },
+            ctx: { won, lost, myScore, oppScore },
             stat,
           })
         }

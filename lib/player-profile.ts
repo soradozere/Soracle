@@ -10,7 +10,6 @@ import {
   resolveSecretHolders,
   resolveMonthlySecretHolders,
   secretViewsFor,
-  unansweredKillsByMatchPlayer,
   type AchievementView,
   type KillPairRow,
   type SecretCandidate,
@@ -354,7 +353,6 @@ function secretCandidates(
   matches: ProfileMatch[],
   stats: StatRow[],
   nameById: Map<string, string>,
-  unanswered: Map<string, number>,
 ): SecretCandidate[] {
   const matchById = new Map(matches.map((m) => [m.id, m]))
   const candidates: SecretCandidate[] = []
@@ -376,7 +374,6 @@ function secretCandidates(
         lost: oppScore > myScore,
         myScore,
         oppScore,
-        maxUnansweredKills: unanswered.get(`${match.id}:${row.player_id}`) ?? 0,
       },
       stat: toAchStat(row),
     })
@@ -1017,7 +1014,7 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
   // Secret crests are resolved globally, then only the holder is handed a view — so
   // for everyone else they don't exist, and can't leak through the earned/total count.
   const secretHolders = resolveSecretHolders(
-    secretCandidates(playable, stats, nameById, unansweredKillsByMatchPlayer(killPairs)),
+    secretCandidates(playable, stats, nameById),
   )
   // Month-resolved crests (Wesley's Prodigy) can't be read off a single match
   // row, so they're resolved separately and merged in. This MUST stay in step

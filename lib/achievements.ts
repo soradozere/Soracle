@@ -349,29 +349,6 @@ export interface KillPairRow {
   rets?: number
 }
 
-/**
- * For every (match, player): the most kills they landed on a single opponent
- * who never killed them back in that match. Keyed "matchId:playerId".
- *
- * "Never killed back" is an absent reverse row or one with zero kills -- the
- * table stores only killed[] (killedBy[] is the same data mirrored), so a
- * player who was never killed by their victim simply has no reverse row.
- */
-export function unansweredKillsByMatchPlayer(rows: KillPairRow[]): Map<string, number> {
-  const pair = new Map<string, number>()
-  for (const r of rows) {
-    pair.set(`${r.match_id}:${r.killer_player_id}:${r.victim_player_id}`, r.kills)
-  }
-  const best = new Map<string, number>()
-  for (const r of rows) {
-    if (r.kills <= 0) continue
-    if ((pair.get(`${r.match_id}:${r.victim_player_id}:${r.killer_player_id}`) ?? 0) > 0) continue
-    const key = `${r.match_id}:${r.killer_player_id}`
-    if (r.kills > (best.get(key) ?? 0)) best.set(key, r.kills)
-  }
-  return best
-}
-
 export interface SecretCandidate {
   playerId: string
   matchId: string
