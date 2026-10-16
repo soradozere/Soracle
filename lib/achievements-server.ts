@@ -66,6 +66,13 @@ async function fetchAll<T>(
       .from(table)
       .select(columns)
       .order("created_at", { ascending: true })
+      // Tiebreak on the primary key. created_at alone is NOT unique: a match's
+      // match_stats and match_kills rows are written in one insert and share a
+      // timestamp, and .range() is LIMIT/OFFSET, so a page boundary landing
+      // inside one match can skip some of its rows and repeat others. Missing
+      // a kill-matrix row is how a reverse kill vanished and Bully was handed
+      // out for a match where the victim had killed back.
+      .order("id", { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
     if (error) throw new Error(`Failed to fetch ${table}: ${error.message}`)
     rows.push(...((data ?? []) as T[]))

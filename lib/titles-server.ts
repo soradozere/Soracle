@@ -69,6 +69,8 @@ export async function recordSeasonalTitles(
       .from("match_stats")
       .select("player_id, match_id, score")
       .in("match_id", matchIds)
+      // Unordered .range() paging can skip or repeat rows between pages.
+      .order("id", { ascending: true })
       .range(from, from + PAGE - 1)
     if (playerIds) q = q.in("player_id", playerIds)
     const { data, error } = await q

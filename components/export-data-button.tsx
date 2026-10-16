@@ -27,6 +27,9 @@ async function fetchAllRows<T>(
       .from(table)
       .select(columns)
       .order("created_at", { ascending: true })
+      // Unique tiebreak: rows from one match share created_at, and .range() paging
+      // over a non-unique order can skip or repeat rows at a page boundary.
+      .order("id", { ascending: true })
       .range(from, from + PAGE_SIZE - 1)
     if (error) throw new Error(error.message)
     rows.push(...((data ?? []) as T[]))
