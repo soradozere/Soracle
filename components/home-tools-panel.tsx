@@ -11,8 +11,9 @@ const TOOLS = [
   },
   {
     label: "NWH Download",
-    href: "https://jk2t.ddns.net/#nwh",
+    href: "/nwh-download",
     icon: Download,
+    internal: true,
   },
   {
     label: "Name Editor",
