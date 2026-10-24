@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import { Rocket, Download, Server, ExternalLink } from "lucide-react"
+import { Rocket, Download, Server } from "lucide-react"
 
 export const metadata: Metadata = {
   title: "NWH Download — JK2 Capture the Flag",
@@ -15,12 +15,6 @@ const CLIENT_DOWNLOADS = [
   { label: "Windows", href: `${NWH_BASE}/nwh_windows_x64.zip` },
   { label: "macOS", href: null },
   { label: "Linux", href: `${NWH_BASE}/nwh_linux_x64.tar.gz` },
-]
-
-const SOURCE_LINKS = [
-  { label: "nwh", href: "https://github.com/soradozere/nwh" },
-  { label: "vvv-nwh", href: "https://github.com/soradozere/vvv-nwh" },
-  { label: "nwh-mvsdk", href: "https://github.com/soradozere/nwh-mvsdk" },
 ]
 
 const cardClassName =
@@ -65,25 +59,6 @@ export default function NwhDownloadPage() {
           <Server className="w-5 h-5 text-[#66fcf1]" />
           <span className="text-sm font-bold text-[#e6edf3]">Server package</span>
         </a>
-
-        <p className="mt-8 text-sm text-text-dim">
-          Source:{" "}
-          {SOURCE_LINKS.map(({ label, href }, i) => (
-            <span key={href}>
-              {i > 0 && " · "}
-              <a
-                href={href}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-[#66fcf1] underline-offset-4 hover:underline inline-flex items-center gap-1"
-              >
-                {label}
-                <ExternalLink className="w-3 h-3" />
-              </a>
-            </span>
-          ))}{" "}
-          — private repos, you&apos;ll need access to open them.
-        </p>
       </div>
     </div>
   )
