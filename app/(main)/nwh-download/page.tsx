@@ -13,7 +13,8 @@ const NWH_BASE = `${process.env.NEXT_PUBLIC_R2_DEMOS_BASE_URL}/nwh`
 
 const CLIENT_DOWNLOADS = [
   { label: "Windows", href: `${NWH_BASE}/nwh_windows_x64.zip` },
-  { label: "macOS", href: null },
+  { label: "macOS", sub: "Apple Silicon", href: `${NWH_BASE}/NWH-macOS-arm64.zip` },
+  { label: "macOS", sub: "Intel", href: `${NWH_BASE}/NWH-macOS-x86_64.zip` },
   { label: "Linux", href: `${NWH_BASE}/nwh_linux_x64.tar.gz` },
 ]
 
@@ -27,21 +28,22 @@ export default function NwhDownloadPage() {
         <h2 className="text-2xl font-bold text-[#66fcf1] mb-4">NWH Download</h2>
         <p className="mb-6 text-[#c5c6c7]">Get it through the JK2 Launcher, or download it directly.</p>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-3">
           <Link href="/launcher" className={cardClassName}>
             <Rocket className="w-5 h-5 text-[#66fcf1]" />
             <span className="text-sm font-bold text-[#e6edf3]">JK2 Launcher</span>
           </Link>
 
-          {CLIENT_DOWNLOADS.map(({ label, href }) =>
+          {CLIENT_DOWNLOADS.map(({ label, sub, href }) =>
             href ? (
-              <a key={label} href={href} className={cardClassName}>
+              <a key={`${label}-${sub ?? ""}`} href={href} className={cardClassName}>
                 <Download className="w-5 h-5 text-[#66fcf1]" />
                 <span className="text-sm font-bold text-[#e6edf3]">{label}</span>
+                {sub && <span className="text-xs text-[#8892a0]">{sub}</span>}
               </a>
             ) : (
               <div
-                key={label}
+                key={`${label}-${sub ?? ""}`}
                 className="flex flex-col items-center justify-center gap-2 rounded-lg border border-[#3d4855] bg-[#2a3441]/30 px-3 py-5 text-center opacity-60"
               >
                 <Download className="w-5 h-5 text-[#8892a0]" />
