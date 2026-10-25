@@ -191,6 +191,39 @@ describe("computeTierMoves: the nudge accumulates rather than jumping", () => {
     )
     for (const m of moves) expect(m.to).toBeLessThanOrEqual(10)
   })
+
+  it("never lets a 10's latent run past 10 — there is no tier 11 to drift into", () => {
+    const matches = series(Array(45).fill(true), 10)
+    const states = computeCalibrationStates(
+      matches,
+      new Map([["subject", 10]]),
+      ["subject"],
+      new Map(),
+      productionAll(matches, 20, 5),
+    )
+    expect(states[0].latent).toBeLessThanOrEqual(10)
+  })
+
+  it("demotes a 10 as soon as production turns, without first unwinding a fake overshoot", () => {
+    // 15 games playing like a 20 (hair off the 10 ceiling), then 15 playing like
+    // a 2. Pre-fix, the first stretch drove latent past 10 toward the old
+    // currentTier+MAX_DRIFT bound, and the second stretch had to walk that
+    // invisible excess all the way back down before a demotion could fire.
+    const hot = series(Array(15).fill(true), 10)
+    const cold = series(Array(15).fill(false), 10).map((m, i) => ({
+      ...m,
+      id: `cold${i}`,
+      created_at: at(15 + i),
+    }))
+    const matches = [...hot, ...cold]
+    const production: ProductionByMatch = new Map([
+      ...productionAll(hot, 20, 5),
+      ...productionAll(cold, 2, 5),
+    ])
+    const moves = computeTierMoves(matches, new Map([["subject", 10]]), ["subject"], new Map(), production)
+    expect(moves).toHaveLength(1)
+    expect(moves[0].to).toBe(9)
+  })
 })
 
 describe("computeTierMoves: no scoreboard, no move", () => {

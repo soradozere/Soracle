@@ -493,10 +493,17 @@ export function computeCalibrationStates(
       if (productionGames > 0 && productionGames % opts.MIN_GAMES === 0) {
         const estimate = window.reduce((a, b) => a + b, 0) / window.length
         const stepped = latent + opts.NUDGE_RATE * (estimate - latent)
-        latent = Math.min(
+        const driftClamped = Math.min(
           currentTier + opts.MAX_DRIFT,
           Math.max(currentTier - opts.MAX_DRIFT, stepped),
         )
+        // There is no tier above 10 or below 1 for the latent to mean anything by —
+        // a 10 who plays like a "13" has nowhere to go, and letting the latent run
+        // up there anyway (bounded only relative to the admin-set tier above) builds
+        // an invisible buffer: production has to fall all the way back through the
+        // make-believe 11-13 range before a real demotion can register, long after
+        // the player has actually turned a corner.
+        latent = Math.min(10, Math.max(1, driftClamped))
         trajectory.push(latent)
       }
     }
