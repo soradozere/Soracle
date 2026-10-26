@@ -562,6 +562,7 @@ export class JkdEngine {
   private fnMatchTime!: () => number
   private fnFurthest!: () => number
   private fnEstimate!: () => number
+  private fnExactDuration: (() => number) | null = null
   private fnSeekTo!: (t: number) => number
   private fnIsSeeking!: () => number
   private fnConnected!: () => number
@@ -937,6 +938,13 @@ export class JkdEngine {
     this.fnTrimRevision =
       typeof revisionExport === "function"
         ? (M.cwrap("JKD_TrimRevision", "number", []) as unknown as () => number)
+        : null
+    // The demo's exact length, read off the last snapshot in the file. Absent on
+    // engines before 20261026-2218; those fall back to the estimate below.
+    const exactExport = exports._JKD_GetExactDuration
+    this.fnExactDuration =
+      typeof exactExport === "function"
+        ? (M.cwrap("JKD_GetExactDuration", "number", []) as unknown as () => number)
         : null
     this.fnViewClient = M.cwrap("JKD_GetViewClientNum", "number", []) as unknown as () => number
     this.fnIsFollowing = M.cwrap("JKD_IsFollowing", "number", []) as unknown as () => number
@@ -1442,14 +1450,24 @@ export class JkdEngine {
   /**
    * Best available total length in milliseconds.
    *
-   * A .dm_15 states no duration anywhere, so this sharpens as the file is read:
-   * an estimate from the record count first, then the exact figure once a demo
-   * has run to the end. `declared` wins when the caller knows better -- the demo
-   * library records real durations at ingest.
+   * The engine reads the exact length off the end of the file once playback
+   * has started (getExactDuration), and that beats everything: the library's
+   * stored figure has been wrong before -- a 38-minute demo was saved as 1:47
+   * by a session that stopped early -- and the record-count estimate runs
+   * short on long recordings. Without it, `declared` (the library's figure)
+   * wins over the estimate, as before.
    */
   getDuration(declaredMs = 0): number {
     if (!this.ready) return Math.max(declaredMs, 1000)
+    const exact = this.getExactDuration()
+    if (exact > 0) return Math.max(exact, this.fnElapsed(), this.fnFurthest(), 1000)
     return Math.max(declaredMs || this.fnEstimate(), this.fnElapsed(), this.fnFurthest(), 1000)
+  }
+
+  /** Exact length in milliseconds, or 0 until the engine knows it (or can't). */
+  getExactDuration(): number {
+    if (!this.ready || !this.fnExactDuration) return 0
+    return this.fnExactDuration()
   }
 
   get isSeeking(): boolean {

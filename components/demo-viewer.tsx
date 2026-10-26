@@ -879,6 +879,17 @@ export function DemoViewer({
       setSeeking(engine.isSeeking)
       setSpan(engine.getDuration(durationMs))
 
+      // A demo the library has no length for gets one as soon as the engine
+      // has measured it, rather than only after someone watches to the end --
+      // which for an hour-long recording is close to never.
+      if (!durationReportedRef.current) {
+        const exact = engine.getExactDuration()
+        if (exact > 0) {
+          durationReportedRef.current = true
+          onDurationRef.current?.(exact)
+        }
+      }
+
       const now = engine.getElapsed()
       if (now >= 0 && !draggingRef.current && !engine.isSeeking) setElapsed(now)
       if (now >= 0) onPositionRef.current?.(now)
