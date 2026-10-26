@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import Link from "next/link"
 import {
   ChevronLeft,
@@ -90,6 +90,12 @@ const FEED_HOLD_MS = 8000
 // choice has to survive a page load to be applied at all.
 const DETAIL_KEY = "soracle.demo.detail"
 const readHighDetail = () => localStorage.getItem(DETAIL_KEY) !== "low"
+
+// Off by default: the overlay covers a corner of the picture, and most people
+// open a clip to watch a play rather than track positions.
+const OVERLAY_KEY = "soracle.demo.teamOverlay"
+const OVERLAY_SIDES_KEY = "soracle.demo.teamOverlaySides"
+const readFlag = (key: string) => localStorage.getItem(key) === "on"
 
 /**
  * Brightness, as a gamma curve over the finished picture.
@@ -341,8 +347,12 @@ export function DemoViewer({
   const [smoothMouse, setSmoothMouse] = useState(true)
   const [highDetail, setHighDetail] = useState(true)
   const [gamma, setGamma] = useState(GAMMA_DEFAULT)
+  const [teamOverlay, setTeamOverlay] = useState(false)
+  const [overlaySides, setOverlaySides] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const settingsPanelRef = useRef<HTMLDivElement>(null)
+  const [settingsMaxH, setSettingsMaxH] = useState<number | null>(null)
   const [copied, setCopied] = useState(false)
 
   // Shown over the picture once the demo runs out, in place of the engine's
@@ -674,6 +684,8 @@ export function DemoViewer({
     const detail = readHighDetail()
     setHighDetail(detail)
     setGamma(readGamma())
+    setTeamOverlay(readFlag(OVERLAY_KEY))
+    setOverlaySides(readFlag(OVERLAY_SIDES_KEY))
 
     const engine = new JkdEngine({
       baseUrl: base,
@@ -1282,6 +1294,53 @@ export function DemoViewer({
       canvas.style.filter = ""
     }
   }, [gamma, ready])
+
+  // Re-applied on ready as well as on change: the cvars are archived, but the
+  // page's choice is the one that should hold, not whatever the engine's
+  // config last saved.
+  useEffect(() => {
+    if (!ready) return
+    engineRef.current?.setTeamOverlay(teamOverlay, overlaySides)
+  }, [teamOverlay, overlaySides, ready])
+
+  /**
+   * Keep the settings panel inside the room above the control bar.
+   *
+   * It opens upward from the bar and is taller than the player on a short
+   * window, so its top slid under the sticky site header, out of reach -- the
+   * first rows could not be clicked at all. Capped to the space actually there,
+   * scrolling past that. In fullscreen the header is not on screen, so the cap
+   * is the top of the screen.
+   */
+  useLayoutEffect(() => {
+    if (!settingsOpen) return
+    const measure = () => {
+      const panel = settingsPanelRef.current
+      if (!panel) return
+      const header = document.fullscreenElement ? null : document.querySelector("header")
+      const ceiling = Math.max(0, header?.getBoundingClientRect().bottom ?? 0)
+      setSettingsMaxH(Math.max(160, panel.getBoundingClientRect().bottom - ceiling - 8))
+    }
+    measure()
+    window.addEventListener("resize", measure)
+    window.addEventListener("scroll", measure, { passive: true })
+    document.addEventListener("fullscreenchange", measure)
+    return () => {
+      window.removeEventListener("resize", measure)
+      window.removeEventListener("scroll", measure)
+      document.removeEventListener("fullscreenchange", measure)
+    }
+  }, [settingsOpen])
+
+  const chooseTeamOverlay = useCallback((on: boolean) => {
+    setTeamOverlay(on)
+    localStorage.setItem(OVERLAY_KEY, on ? "on" : "off")
+  }, [])
+
+  const chooseOverlaySides = useCallback((on: boolean) => {
+    setOverlaySides(on)
+    localStorage.setItem(OVERLAY_SIDES_KEY, on ? "on" : "off")
+  }, [])
 
   const changeSensitivity = useCallback((v: number) => {
     setSensitivity(v)
@@ -2013,7 +2072,11 @@ export function DemoViewer({
             when the player is at its most useful. Living inside the control
             bar also means it hides with the rest of the chrome. */}
         {settingsOpen && (
-          <div className="absolute bottom-full right-4 mb-2 w-64 rounded-xl border border-white/10 bg-black/90 p-1.5 shadow-xl backdrop-blur">
+          <div
+            ref={settingsPanelRef}
+            style={settingsMaxH ? { maxHeight: settingsMaxH } : undefined}
+            className="absolute bottom-full right-4 mb-2 w-64 overflow-y-auto rounded-xl border border-white/10 bg-black/90 p-1.5 shadow-xl backdrop-blur"
+          >
             <SettingToggle
               label="High detail"
               hint={restarting ? "Reloading…" : "Sharper models. Turn off if playback stutters. Reloads the player."}
@@ -2031,6 +2094,20 @@ export function DemoViewer({
               // is the way round anyone expects. Gamma itself goes the other way.
               onChange={(v) => changeGamma(GAMMA_MAX + GAMMA_MIN - v)}
             />
+            <SettingToggle
+              label="Team overlay"
+              hint="Every player's location, health, armour and weapon, top right."
+              on={teamOverlay}
+              onChange={chooseTeamOverlay}
+            />
+            {teamOverlay && (
+              <SettingToggle
+                label="Left / Right locations"
+                hint="Yavin's (A) and (B) named by side, as seen from each base."
+                on={overlaySides}
+                onChange={chooseOverlaySides}
+              />
+            )}
             <div className="my-1 border-t border-white/10" />
             <SettingSlider
               label="Camera distance"

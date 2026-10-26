@@ -1578,6 +1578,32 @@ export class JkdEngine {
   }
 
   /**
+   * The game's team overlay, top right: every player's location, health,
+   * armour, weapon and flag.
+   *
+   * Drawn from the server's own team info as recorded in the demo, which the
+   * library's merged clips carry for both teams; a single demobot recording
+   * has it for the followed player's team only, and that is all it can show.
+   * The engine keeps both teams up and treats the watched player's team as
+   * "yours" (cg_drawTeamOverlay in the jk2mv cgame). An engine older than that
+   * still draws, but only the recorder's team, flicking between teams on
+   * clips that carry both.
+   *
+   * locationSides is TomArrow's yavin rename: "(A)/(B)" in a location becomes
+   * "(Left)/(Right)" as seen from that team's base.
+   *
+   * `set` rather than the bare form, because the page applies this as soon as
+   * the engine boots, before a demo has loaded the cgame that registers these
+   * cvars -- and a bare `name value` for a cvar that doesn't exist yet is an
+   * unknown command, silently dropped. `set` creates it, and the cgame's
+   * registration keeps the value it finds.
+   */
+  setTeamOverlay(on: boolean, locationSides: boolean) {
+    this.command(`set cg_drawTeamOverlay ${on ? 1 : 0}`)
+    this.command(`set cg_drawTeamOverlayLocationOverrides ${locationSides ? 1 : 0}`)
+  }
+
+  /**
    * How far the camera sits behind whoever is being watched.
    *
    * Pulled all the way in it becomes first person, which is what the engine's
