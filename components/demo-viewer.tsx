@@ -2096,7 +2096,7 @@ export function DemoViewer({
             />
             <SettingToggle
               label="Team overlay"
-              hint="Every player's location, health, armour and weapon, top right."
+              hint="The watched player's team: location, health, armour and weapon, top right."
               on={teamOverlay}
               onChange={chooseTeamOverlay}
             />

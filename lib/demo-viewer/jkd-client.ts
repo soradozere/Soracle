@@ -1578,16 +1578,15 @@ export class JkdEngine {
   }
 
   /**
-   * The game's team overlay, top right: every player's location, health,
-   * armour, weapon and flag.
+   * The game's team overlay, top right: location, health, armour, weapon and
+   * flag for the watched player's team, switching with the POV (free fly
+   * keeps the team of whoever was watched last).
    *
    * Drawn from the server's own team info as recorded in the demo, which the
-   * library's merged clips carry for both teams; a single demobot recording
-   * has it for the followed player's team only, and that is all it can show.
-   * The engine keeps both teams up and treats the watched player's team as
-   * "yours" (cg_drawTeamOverlay in the jk2mv cgame). An engine older than that
-   * still draws, but only the recorder's team, flicking between teams on
-   * clips that carry both.
+   * library's merged clips carry for both teams, so either is ready the
+   * moment the POV switches. A single demobot recording has it only for the
+   * team it was following, so watching the other team shows nothing.
+   * An engine older than 2026-10 draws the text as bars.
    *
    * locationSides is TomArrow's yavin rename: "(A)/(B)" in a location becomes
    * "(Left)/(Right)" as seen from that team's base.
