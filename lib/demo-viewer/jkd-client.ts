@@ -940,7 +940,7 @@ export class JkdEngine {
         ? (M.cwrap("JKD_TrimRevision", "number", []) as unknown as () => number)
         : null
     // The demo's exact length, read off the last snapshot in the file. Absent on
-    // engines before 20261026-2218; those fall back to the estimate below.
+    // engines before 20261027-1343; those fall back to the estimate below.
     const exactExport = exports._JKD_GetExactDuration
     this.fnExactDuration =
       typeof exactExport === "function"
