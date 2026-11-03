@@ -25,6 +25,7 @@ import {
   type ProductionRow,
   type ProductionStatRow,
 } from "@/lib/production-rating"
+import { resolvedRunsByPlayer, type KillRow, type ResolvedRuns } from "@/lib/cap-conversion"
 
 /**
  * The W/L share as a percentage, for copy. Read from the constant rather than
@@ -85,14 +86,26 @@ const JOB_DETAIL: Record<Job, string> = {
 
 const JOBS: Job[] = ["cap", "base", "returns", "support"]
 
-/** The raw per-game numbers behind each job, for the column tooltips. */
-function jobDetail(row: ProductionRow, job: Job): string {
+/**
+ * The raw per-game numbers behind each job, for the column tooltips.
+ *
+ * Cap conversion is captures over RESOLVED runs (capped, or returned off you),
+ * from lib/cap-conversion.ts, so it matches the Reports card exactly. It used to
+ * be captures / flag_grabs, which counted a support player's deliberate /kill
+ * resets as failed runs: Interlude's 1 cap in 5 runs read 20% on Reports and 14%
+ * here. `runs` is undefined when the kill matrix doesn't cover any of their
+ * matches (pre-9 Aug 2026), and the conversion is left out rather than guessed.
+ */
+function jobDetail(row: ProductionRow, job: Job, runs?: ResolvedRuns): string {
   const per = (total: number) => (total / Math.max(row.games, 1)).toFixed(1)
   switch (job) {
-    case "cap":
-      return `${per(row.captures)} caps, ${per(row.grabs)} grabs a game — ${
-        row.grabs > 0 ? Math.round((row.captures / row.grabs) * 100) : 0
-      }% conversion`
+    case "cap": {
+      const base = `${per(row.captures)} caps, ${per(row.grabs)} grabs a game`
+      if (!runs || runs.carries === 0) return base
+      return `${base} — ${Math.round((runs.captures / runs.carries) * 100)}% conversion (${
+        runs.captures
+      } ${runs.captures === 1 ? "cap" : "caps"} in ${runs.carries} resolved ${runs.carries === 1 ? "run" : "runs"})`
+    }
     case "base":
       return `${per(row.clears)} base cleans, ${per(row.homeMines)} own-base mines, ${per(row.mineKills)} mine kills a game`
     case "returns":
@@ -227,6 +240,8 @@ interface Fetched {
   matches: MatchRow[]
   statRows: ProductionStatRow[]
   players: ProductionPlayer[]
+  /** Kill matrix, for cap conversion only. Empty before 9 Aug 2026. */
+  kills: KillRow[]
 }
 
 /** UTC day of a match, as YYYY-MM-DD. UTC to match the month bucketing. */
@@ -293,8 +308,21 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
               return scope === "month" ? q.in("match_id", monthIds) : q
             })
 
+      // Only the Cap tooltip's conversion reads this; the rating itself never does.
+      // Ordered on the primary key because of the paging, same as everything above.
+      const kills =
+        scope === "month" && monthIds.length === 0
+          ? []
+          : await fetchAll<KillRow>(() => {
+              const q = supabase
+                .from("match_kills")
+                .select("match_id, victim_player_id, rets")
+                .order(PAGE_ORDER, { ascending: true })
+              return scope === "month" ? q.in("match_id", monthIds) : q
+            })
+
       if (stale()) return
-      setData({ matches: allMatches, statRows, players })
+      setData({ matches: allMatches, statRows, players, kills })
       setDayIndex(null)
     } catch (err) {
       if (stale()) return
@@ -346,6 +374,26 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
       scope === "alltime" ? { minGames: ALL_TIME_MIN_MATCHES } : { minGamesFraction: MONTHLY_MIN_FRACTION },
     )
   }, [data, cutoff, scope])
+
+  /**
+   * Resolved flag runs per player NAME (board rows carry names, not ids), over the
+   * same slice as the board — so stepping back a day moves the conversion too.
+   */
+  const runsByName = useMemo(() => {
+    const out = new Map<string, ResolvedRuns>()
+    if (!data) return out
+    const keep = new Set(
+      (cutoff ? data.matches.filter((m) => dayOf(m) <= cutoff) : data.matches).map((m) => m.id),
+    )
+    const kills = data.kills.filter((k) => keep.has(k.match_id))
+    const stats = data.statRows.filter((r) => keep.has(r.match_id))
+    const nameById = new Map(data.players.map((p) => [p.id, p.name]))
+    for (const [playerId, runs] of resolvedRunsByPlayer(kills, stats)) {
+      const name = nameById.get(playerId)
+      if (name) out.set(name, runs)
+    }
+    return out
+  }, [data, cutoff])
 
   const monthLabel = scope === "alltime" ? "every statted match" : `${MONTH_NAMES[month - 1]} ${year}`
 
@@ -941,8 +989,8 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
                           }}
                           title={
                             shares[job] > 0
-                              ? `${shares[job]}% of ${row.name}'s rating, across all ${row.games} matches — ${jobDetail(row, job)}. For how they compare against others whose main job this was, see By role.`
-                              : `Did none of this job — ${jobDetail(row, job)}. Costs nothing.`
+                              ? `${shares[job]}% of ${row.name}'s rating, across all ${row.games} matches — ${jobDetail(row, job, runsByName.get(row.name))}. For how they compare against others whose main job this was, see By role.`
+                              : `Did none of this job — ${jobDetail(row, job, runsByName.get(row.name))}. Costs nothing.`
                           }
                         >
                           {shares[job] > 0 ? `${shares[job]}%` : "–"}
