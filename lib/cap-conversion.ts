@@ -157,6 +157,66 @@ export function aggregateCapConversion(
 }
 
 // ---------------------------------------------------------------------------
+// One player's resolved runs, with no board floor
+// ---------------------------------------------------------------------------
+
+export interface ResolvedRuns {
+  captures: number
+  /** Times returned while carrying. */
+  caught: number
+  /** captures + caught. Not `flag_grabs`. */
+  carries: number
+}
+
+/** A match_stats row with the match it came from, so coverage can be checked. */
+export interface MatchCaptureRow {
+  match_id: string
+  player_id: string
+  captures: number | null
+}
+
+/**
+ * Every player's resolved runs over the matches the kill matrix covers, keyed by
+ * player id, with no carry floor applied.
+ *
+ * For showing one player's conversion beside other stats — the Impact board's Cap
+ * tooltip — so it can never disagree with the Reports card. That tooltip used to
+ * divide captures by `flag_grabs`, which billed support players for their
+ * deliberate resets and gave them a lower number than the card a click away.
+ *
+ * Same coverage rule as computeCapConversion: a capture from a match with no
+ * matrix rows is dropped, because nobody in that match can ever be recorded as
+ * caught, and counting it would push the ratio towards 100%.
+ */
+export function resolvedRunsByPlayer(
+  kills: KillRow[],
+  stats: MatchCaptureRow[],
+): Map<string, ResolvedRuns> {
+  const covered = new Set(kills.map((k) => k.match_id))
+  const out = new Map<string, ResolvedRuns>()
+  const rec = (playerId: string) => {
+    let r = out.get(playerId)
+    if (!r) {
+      r = { captures: 0, caught: 0, carries: 0 }
+      out.set(playerId, r)
+    }
+    return r
+  }
+  for (const s of stats) {
+    if (!covered.has(s.match_id)) continue
+    const r = rec(s.player_id)
+    r.captures += s.captures ?? 0
+    r.carries = r.captures + r.caught
+  }
+  for (const k of kills) {
+    const r = rec(k.victim_player_id)
+    r.caught += k.rets ?? 0
+    r.carries = r.captures + r.caught
+  }
+  return out
+}
+
+// ---------------------------------------------------------------------------
 // Cap conversion, per completed month, in capper-role games only
 // ---------------------------------------------------------------------------
 

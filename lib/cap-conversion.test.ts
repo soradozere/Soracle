@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest"
-import { aggregateCapConversion, type CaptureStatRow, type KillRow } from "./cap-conversion"
+import {
+  aggregateCapConversion,
+  resolvedRunsByPlayer,
+  type CaptureStatRow,
+  type KillRow,
+} from "./cap-conversion"
 
 /*
  * aggregateCapConversion is the pure half of computeCapConversion — everything
@@ -109,5 +114,45 @@ describe("aggregateCapConversion", () => {
     const kills: KillRow[] = [{ match_id: "m1", victim_player_id: "ghost", rets: 1 }]
     const { rows } = aggregateCapConversion(kills, [], names)
     expect(rows[0].name).toBe("unknown")
+  })
+})
+
+describe("resolvedRunsByPlayer", () => {
+  it("leaves deliberate resets out: 7 grabs, 1 cap, caught 4 times is 1 in 5, not 1 in 7", () => {
+    // The Discord report that prompted this. flag_grabs never enters the sum, so
+    // the two /kill resets a support player made simply aren't runs.
+    const kills: KillRow[] = [
+      { match_id: "m1", victim_player_id: "p-support", rets: 3 },
+      { match_id: "m1", victim_player_id: "p-support", rets: 1 },
+    ]
+    const runs = resolvedRunsByPlayer(kills, [{ match_id: "m1", player_id: "p-support", captures: 1 }])
+    expect(runs.get("p-support")).toEqual({ captures: 1, caught: 4, carries: 5 })
+  })
+
+  it("drops captures from matches the kill matrix doesn't cover", () => {
+    const kills: KillRow[] = [{ match_id: "m-json", victim_player_id: "p-leader", rets: 1 }]
+    const runs = resolvedRunsByPlayer(kills, [
+      { match_id: "m-json", player_id: "p-leader", captures: 1 },
+      { match_id: "m-csv", player_id: "p-leader", captures: 5 },
+    ])
+    expect(runs.get("p-leader")).toEqual({ captures: 1, caught: 1, carries: 2 })
+  })
+
+  it("agrees with the board for players who clear its floor", () => {
+    const kills: KillRow[] = [
+      { match_id: "m1", victim_player_id: "p-leader", rets: 2 },
+      { match_id: "m1", victim_player_id: "p-support", rets: 1 },
+    ]
+    const stats = [
+      { match_id: "m1", player_id: "p-leader", captures: 6 },
+      { match_id: "m1", player_id: "p-support", captures: 2 },
+    ]
+    const runs = resolvedRunsByPlayer(kills, stats)
+    const { rows } = aggregateCapConversion(kills, stats, names)
+    for (const r of rows) {
+      const mine = runs.get(r.playerId)!
+      expect(mine.captures).toBe(r.captures)
+      expect(mine.carries).toBe(r.carries)
+    }
   })
 })
