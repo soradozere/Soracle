@@ -11,9 +11,11 @@ import { resolveMonthlySecretHolders } from "./achievements"
  *   resolveMonthlySecretHolders()  — which month settles the crest, forever
  *                                    (lib/achievements.ts)
  *
- * The crest ships with { minConversion: 35, gameFloorFraction: 0.5 }. Tests
- * that depend on those exact numbers say so, so a deliberate retune fails
- * loudly here rather than silently changing who owns the crest.
+ * The crest ships with { minConversion: 22, gameFloorFraction: 0.5 } (lowered
+ * from 35 on 8 Nov 2026 — see the "Why 35% missed" comment on the def in
+ * lib/achievement-meta.ts). Tests that depend on those exact numbers say so,
+ * so a deliberate retune fails loudly here rather than silently changing who
+ * owns the crest.
  */
 
 const NOW = new Date("2026-10-15T12:00:00.000Z")
@@ -186,12 +188,12 @@ describe("resolveMonthlySecretHolders", () => {
     lastDate: `${month}-28T20:00:00Z`,
   })
 
-  it("awards nobody when no month clears the 35% bar", () => {
-    // August 2026's real shape: xan led on 28.4%, under the bar.
+  it("awards nobody when no month clears the 22% bar", () => {
+    // September 2026's real shape: jin led on 19.0%, under the bar.
     const holders = resolveMonthlySecretHolders([
-      row("2026-08", "xan", 8, 28.4),
-      row("2026-08", "retpecs", 10, 21.7),
-      row("2026-08", "interlude", 12, 16.5),
+      row("2026-09", "jin", 10, 19.0),
+      row("2026-09", "retpecs", 8, 16.7),
+      row("2026-09", "interlude", 12, 15.5),
     ])
     expect(holders.size).toBe(0)
   })

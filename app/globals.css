@@ -512,6 +512,7 @@ html[data-theme="cloud-city"] {
   --rarity-legendary: #f5c542;
   --rarity-mythic: #eaeeff;
   --rarity-oneofone: #ff2fb9;
+  --rarity-transcendent: #ff3b3b;
 }
 
 /* Keyed on the GROUND the colour lands on, not on the site theme, because those
@@ -534,6 +535,7 @@ html[data-profile-mode="light"] {
   --rarity-legendary: #6e591e;
   --rarity-mythic: #525359;
   --rarity-oneofone: #b32182;
+  --rarity-transcendent: #b31b1b;
 }
 
 /* Every --rarity-* above is read only from JS inline styles, which the CSS
@@ -544,6 +546,7 @@ html[data-profile-mode="light"] {
   color: var(--rarity-common);
   border-color: var(--rarity-rare) var(--rarity-epic) var(--rarity-legendary) var(--rarity-mythic);
   background-color: var(--rarity-oneofone);
+  outline-color: var(--rarity-transcendent);
 }
 
 /* Profile pages under a full-palette theme: wallpaper art and glyph rain are

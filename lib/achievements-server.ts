@@ -6,6 +6,7 @@ import {
   resolveSecretHolders,
   resolveScoreSecretHolders,
   resolveMonthlySecretHolders,
+  resolveCompletionistHolder,
   secretViewsFor,
   unlockEventsFor,
   type AchievementView,
@@ -312,10 +313,11 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
     }
   }
 
-  // Match-, score- and month-resolved secrets answer different questions off the
-  // same history, so they're resolved separately and merged into one map. Ids
-  // never overlap: a def has exactly one of claim() / scoreThreshold / monthly,
-  // and each resolver skips the defs that aren't its own.
+  // Match-, score-, month- and completionist-resolved secrets answer different
+  // questions off the same history, so they're resolved separately and merged
+  // into one map. Ids never overlap: a def has exactly one of claim() /
+  // scoreThreshold / monthly / completionist, and each resolver skips the defs
+  // that aren't its own.
   const holders = resolveSecretHolders(candidates)
   for (const [id, holder] of resolveScoreSecretHolders(seqByPlayer)) holders.set(id, holder)
   for (const [id, holder] of resolveMonthlySecretHolders(
@@ -323,6 +325,7 @@ async function buildHistoryIndex(): Promise<HistoryIndex> {
   )) {
     holders.set(id, holder)
   }
+  for (const [id, holder] of resolveCompletionistHolder(seqByPlayer)) holders.set(id, holder)
   return { seqByPlayer, nameById, metaById, holders }
 }
 
@@ -443,7 +446,7 @@ export async function computeAchievementLedger(): Promise<AchievementLedger> {
       achId: def.id,
       rank: 1,
       totalRanks: 1,
-      rarity: SECRET_RARITY,
+      rarity: def.completionist ? "transcendent" : SECRET_RARITY,
       title: def.title,
       titled: true, // a one-of-one's name is its own; there is no family to number against
       date: holder.date,
@@ -552,16 +555,18 @@ export async function computePlayersDirectory(): Promise<PlayerRow[]> {
         }
       }
     }
-    // A claimed one-of-one outranks everything, so it takes the title outright.
+    // A claimed secret outranks everything, so it takes the title outright.
     // Its POINTS come from the def, not the rarity: The GOAT is worth 0 (see
-    // pointsForSecret), while still counting as a one-of-one for the rarity
-    // breakdown and the board's accent colour.
+    // pointsForSecret), while still counting at its rarity (oneofone, or
+    // transcendent for the completionist one) for the rarity breakdown and
+    // the board's accent colour.
     let secretPoints = 0
     for (const def of SECRET_ACHIEVEMENTS) {
       if (holders.get(def.id)?.playerId !== pid) continue
-      rarities.push(SECRET_RARITY)
+      const secretRarity = def.completionist ? "transcendent" : SECRET_RARITY
+      rarities.push(secretRarity)
       secretPoints += pointsForSecret(def.id)
-      topEvent = { rarity: SECRET_RARITY, rank: 1, date: holders.get(def.id)!.date, label: def.title }
+      topEvent = { rarity: secretRarity, rank: 1, date: holders.get(def.id)!.date, label: def.title }
     }
 
     const rarityCounts = Object.fromEntries(RARITY_ORDER.map((r) => [r, 0])) as Record<Rarity, number>
@@ -580,7 +585,7 @@ export async function computePlayersDirectory(): Promise<PlayerRow[]> {
       name: meta.name,
       tierValue: meta.tierValue,
       avatarUrl: meta.avatarUrl,
-      score: scoreFor(rarities.filter((r) => r !== SECRET_RARITY)) + secretPoints,
+      score: scoreFor(rarities.filter((r) => r !== SECRET_RARITY && r !== "transcendent")) + secretPoints,
       unlocks: rarities.length,
       best: bestRarity(rarities),
       title: topEvent?.label ?? null,

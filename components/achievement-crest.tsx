@@ -104,6 +104,15 @@ export const Crest = forwardRef<HTMLDivElement, CrestProps>(function Crest(
           ))}
         </div>
       )}
+      {is("transcendent") && (
+        <div className="ach-mist" aria-hidden>
+          {rep(7).map((_, i) => (
+            <i key={i} />
+          ))}
+        </div>
+      )}
+      {is("transcendent") && <div className="ach-spec" aria-hidden />}
+      {is("transcendent") && <div className="ach-shade" aria-hidden />}
       <div className="ach-face">
         {a.tiered && earned && <div className="ach-rank">{roman(a.rank)}</div>}
         <CrestIcon icon={a.icon} color={color} locked={!earned} />
@@ -288,6 +297,37 @@ export const ACH_CSS = `
 .ach-sparks i:nth-child(7){top:92%;left:66%;--s:13px;animation-delay:2.5s}
 .ach-sparks i:nth-child(8){top:18%;left:40%;--s:9px;animation-delay:2.95s}
 
+/* ---- transcendent: All Too Easy — a lit sphere, mist bands drifting
+   horizontally across it instead of a spiral pulling to a centre. No inner
+   core: the crest's own 3D shape (the sphere shading below) IS the "orb",
+   not a second glowing dot inside it.
+   circle() uses closest-side, not a literal px radius: .ach-ring sits at
+   inset:0 (150x176) and .ach-bodyfill/.ach-mist/.ach-spec/.ach-shade sit at
+   inset:5px (140x166) — a shared literal radius bulges past the smaller
+   box's own edge and gets flat-clipped there (shipped once, caught in
+   review). closest-side resolves per element's own box, so the inset layers
+   come out a uniform 5px inside the ring's circle, same concentric-bezel
+   effect the hexagon/octagon get from their shapes being percentage-based. */
+.ach-tile.transcendent{--rc:#ff3b3b;--a:#ff3b3b;--b:#ff9d9d;--c:#3a0000;--ach-shape:circle(closest-side at 50% 50%)}
+.ach-tile.transcendent .ach-glow{filter:drop-shadow(0 0 12px color-mix(in srgb,var(--a) 65%,transparent)) drop-shadow(0 0 28px color-mix(in srgb,var(--c) 55%,transparent))}
+.ach-tile.transcendent .ach-ring{background:radial-gradient(circle at 32% 26%,#ffd6d6 0%,#ff9d9d 12%,#ff3b3b 44%,#9a0000 80%,#3a0000 100%)}
+.ach-tile.transcendent .ach-bodyfill{background:radial-gradient(circle at 32% 26%,rgba(255,180,180,.5) 0%,rgba(255,59,59,.16) 30%,transparent 58%),radial-gradient(circle at 70% 78%,#1c0d0f 0%,#120a0b 45%,#07050a 100%)}
+.ach-tile.transcendent .ach-name{color:#fff0f0;text-shadow:0 0 9px color-mix(in srgb,var(--b) 55%,transparent)}
+.ach-tile.transcendent .ach-tag{background:#0b0507;border-color:var(--a);color:#ffd6d6;box-shadow:0 0 12px color-mix(in srgb,var(--a) 55%,transparent)}
+.ach-mist{position:absolute;inset:5px;z-index:3;pointer-events:none;overflow:hidden;clip-path:var(--ach-shape)}
+.ach-mist i{position:absolute;left:-65%;width:230%;border-radius:50%;filter:blur(1.5px);mix-blend-mode:screen}
+.ach-mist i:nth-child(1){top:7%;height:5px;background:linear-gradient(90deg,transparent 0%,rgba(255,170,170,.6) 40%,rgba(255,170,170,.6) 60%,transparent 100%);animation:achMistA 4.6s ease-in-out infinite}
+.ach-mist i:nth-child(2){top:19%;height:7px;background:linear-gradient(90deg,transparent 0%,rgba(255,110,110,.55) 42%,rgba(255,110,110,.55) 58%,transparent 100%);animation:achMistB 5.8s ease-in-out infinite}
+.ach-mist i:nth-child(3){top:33%;height:4px;background:linear-gradient(90deg,transparent 0%,rgba(255,235,225,.45) 40%,rgba(255,235,225,.45) 60%,transparent 100%);animation:achMistA 3.9s ease-in-out infinite reverse}
+.ach-mist i:nth-child(4){top:49%;height:8px;background:linear-gradient(90deg,transparent 0%,rgba(255,120,120,.5) 42%,rgba(255,120,120,.5) 58%,transparent 100%);animation:achMistB 5.1s ease-in-out infinite reverse}
+.ach-mist i:nth-child(5){top:63%;height:5px;background:linear-gradient(90deg,transparent 0%,rgba(200,20,20,.6) 42%,rgba(200,20,20,.6) 58%,transparent 100%);animation:achMistA 4.3s ease-in-out infinite}
+.ach-mist i:nth-child(6){top:77%;height:6px;background:linear-gradient(90deg,transparent 0%,rgba(255,235,225,.35) 40%,rgba(255,235,225,.35) 60%,transparent 100%);animation:achMistB 6.4s ease-in-out infinite}
+.ach-mist i:nth-child(7){top:90%;height:4px;background:linear-gradient(90deg,transparent 0%,rgba(120,0,0,.65) 40%,rgba(120,0,0,.65) 60%,transparent 100%);animation:achMistA 5.4s ease-in-out infinite reverse}
+@keyframes achMistA{0%,100%{transform:translateX(-38%)}50%{transform:translateX(38%)}}
+@keyframes achMistB{0%,100%{transform:translateX(34%)}50%{transform:translateX(-34%)}}
+.ach-spec{position:absolute;inset:0;z-index:3;pointer-events:none;mix-blend-mode:screen;clip-path:var(--ach-shape);background:radial-gradient(circle at 27% 21%,rgba(255,255,255,.85) 0%,rgba(255,255,255,.3) 14%,transparent 34%)}
+.ach-shade{position:absolute;inset:0;z-index:3;pointer-events:none;clip-path:var(--ach-shape);background:radial-gradient(circle at 70% 76%,transparent 0%,transparent 42%,rgba(0,0,0,.5) 76%,rgba(0,0,0,.72) 100%)}
+
 .ach-tile.locked{filter:grayscale(.85);opacity:.6}
 .ach-tile.locked .ach-bodyfill{background:linear-gradient(180deg,#141a22,#0a0e13)}
 .ach-tile.locked .ach-ring{background:linear-gradient(150deg,#33404e,#1a222c)}
@@ -300,7 +340,8 @@ export const ACH_CSS = `
 
 @media (prefers-reduced-motion:reduce){
   .ach-tile.pulse,.ach-sheen,.ach-comet,.ach-scan i,.ach-neb i,.ach-embers i,.ach-flares i,.ach-sparks i,
-  .ach-tile.epic.earned .ach-pips i.on,.ach-tile.mythic.earned .ach-glow,.ach-tile.oneofone .ach-ring::before{animation:none}
+  .ach-tile.epic.earned .ach-pips i.on,.ach-tile.mythic.earned .ach-glow,.ach-tile.oneofone .ach-ring::before,
+  .ach-mist i{animation:none}
   .ach-sparks i,.ach-flares i{opacity:.85;transform:scale(1)}
 }
 `

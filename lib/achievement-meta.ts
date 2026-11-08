@@ -12,7 +12,7 @@
 // mask-tinted to the rarity colour (same technique as badges). The mapping is
 // thematic/decorative — the crests are emblems, not literal action icons.
 
-export type Rarity = "common" | "rare" | "epic" | "legendary" | "mythic" | "oneofone"
+export type Rarity = "common" | "rare" | "epic" | "legendary" | "mythic" | "oneofone" | "transcendent"
 export type AchievementCategory = "match" | "career" | "streak"
 
 // Mythic sits above legendary — the very rarest feats. Its crest is a fire-lit
@@ -23,6 +23,13 @@ export type AchievementCategory = "match" | "career" | "streak"
 // player holds each, forever. Fuchsia because no other tier is anywhere near it
 // on the wheel, and its crest is an octagon rather than a hexagon — a crest that
 // nobody else can ever earn should not be the same shape as the ones they can.
+//
+// "Transcendent" sits above One of One — not another one-of-one among several,
+// but THE single crest for clearing every other achievement family in the game
+// (see "all-too-easy" below). Red, because it needs to read as categorically
+// different from the fuchsia ladder rather than one more rung on it, and its
+// crest is a circle — every other shape in the ladder is an angular gem; the
+// one thing nobody else can ever hold shouldn't share a silhouette with them.
 export const RARITY_META: Record<Rarity, { label: string; color: string; order: number }> = {
   common: { label: "Common", color: "#3ddc84", order: 1 },
   rare: { label: "Rare", color: "#2f81f7", order: 2 },
@@ -30,6 +37,7 @@ export const RARITY_META: Record<Rarity, { label: string; color: string; order: 
   legendary: { label: "Legendary", color: "#f5c542", order: 4 },
   mythic: { label: "Mythic", color: "#eaeeff", order: 5 },
   oneofone: { label: "One of One", color: "#ff2fb9", order: 6 },
+  transcendent: { label: "Transcendent", color: "#ff3b3b", order: 7 },
 }
 
 /*
@@ -43,7 +51,7 @@ export const RARITY_META: Record<Rarity, { label: string; color: string; order: 
  *
  * Each is its own hue mixed toward black until it clears 4.5 (AA text), so hue
  * identity survives even though value doesn't: 45% for common/legendary, 70%
- * for rare/epic/one-of-one, 35% for mythic.
+ * for rare/epic/one-of-one/transcendent, 35% for mythic.
  *
  * Mythic is the one real compromise. It is *designed* as pearl-white ("a cold
  * fire", see components/achievement-crest.tsx), and there is no readable
@@ -68,6 +76,7 @@ export const RARITY_COLOR_LIGHT: Record<Rarity, string> = {
   legendary: "#6e591e",
   mythic: "#525359",
   oneofone: "#b32182",
+  transcendent: "#b31b1b",
 }
 
 // The per-match scoreboard fields achievements read. A subset of match_stats,
@@ -1238,6 +1247,16 @@ export interface SecretDef {
    */
   monthly?: MonthlySecretMetric
   /**
+   * The fourth resolution kind: answered by neither one match, nor a score
+   * total, nor a calendar month, but by whether a player has maxed out every
+   * family in ACHIEVEMENTS. There is exactly one of these ("all-too-easy");
+   * the flag exists rather than a bare id check so a second one wouldn't need
+   * a parallel string comparison somewhere. See resolveCompletionistHolder in
+   * lib/achievements.ts, and SECRET_RARITY vs this id's own "transcendent"
+   * rarity (secretViewsFor and findAchievementDef both special-case it).
+   */
+  completionist?: true
+  /**
    * Points this crest contributes, overriding its rarity. Only The GOAT sets it
    * (to 0): it fires AT 1337 Achievement Score, and a 150-point crest would
    * shove its own holder to 1487 the instant they earned it. Zero keeps them on
@@ -1315,12 +1334,22 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
      * Restricted to capper-role games so a chaser who picked up one loose flag
      * and walked it in can't post 100% off a single carry.
      *
-     * Why 35%: scored over the matches the kill matrix actually covers, the
-     * best capper-role month on record is 20.3% (cooky, Aug 2026). An earlier
-     * pass put the bar's nearest approach at 28.4%, but that number was
-     * inflated — it counted captures from every August match while counting
-     * times-caught only from the covered ones. 35% is comfortably clear of the
-     * real ceiling either way. This ships UNCLAIMED and is meant to.
+     * Why 35% missed, and 22% replaces it (recalibrated 8 Nov 2026): the
+     * original bar was set against a mid-month snapshot of Aug 2026 (cooky at
+     * 20.3%, taken 26 Aug — the month had six days left to play). By the time
+     * that month actually closed, more games diluted cooky down to 16.2%, and
+     * three full matrix-covered months later (Aug, Sep, Oct 2026) the real
+     * ceiling turned out to be 19.0% (jin, Sep 2026) — nowhere near 35%, which
+     * no capper came within 16 points of in a single one of them. An earlier
+     * pass before that put the bar's nearest approach at 28.4%, but that
+     * number was inflated too — it counted captures from every August match
+     * while counting times-caught only from the covered ones.
+     *
+     * 22% sits just past the real, closed-month ceiling (19.0%) the same way
+     * the retired versions meant to and failed to: unclaimed today, but by a
+     * margin a real month of capping can actually close, not a permanently
+     * dead target. Re-verify against live capperMonths() output before ever
+     * retuning this again — a comment's number is a snapshot, not a floor.
      *
      * Needs match_kills (returns made AGAINST a carrier), which is JSON-era
      * only and cannot be backfilled — so no month before Aug 2026 can ever
@@ -1332,8 +1361,8 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
     title: "Wesley's Prodigy",
     category: "career",
     icon: "rogue-one", // shares Pro Rusher's crest — the runner's crest
-    condition: "35%+ cap conversion as your team's capper, across a full month",
-    monthly: { kind: "capperConversion", minConversion: 35, gameFloorFraction: 0.5 },
+    condition: "22%+ cap conversion as your team's capper, across a full month",
+    monthly: { kind: "capperConversion", minConversion: 22, gameFloorFraction: 0.5 },
   },
   {
     // Score-resolved, not match-resolved: no single scoreboard row can answer
@@ -1359,6 +1388,35 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
     condition: "3+ dooms, 15+ DBS kills and a cap in one match",
     claim: (s) => s.doom_kills >= 3 && s.dbs_kills >= 15 && s.captures >= 1,
   },
+  {
+    /*
+     * The ULTIMATE crest: not for a feat, but for having no families left to
+     * climb — every ACHIEVEMENTS ladder maxed to its top rank, by one player.
+     * Deliberately scoped to the public ladder only, not the other five
+     * secrets here: those are each exclusive to whoever claimed them first
+     * (Pacifist is suvix's forever, Protector of Yavin is Interlude's), so
+     * requiring a player to ALSO hold every one of them would make this
+     * crest provably unclaimable the moment two of those go to different
+     * people — which they already have. Scoped this way it's merely the
+     * hardest real climb in the game, not a mathematical impossibility.
+     *
+     * Held by whoever was first to complete the LAST family they were
+     * missing — see resolveCompletionistHolder in lib/achievements.ts, same
+     * "replay the unlock ledger, find the crossing" shape as The GOAT, just
+     * tracking set-completeness instead of a score sum.
+     *
+     * Rarity is "transcendent", not SECRET_RARITY: this is the one secret
+     * that isn't a one-of-one among equals, it's the thing above all of
+     * them. See the rarity's own comment on RARITY_META. secretViewsFor and
+     * findAchievementDef both read `completionist` to make that swap.
+     */
+    id: "all-too-easy",
+    title: "All Too Easy",
+    category: "career",
+    icon: "lord-revan", // shares Nah You're Hacking's crest — total mastery
+    condition: "Max every achievement in the game",
+    completionist: true,
+  },
 ]
 
 // Both ACHIEVEMENTS and SECRET_ACHIEVEMENTS, by id. Anything that renders a crest
@@ -1370,5 +1428,5 @@ export function findAchievementDef(
   const def = ACHIEVEMENTS.find((d) => d.id === id)
   if (def) return def
   const secret = SECRET_ACHIEVEMENTS.find((d) => d.id === id)
-  return secret && { id: secret.id, title: secret.title, rarity: SECRET_RARITY }
+  return secret && { id: secret.id, title: secret.title, rarity: secret.completionist ? "transcendent" : SECRET_RARITY }
 }

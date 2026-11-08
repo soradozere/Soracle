@@ -9,6 +9,7 @@ import {
   computeMeritTitles,
   resolveSecretHolders,
   resolveMonthlySecretHolders,
+  resolveCompletionistHolder,
   secretViewsFor,
   type AchievementView,
   type KillPairRow,
@@ -379,6 +380,49 @@ function secretCandidates(
     })
   }
   return candidates
+}
+
+// Every player's chronological match sequence, built from the same full
+// dataset secretCandidates uses — needed by resolveCompletionistHolder (All
+// Too Easy), which asks "has EVERY player maxed every family" and so, like
+// the one-of-ones above, can't be read off a single profile's own history.
+//
+// Mirrors the per-player loop in buildHistoryIndex (lib/achievements-server.ts)
+// field-for-field; the two MUST agree for the same reason the monthly merge
+// below does — a browser/server mismatch here would leave All Too Easy's
+// holder different on the two surfaces.
+function buildSeqByPlayer(
+  matches: ProfileMatch[],
+  stats: StatRow[],
+  nameById: Map<string, string>,
+): Map<string, AchMatch[]> {
+  const statByKey = new Map<string, StatRow>()
+  for (const r of stats) statByKey.set(`${r.match_id}:${r.player_id}`, r)
+
+  const seqByPlayer = new Map<string, AchMatch[]>()
+  for (const [playerId, name] of nameById) {
+    const seq: AchMatch[] = []
+    for (const match of matches) {
+      const o = outcomeFor(name, match)
+      if (!o.played) continue
+      const onRed = (match.red_team || []).includes(name)
+      const row = statByKey.get(`${match.id}:${playerId}`)
+      seq.push({
+        matchId: match.id,
+        date: match.created_at,
+        played: true,
+        won: o.won,
+        lost: o.lost,
+        myScore: onRed ? match.red_score : match.blue_score,
+        oppScore: onRed ? match.blue_score : match.red_score,
+        teammates: o.teammates,
+        opponents: o.opponents,
+        stat: row ? toAchStat(row) : null,
+      })
+    }
+    if (seq.length) seqByPlayer.set(playerId, seq)
+  }
+  return seqByPlayer
 }
 
 // ---------------------------------------------------------------------------
@@ -1024,6 +1068,11 @@ export async function loadPlayerProfile(player: Player, allPlayers: Player[]): P
   for (const [id, holder] of resolveMonthlySecretHolders(
     capperMonths(playable, stats, killPairs, new Date()),
   )) {
+    secretHolders.set(id, holder)
+  }
+  // Completionist-resolved (All Too Easy) needs every player's full sequence,
+  // not just this one — same cross-surface consistency requirement as above.
+  for (const [id, holder] of resolveCompletionistHolder(buildSeqByPlayer(playable, stats, nameById))) {
     secretHolders.set(id, holder)
   }
   const achievements = computeAchievements(achSeq, secretViewsFor(player.id, secretHolders))
