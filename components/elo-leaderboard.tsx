@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react"
 import { rankBy, rankByName } from "@/lib/rank-order"
-import { createClient } from "@/lib/supabase/client"
 import { ArrowUp, ArrowDown, RefreshCw, Trophy, TrendingUp, TrendingDown, HelpCircle } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -135,45 +134,25 @@ export function EloLeaderboard({ year, month, isAdmin = false, scope: scopeProp 
     setError(null)
 
     try {
-      const supabase = createClient()
-
       // Full match history, oldest first — order matters for a running rating.
-      const { data: matches, error: matchesError } = await supabase
-        .from("matches")
-        .select("id, red_team, blue_team, red_score, blue_score, created_at")
-        .order("created_at", { ascending: true })
-
-      if (matchesError) {
-        setError(matchesError.message)
+      // Served from the same cached history the achievements/homepage pages share
+      // (lib/achievements-server.ts) instead of querying Postgres directly from the
+      // browser on every mount and month change.
+      const res = await fetch("/api/leaderboard-history")
+      if (!res.ok) {
+        setError(`Failed to load match history (${res.status})`)
         setLoading(false)
         return
       }
-
-      const { data: players, error: playersError } = await supabase
-        .from("players")
-        .select("id, name, tier_value")
-
-      if (playersError) {
-        setError(playersError.message)
-        setLoading(false)
-        return
-      }
-
-      // Per-player kills/deaths (only matches with an uploaded stats CSV contribute,
-      // so this is partial — stats tracking started recently).
-      const { data: stats, error: statsError } = await supabase
-        .from("match_stats")
-        .select("player_id, match_id, kills, deaths")
-
-      if (statsError) {
-        setError(statsError.message)
-        setLoading(false)
-        return
+      const { matches, players, stats } = (await res.json()) as {
+        matches: Match[]
+        players: { id: string; name: string; tier_value: number }[]
+        stats: { player_id: string; match_id: string; kills: number; deaths: number }[]
       }
 
       const playerTierMap = new Map<string, number>()
       const playerIdToName = new Map<string, string>()
-      for (const player of players || []) {
+      for (const player of players) {
         playerTierMap.set(player.name, player.tier_value)
         playerIdToName.set(player.id, player.name)
       }
@@ -245,7 +224,7 @@ export function EloLeaderboard({ year, month, isAdmin = false, scope: scopeProp 
       const monthMatchIds = new Set<string>()
       const monthMatches: Match[] = []
 
-      for (const match of (matches || []) as Match[]) {
+      for (const match of matches) {
         if (!match.red_team?.length || !match.blue_team?.length) continue
 
         const inMonth = isInSelectedMonth(match.created_at)
@@ -279,7 +258,7 @@ export function EloLeaderboard({ year, month, isAdmin = false, scope: scopeProp 
       // Aggregate kills/deaths per name, all-time and month-only.
       const allKd = new Map<string, { kills: number; deaths: number }>()
       const monthKd = new Map<string, { kills: number; deaths: number }>()
-      for (const row of stats || []) {
+      for (const row of stats) {
         const name = playerIdToName.get(row.player_id)
         if (!name) continue
         if (!allKd.has(name)) allKd.set(name, { kills: 0, deaths: 0 })
