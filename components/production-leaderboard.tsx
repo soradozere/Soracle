@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { createClient } from "@/lib/supabase/client"
 import { ChevronLeft, ChevronRight, Hammer, HelpCircle, ListChecks, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -52,15 +51,6 @@ const MONTH_NAMES = [
 
 /** Scoreboards only exist from this date; before it there is nothing to rate. */
 const SCOREBOARD_ERA = "1 June 2026"
-
-const STAT_COLUMNS =
-  "match_id, player_id, team, captures, flag_grabs, flag_hold_ms, returns, assists, base_cleaner, " +
-  "mine_kills, mine_grabs_red, mine_grabs_blue, mine_returns, time_played"
-
-const PAGE_SIZE = 1000
-
-/** Every paged query must order on something unique — `.range()` is LIMIT/OFFSET. */
-const PAGE_ORDER = "id"
 
 /** One colour per job, shared by the legend, the bars and the breakdown columns. */
 const JOB_COLOURS: Record<Job, string> = {
@@ -125,21 +115,6 @@ interface ProductionLeaderboardProps {
 
 interface MatchRow extends ProductionMatch {
   created_at: string
-}
-
-async function fetchAll<T>(
-  build: () => {
-    range: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>
-  },
-): Promise<T[]> {
-  const rows: T[] = []
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await build().range(from, from + PAGE_SIZE - 1)
-    if (error) throw new Error(error.message)
-    const batch = (data ?? []) as T[]
-    rows.push(...batch)
-    if (batch.length < PAGE_SIZE) return rows
-  }
 }
 
 /**
@@ -278,35 +253,31 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
     setError(null)
 
     try {
-      const supabase = createClient()
-
-      const matchQuery = () => {
-        const q = supabase
-          .from("matches")
-          .select("id, red_team, blue_team, red_score, blue_score, created_at")
-          .order(PAGE_ORDER, { ascending: true })
-        if (scope === "alltime") return q
-        const start = new Date(Date.UTC(year, month - 1, 1))
-        const end = new Date(Date.UTC(year, month, 1))
-        return q.gte("created_at", start.toISOString()).lt("created_at", end.toISOString())
+      // Served from the same cached history the ELO/TrueSkill boards and the
+      // achievements/homepage pages share (lib/achievements-server.ts) instead of
+      // querying matches/players/match_stats directly from the browser on every
+      // mount and month change -- that unbounded per-visitor querying is what blew
+      // through the Supabase project's egress quota.
+      const res = await fetch("/api/leaderboard-history")
+      if (!res.ok) throw new Error(`Failed to load match history (${res.status})`)
+      const { matches: rawMatches, players, stats: rawStats } = (await res.json()) as {
+        matches: MatchRow[]
+        players: ProductionPlayer[]
+        stats: ProductionStatRow[]
       }
 
-      const allMatches = (await fetchAll<MatchRow>(matchQuery)).filter(
-        (m) => m.red_team?.length && m.blue_team?.length,
-      )
+      const inScope = (m: MatchRow) => {
+        if (!(m.red_team?.length && m.blue_team?.length)) return false
+        if (scope === "alltime") return true
+        const start = Date.UTC(year, month - 1, 1)
+        const end = Date.UTC(year, month, 1)
+        const t = Date.parse(m.created_at)
+        return t >= start && t < end
+      }
 
-      const players = await fetchAll<ProductionPlayer>(() =>
-        supabase.from("players").select("id, name, tier_value").order(PAGE_ORDER, { ascending: true }),
-      )
-
-      const monthIds = allMatches.map((m) => m.id)
-      const statRows =
-        scope === "month" && monthIds.length === 0
-          ? []
-          : await fetchAll<ProductionStatRow>(() => {
-              const q = supabase.from("match_stats").select(STAT_COLUMNS).order(PAGE_ORDER, { ascending: true })
-              return scope === "month" ? q.in("match_id", monthIds) : q
-            })
+      const allMatches = rawMatches.filter(inScope)
+      const matchIds = new Set(allMatches.map((m) => m.id))
+      const statRows = rawStats.filter((r) => matchIds.has(r.match_id))
 
       // Only the Cap tooltip's conversion reads this; the rating itself never does.
       // Ordered on the primary key because of the paging, same as everything above.

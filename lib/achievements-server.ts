@@ -156,7 +156,7 @@ interface RawHistory {
  */
 export const HISTORY_TAG = "achievement-history"
 
-const fetchHistoryRows = unstable_cache(fetchHistoryRowsUncached, ["achievement-history"], {
+export const fetchHistoryRows = unstable_cache(fetchHistoryRowsUncached, ["achievement-history"], {
   tags: [HISTORY_TAG],
   revalidate: 3600,
 })

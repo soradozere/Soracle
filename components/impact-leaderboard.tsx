@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { createClient } from "@/lib/supabase/client"
 import { Activity, HelpCircle, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import {
@@ -47,26 +46,6 @@ const MONTH_NAMES = [
  */
 const SCOREBOARD_ERA = "1 June 2026"
 
-/** Columns the board reads. Kept in one place so the two scopes cannot drift. */
-const STAT_COLUMNS =
-  "match_id, player_id, team, score, captures, returns, base_cleaner, assists, flag_grabs, kills, deaths, time_played"
-
-/**
- * PostgREST caps a response at 1000 rows and says nothing about it. A month of 6v6
- * is ~12 rows a match, so the monthly board is safe, but the all-time table passed
- * 1000 rows around mid-July 2026 and would silently drop everything after it —
- * which looks exactly like a quiet month rather than a bug.
- */
-const PAGE_SIZE = 1000
-
-/**
- * Every paged query MUST be ordered on something unique. `.range()` becomes
- * LIMIT/OFFSET, and Postgres gives no stability guarantee across two separate
- * statements without an ORDER BY — the same row can come back in both pages, or in
- * neither.
- */
-const PAGE_ORDER = "id"
-
 /** Where a standing bar is drawn at full width, in standard deviations. */
 const Z_BAR_CLAMP = 2.5
 
@@ -95,26 +74,6 @@ interface MatchRow extends ImpactMatch {
 }
 
 const signed = (z: number) => `${z >= 0 ? "+" : ""}${z.toFixed(1)}`
-
-/**
- * Page through a query until a batch comes back short. Same shape as the helper in
- * lib/returner-rate.ts: the query is rebuilt per page because a PostgREST builder
- * is single-use once awaited.
- */
-async function fetchAll<T>(
-  build: () => {
-    range: (from: number, to: number) => PromiseLike<{ data: unknown; error: { message: string } | null }>
-  },
-): Promise<T[]> {
-  const rows: T[] = []
-  for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await build().range(from, from + PAGE_SIZE - 1)
-    if (error) throw new Error(error.message)
-    const batch = (data ?? []) as T[]
-    rows.push(...batch)
-    if (batch.length < PAGE_SIZE) return rows
-  }
-}
 
 /**
  * One of the four standings, as a bar diverging from the pool average.
@@ -185,43 +144,36 @@ export function ImpactLeaderboard({ year, month, scope }: ImpactLeaderboardProps
     setError(null)
 
     try {
-      const supabase = createClient()
+      // Served from the same cached history the ELO/TrueSkill boards and the
+      // achievements/homepage pages share (lib/achievements-server.ts) instead of
+      // querying matches/players/match_stats directly from the browser on every
+      // mount and month change -- that unbounded per-visitor querying is what blew
+      // through the Supabase project's egress quota. fetchHistoryRows already pages
+      // oldest-first by created_at, which is what the chronological `form` pills
+      // below need.
+      const res = await fetch("/api/leaderboard-history")
+      if (!res.ok) throw new Error(`Failed to load match history (${res.status})`)
+      const { matches: rawMatches, players, stats: rawStats } = (await res.json()) as {
+        matches: MatchRow[]
+        players: ImpactPlayer[]
+        stats: ImpactStatRow[]
+      }
 
-      // Oldest first, and it matters: ELO and TrueSkill are running ratings, so the
-      // order they are replayed in IS the answer.
-      const matchQuery = () => {
-        const q = supabase
-          .from("matches")
-          .select("id, red_team, blue_team, red_score, blue_score, created_at")
-          .order("created_at", { ascending: true })
-          // created_at is not unique — two matches logged in the same second would
-          // make the page boundary ambiguous.
-          .order(PAGE_ORDER, { ascending: true })
-        if (scope === "alltime") return q
+      const inScope = (m: MatchRow) => {
+        if (!(m.red_team?.length && m.blue_team?.length)) return false
+        if (scope === "alltime") return true
         // UTC month boundaries, matching the rest of the site — bucketing on the
         // viewer's local month would put the same match in different months for
         // players either side of midnight UTC.
-        const start = new Date(Date.UTC(year, month - 1, 1))
-        const end = new Date(Date.UTC(year, month, 1))
-        return q.gte("created_at", start.toISOString()).lt("created_at", end.toISOString())
+        const start = Date.UTC(year, month - 1, 1)
+        const end = Date.UTC(year, month, 1)
+        const t = Date.parse(m.created_at)
+        return t >= start && t < end
       }
 
-      const allMatches = (await fetchAll<MatchRow>(matchQuery)).filter(
-        (m) => m.red_team?.length && m.blue_team?.length,
-      )
-
-      const players = await fetchAll<ImpactPlayer>(() =>
-        supabase.from("players").select("id, name, tier_value").order(PAGE_ORDER, { ascending: true }),
-      )
-
-      const monthIds = allMatches.map((m) => m.id)
-      const statRows =
-        scope === "month" && monthIds.length === 0
-          ? []
-          : await fetchAll<ImpactStatRow>(() => {
-              const q = supabase.from("match_stats").select(STAT_COLUMNS).order(PAGE_ORDER, { ascending: true })
-              return scope === "month" ? q.in("match_id", monthIds) : q
-            })
+      const allMatches = rawMatches.filter(inScope)
+      const scopeIds = new Set(allMatches.map((m) => m.id))
+      const statRows = rawStats.filter((r) => scopeIds.has(r.match_id))
 
       // All-time drops the pre-scoreboard era: keeping those matches would let a
       // player's win rate, ELO and TrueSkill run over games their score per game

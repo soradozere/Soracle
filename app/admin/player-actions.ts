@@ -1,8 +1,10 @@
 "use server"
 
+import { updateTag } from "next/cache"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { requireFullAdmin } from "@/lib/player-role"
 import { recordTitleChangeSafely } from "@/lib/titles-server"
+import { HISTORY_TAG } from "@/lib/achievements-server"
 
 // Full-admin roster writes, moved server-side so a player login promoted to
 // full_admin (scripts/044_add_player_admin_roles.sql) can use them too --
@@ -34,6 +36,8 @@ export async function createPlayer(input: PlayerInput): Promise<ActionResult<Rec
 
   const { data, error } = await createServiceClient().from("players").insert(input).select().single()
   if (error) return { success: false, error: error.message }
+  // tier_value seeds the HISTORY_TAG-cached leaderboards' ratings -- keep them in sync.
+  updateTag(HISTORY_TAG)
   return { success: true, data }
 }
 
@@ -48,6 +52,8 @@ export async function updatePlayerRecord(
   const supabase = createServiceClient()
   const { error } = await supabase.from("players").update(input).eq("id", playerId)
   if (error) return { success: false, error: error.message }
+  // tier_value seeds the HISTORY_TAG-cached leaderboards' ratings -- keep them in sync.
+  updateTag(HISTORY_TAG)
 
   if (tierChange) {
     await supabase.from("tier_changes").insert({
