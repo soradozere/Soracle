@@ -1,6 +1,6 @@
 import type { Metadata } from "next"
 import Link from "next/link"
-import { BookOpen, BarChart3 } from "lucide-react"
+import { Trophy, BarChart3 } from "lucide-react"
 import { computeAchievementLedger, computePlayersDirectory, computeHomeSummary } from "@/lib/achievements-server"
 import { resolveEquippedTitles } from "@/lib/titles-server"
 import { listFeedDemoUploads } from "@/lib/demos-server"
@@ -152,21 +152,15 @@ export default async function HomePage() {
             does the same job of separating "go do something" from "go look at
             something" without a second line. */}
         <div className="flex flex-wrap items-center justify-center gap-3 mt-8">
-          {/* Was "Open the Team Balancer", then "How It Works". The balancer is
-              one click away in the nav rail, and nothing on the homepage taught
-              a new player the game itself — the roles, how a capture actually
-              plays out, how their tier moves. CTF 101 is that, and this is its
-              only entry point: it is deliberately NOT in the nav rail, so the
-              rail stays a list of places you go rather than things you read.
-              /how-it-works still exists for the balancer specifically, linked
-              from the balancer panel and from CTF 101. */}
+          {/* Was CTF 101 (still reachable from the FAQ page), swapped for the
+              2026 Player Awards push. */}
           <Link
-            href="/ctf-101"
-            style={{ backgroundColor: "var(--color-primary)", color: "var(--color-background)" }}
+            href="/player-awards-2026"
+            style={{ backgroundColor: "#f39c12", color: "var(--color-background)" }}
             className="px-6 py-2.5 font-bold rounded-md transition-all text-sm hover-glow inline-flex items-center gap-2"
           >
-            <BookOpen className="w-4 h-4" />
-            CTF 101
+            <Trophy className="w-4 h-4" />
+            Player Awards 2026
           </Link>
           <Link
             href="/stats"

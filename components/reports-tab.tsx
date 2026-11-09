@@ -352,9 +352,8 @@ export function ReportsTab() {
   // all-time form.
   const [allTimeBoard, setAllTimeBoard] = useState<"wins" | "elo" | "trueskill" | "production">("wins")
   // Every match ever played, for the all-time Wins board. Fetched separately
-  // from the month's matches and only once the admin-only All-Time tab is
-  // actually opened -- no reason to pull the whole history for a page most
-  // people never see.
+  // from the month's matches and only once the All-Time tab is actually
+  // opened -- no reason to pull the whole history for every stats page load.
   const [allTimeMatches, setAllTimeMatches] = useState<Match[] | null>(null)
   /*
    * Wrapped is personal, so the tab needs to know who is reading it. null while
@@ -415,13 +414,6 @@ export function ReportsTab() {
   }, [])
 
   const isCurrentMonth = selectedYear === now.getUTCFullYear() && selectedMonth === now.getUTCMonth() + 1
-
-  // isAdmin resolves after the first render, so a non-admin could be sitting on
-  // All-Time for a frame. Send them back rather than leave them on a tab that
-  // is about to vanish from the rail.
-  useEffect(() => {
-    if (!isAdmin && currentView === "alltime") setCurrentView("stats")
-  }, [isAdmin, currentView])
 
   useEffect(() => {
     if (currentView !== "alltime" || allTimeMatches !== null) return
@@ -918,7 +910,7 @@ export function ReportsTab() {
           segments={[
             { key: "stats", label: "Monthly" },
             { key: "leaderboard", label: "Leaderboard" },
-            ...(isAdmin ? [{ key: "alltime", label: "All-Time" }] : []),
+            { key: "alltime", label: "All-Time" },
             // Always offered, signed in or not: a visitor who cannot see the
             // card should still find out it exists. The login prompt lives
             // inside the tab rather than in place of it.

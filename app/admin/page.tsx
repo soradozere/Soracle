@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { ExportDataButton } from "@/components/export-data-button"
 import { readAutoCalibrationEnabled } from "@/lib/calibration"
 import Link from "next/link"
-import { LogOut, Home, Settings, Youtube, Activity } from "lucide-react"
+import { LogOut, Home, Settings, Youtube, Activity, Trophy } from "lucide-react"
 
 export default async function AdminPage() {
   // Full-admin only (a Supabase Auth admin, or a player login promoted to
@@ -32,6 +32,12 @@ export default async function AdminPage() {
               <Button variant="outline" size="sm">
                 <Activity className="h-4 w-4 mr-2" />
                 Progress
+              </Button>
+            </Link>
+            <Link href="/admin/player-awards-2026">
+              <Button variant="outline" size="sm">
+                <Trophy className="h-4 w-4 mr-2" />
+                Player Awards
               </Button>
             </Link>
             <Link href="/admin/renders">
