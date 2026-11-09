@@ -24,12 +24,16 @@ import { fetchHistoryRows } from "@/lib/achievements-server"
 // existence is why they now call updateTag). A second cache layered on top
 // here would just risk serving stale data past that.
 export async function GET() {
-  const { matches, players, stats } = await fetchHistoryRows()
+  const { matches, players, stats, killPairs } = await fetchHistoryRows()
 
   return NextResponse.json(
     {
       matches,
       players: players.map((p) => ({ id: p.id, name: p.name, tier_value: p.tier_value })),
+      // Only what the Production/Impact board's Cap tooltip needs (lib/cap-conversion.ts's
+      // KillRow) -- killer_player_id and kills ride along in fetchHistoryRows for the
+      // achievement passes but have no reader here.
+      killPairs: killPairs.map((k) => ({ match_id: k.match_id, victim_player_id: k.victim_player_id, rets: k.rets })),
       stats: stats.map((s) => ({
         player_id: s.player_id,
         match_id: s.match_id,

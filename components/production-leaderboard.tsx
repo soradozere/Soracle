@@ -260,10 +260,11 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
       // through the Supabase project's egress quota.
       const res = await fetch("/api/leaderboard-history")
       if (!res.ok) throw new Error(`Failed to load match history (${res.status})`)
-      const { matches: rawMatches, players, stats: rawStats } = (await res.json()) as {
+      const { matches: rawMatches, players, stats: rawStats, killPairs } = (await res.json()) as {
         matches: MatchRow[]
         players: ProductionPlayer[]
         stats: ProductionStatRow[]
+        killPairs: KillRow[]
       }
 
       const inScope = (m: MatchRow) => {
@@ -280,17 +281,7 @@ export function ProductionLeaderboard({ year, month, scope }: ProductionLeaderbo
       const statRows = rawStats.filter((r) => matchIds.has(r.match_id))
 
       // Only the Cap tooltip's conversion reads this; the rating itself never does.
-      // Ordered on the primary key because of the paging, same as everything above.
-      const kills =
-        scope === "month" && monthIds.length === 0
-          ? []
-          : await fetchAll<KillRow>(() => {
-              const q = supabase
-                .from("match_kills")
-                .select("match_id, victim_player_id, rets")
-                .order(PAGE_ORDER, { ascending: true })
-              return scope === "month" ? q.in("match_id", monthIds) : q
-            })
+      const kills = scope === "month" ? killPairs.filter((k) => matchIds.has(k.match_id)) : killPairs
 
       if (stale()) return
       setData({ matches: allMatches, statRows, players, kills })
