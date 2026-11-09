@@ -19,16 +19,22 @@ export const RARITY_POINTS: Record<Rarity, number> = {
   legendary: 20,
   mythic: 50,
   oneofone: 150,
+  // 3x oneofone's own jump over mythic — the rarest thing in the game being
+  // worth another one-of-one's own ladder-leap above the rest of the ladder.
+  transcendent: 450,
 }
 
 /**
  * What one crest is worth. Rarity decides it, unless the def overrides — The
  * GOAT is worth 0 so that crossing 1337 Achievement Score leaves you ON 1337
- * rather than immediately on 1487.
+ * rather than immediately on 1487. Absent an override, a completionist secret
+ * (All Too Easy) defaults to transcendent's points rather than oneofone's —
+ * it is not one of the six, it is the one above them.
  */
 export function pointsForSecret(secretId: string): number {
   const def = SECRET_ACHIEVEMENTS.find((d) => d.id === secretId)
-  return def?.points ?? RARITY_POINTS.oneofone
+  if (def?.points !== undefined) return def.points
+  return def?.completionist ? RARITY_POINTS.transcendent : RARITY_POINTS.oneofone
 }
 
 export const scoreFor = (rarities: Iterable<Rarity>) => {
@@ -65,9 +71,9 @@ export function scoreFromViews(views: { id: string; rank: number; rarity: Rarity
     const def = ACHIEVEMENTS.find((d) => d.id === v.id)
     if (def?.ranks?.length) {
       for (let i = 0; i < v.rank && i < def.ranks.length; i++) total += RARITY_POINTS[def.ranks[i].rarity]
-    } else if (v.rarity === "oneofone") {
-      // A claimed one-of-one is a single rank, worth whatever its def says (see
-      // pointsForSecret) rather than a flat 150.
+    } else if (v.rarity === "oneofone" || v.rarity === "transcendent") {
+      // A claimed secret is a single rank, worth whatever its def says (see
+      // pointsForSecret) rather than a flat per-rarity number.
       total += pointsForSecret(v.id)
     } else {
       // Untiered crests are a single rank worth their own rarity.

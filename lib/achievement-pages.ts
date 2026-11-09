@@ -118,7 +118,7 @@ export function claimedSecretSummaries(ledger: AchievementLedger): ClaimedSecret
           title: def.title,
           titled: true,
           category: def.category,
-          rarity: "oneofone" as Rarity,
+          rarity: def.completionist ? ("transcendent" as Rarity) : ("oneofone" as Rarity),
           icon: def.icon,
           condition: def.condition,
           pending: false,
@@ -146,7 +146,9 @@ export function pageDefFor(id: string, ledger: AchievementLedger): AchievementDe
   const claimed = ledger.claimedSecrets.some((e) => e.achId === id)
   if (!claimed) return null
   const secret = SECRET_ACHIEVEMENTS.find((d) => d.id === id)
-  return secret ? { ...secret, metric: { type: "matchCount" }, threshold: 1, rarity: "oneofone" as Rarity } : null
+  return secret
+    ? { ...secret, metric: { type: "matchCount" }, threshold: 1, rarity: secret.completionist ? ("transcendent" as Rarity) : ("oneofone" as Rarity) }
+    : null
 }
 
 // "3rd player to reach this rank" — distinct players at or above `rank` up to and

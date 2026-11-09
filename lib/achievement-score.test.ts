@@ -24,6 +24,7 @@ describe("RARITY_POINTS", () => {
       legendary: 20,
       mythic: 50,
       oneofone: 150,
+      transcendent: 450,
     })
   })
 })

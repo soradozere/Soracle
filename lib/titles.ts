@@ -443,7 +443,7 @@ export function oneOfOneTitles(earnedAchievementIds: Iterable<string>): EarnedTi
     id: d.id,
     title: d.title,
     threshold: 0,
-    rarity: SECRET_RARITY,
+    rarity: d.completionist ? "transcendent" : SECRET_RARITY,
     source: ONE_OF_ONE_SOURCE,
   }))
 }
@@ -478,7 +478,7 @@ export function catalogueTitleById(id: string): { title: string; rarity: Rarity;
   // (players board, bot embeds). This leaks nothing: resolution is by id, and
   // only the crest's holder can ever have the id stored as their title.
   const secret = SECRET_ACHIEVEMENTS.find((d) => d.id === id)
-  if (secret) return { title: secret.title, rarity: SECRET_RARITY, source: ONE_OF_ONE_SOURCE }
+  if (secret) return { title: secret.title, rarity: secret.completionist ? "transcendent" : SECRET_RARITY, source: ONE_OF_ONE_SOURCE }
   const merit = MERIT_TITLES.find((d) => d.id === id)
   if (merit) return { title: merit.title, rarity: merit.rarity ?? "common", source: MERIT_TITLE_SOURCE }
   return null

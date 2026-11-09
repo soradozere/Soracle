@@ -518,6 +518,67 @@ export function resolveMonthlySecretHolders(rows: CapperMonthRow[]): Map<string,
   return holders
 }
 
+/**
+ * Holder of the completionist secret (All Too Easy).
+ *
+ * The fourth resolution shape, and a different question from the other
+ * three: not "who crossed some threshold" but "who has touched everything"
+ * — every family in ACHIEVEMENTS unlocked at rank 1. Deliberately NOT every
+ * family maxed to its top rank: a deep ladder like Hours Played or Career
+ * Kills can take hundreds of matches to summit, which would make this a
+ * "who has played longest" crest more than a "who has done everything"
+ * one. Rank 1 of each is the bar — a family's own completion moment is
+ * when it was FIRST crossed (unlockEventsFor's first entry for it); the
+ * crest's moment is the LATEST of those per player, because whichever
+ * family they touched last is the one that completed the set. Earliest
+ * such moment across all players wins, the same claimedFirst tiebreak
+ * every other resolver uses, so the browser and the bot can never disagree
+ * on the holder.
+ *
+ * A player who never touched a family contributes no event for it and so
+ * can never read as complete — exactly the all-or-nothing behaviour this
+ * needs, with no extra "have they started everything" check required.
+ */
+export function resolveCompletionistHolder(seqByPlayer: Map<string, AchMatch[]>): Map<string, SecretHolder> {
+  const holders = new Map<string, SecretHolder>()
+  const def = SECRET_ACHIEVEMENTS.find((d) => d.completionist)
+  if (!def) return holders
+
+  let best: SecretHolder | null = null
+  for (const [playerId, seq] of seqByPlayer) {
+    const completions: UnlockEvent[] = []
+    let complete = true
+    for (const d of ACHIEVEMENTS) {
+      const first = unlockEventsFor(d, seq)[0]
+      if (!first) {
+        complete = false
+        break
+      }
+      completions.push(first)
+    }
+    if (!complete) continue
+
+    // Whichever family they touched last is when the whole set became complete.
+    let last = completions[0]
+    for (const c of completions) {
+      const t = Date.parse(c.date)
+      const bt = Date.parse(last.date)
+      if (t > bt || (t === bt && c.matchId > last.matchId)) last = c
+    }
+
+    const candidate: SecretCandidate = {
+      playerId,
+      matchId: last.matchId,
+      date: last.date,
+      stat: null as unknown as AchStat,
+      ctx: null as unknown as ClaimContext,
+    }
+    if (!best || claimedFirst(candidate, best)) best = { playerId, matchId: last.matchId, date: last.date }
+  }
+  if (best) holders.set(def.id, best)
+  return holders
+}
+
 // The secret crests THIS player holds, as views. Everyone else gets an empty array,
 // which is what keeps a secret secret — there is no locked state to leak.
 export function secretViewsFor(playerId: string, holders: Map<string, SecretHolder>): AchievementView[] {
@@ -530,7 +591,7 @@ export function secretViewsFor(playerId: string, holders: Map<string, SecretHold
       title: def.title,
       titled: false,
       category: def.category,
-      rarity: SECRET_RARITY,
+      rarity: def.completionist ? "transcendent" : SECRET_RARITY,
       icon: def.icon,
       condition: def.condition,
       pending: false,
@@ -551,7 +612,9 @@ export function secretViewsFor(playerId: string, holders: Map<string, SecretHold
 }
 
 // `secrets` comes from secretViewsFor — empty for all but the single holder. They
-// sort to the front for free: RARITY_META.oneofone has the highest order.
+// sort to the front for free: oneofone and transcendent have the two highest
+// orders in RARITY_META, and transcendent — All Too Easy's rarity — is the
+// single highest of all, so it always leads when someone actually holds it.
 export function computeAchievements(seq: AchMatch[], secrets: AchievementView[] = []): AchievementView[] {
   return [...ACHIEVEMENTS.map((def) => viewFor(def, seq)), ...secrets].sort(compareViews)
 }
