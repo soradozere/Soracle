@@ -154,44 +154,71 @@ interface RawHistory {
  * future requests -- and the 1-hour window below exists only as a safety net
  * for a write path that bypasses that: Sora edits players/matches by hand in
  * Supabase sometimes, and that's real, not hypothetical.
+ *
+ * Cached per table rather than as one combined payload: Next's data cache
+ * rejects anything over 2MB, and match_stats alone passed that on its own
+ * (2.3MB as of Nov 2026, measured straight off Supabase) -- it grows by
+ * ~37 columns x 12 players every match played and never shrinks, so it was
+ * only a matter of time before the combined payload tipped over. A cache
+ * write failure throws through unstable_cache's returned promise even though
+ * the underlying fetch succeeded, which is what turned this into a 500 on
+ * every page reading match history rather than just a missed cache. cached()
+ * below catches that specific failure and falls back to an uncached read so
+ * a table outgrowing the limit degrades to "fetched fresh every call" for
+ * just that table instead of taking the whole page down with it.
  */
 export const HISTORY_TAG = "achievement-history"
 
-export const fetchHistoryRows = unstable_cache(fetchHistoryRowsUncached, ["achievement-history"], {
-  tags: [HISTORY_TAG],
-  revalidate: 3600,
-})
+function cached<T>(fn: () => Promise<T>, key: string): () => Promise<T> {
+  const withCache = unstable_cache(fn, ["achievement-history", key], {
+    tags: [HISTORY_TAG],
+    revalidate: 3600,
+  })
+  return async () => {
+    try {
+      return await withCache()
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("can not be cached")) return fn()
+      throw err
+    }
+  }
+}
 
-async function fetchHistoryRowsUncached(): Promise<RawHistory> {
-  // Anon, not the cookie-backed server client: every one of these reads is public
-  // and identical for all callers, and reading cookies would force the pages that
-  // depend on this to re-render per request instead of honouring `revalidate`.
-  const supabase = createAnonClient()
+// Anon, not the cookie-backed server client: every one of these reads is public
+// and identical for all callers, and reading cookies would force the pages that
+// depend on this to re-render per request instead of honouring `revalidate`.
+const fetchMatches = cached(
+  () => fetchAll<ServerMatch>(createAnonClient(), "matches", "id, red_team, blue_team, red_score, blue_score, created_at"),
+  "matches",
+)
+const fetchStats = cached(() => fetchAll<ServerStat>(createAnonClient(), "match_stats", STAT_COLUMNS), "stats")
+// The kill matrix, for `rets` — returns made AGAINST a carrier, which is the
+// denominator half of Wesley's Prodigy's cap conversion and exists nowhere
+// else. Small on purpose: it only exists for JSON-era matches.
+const fetchKillPairs = cached(
+  () => fetchAll<KillPairRow>(createAnonClient(), "match_kills", "match_id, killer_player_id, victim_player_id, kills, rets"),
+  "kill-pairs",
+)
+// tier_value / avatar_url / manually_inactive ride along for the /players
+// board: same row, same round-trip, and the achievement passes ignore them.
+//
+// ADDING A COLUMN HERE IS NOT FREE. app/api/player-profile/route.ts only
+// invalidates HISTORY_TAG when avatar_url changes, on the grounds that it is
+// the sole profile-writable column in this list. Add another one the profile
+// save writes (model, saber, skin, profile_theme, title, either animation,
+// spotlight_url) and that gate silently stops firing for it -- no error, just
+// a stale board until the next revalidate. Update both.
+const fetchPlayers = cached(
+  () => fetchAll<RawPlayerRow>(createAnonClient(), "players", "id, name, created_at, tier_value, avatar_url, manually_inactive"),
+  "players",
+)
+
+export async function fetchHistoryRows(): Promise<RawHistory> {
   const [matches, stats, killPairs, players] = await Promise.all([
-    fetchAll<ServerMatch>(supabase, "matches", "id, red_team, blue_team, red_score, blue_score, created_at"),
-    fetchAll<ServerStat>(supabase, "match_stats", STAT_COLUMNS),
-    // The kill matrix, for `rets` — returns made AGAINST a carrier, which is
-    // the denominator half of Wesley's Prodigy's cap conversion and exists
-    // nowhere else. Small on purpose: it only exists for JSON-era matches.
-    fetchAll<KillPairRow>(
-      supabase,
-      "match_kills",
-      "match_id, killer_player_id, victim_player_id, kills, rets",
-    ),
-    // tier_value / avatar_url / manually_inactive ride along for the /players
-    // board: same row, same round-trip, and the achievement passes ignore them.
-    //
-    // ADDING A COLUMN HERE IS NOT FREE. app/api/player-profile/route.ts only
-    // invalidates HISTORY_TAG when avatar_url changes, on the grounds that it
-    // is the sole profile-writable column in this list. Add another one the
-    // profile save writes (model, saber, skin, profile_theme, title, either
-    // animation, spotlight_url) and that gate silently stops firing for it --
-    // no error, just a stale board until the next revalidate. Update both.
-    fetchAll<RawPlayerRow>(
-      supabase,
-      "players",
-      "id, name, created_at, tier_value, avatar_url, manually_inactive",
-    ),
+    fetchMatches(),
+    fetchStats(),
+    fetchKillPairs(),
+    fetchPlayers(),
   ])
   return { matches, stats, players, killPairs }
 }
