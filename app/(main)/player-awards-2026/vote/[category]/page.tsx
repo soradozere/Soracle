@@ -4,7 +4,7 @@ import { cookies } from "next/headers"
 import { notFound } from "next/navigation"
 import { ChevronLeft, LogIn } from "lucide-react"
 import { AWARD_CATEGORIES, categorySlug, CategoryIcon } from "../../award-categories"
-import { fetchPlayersFromDB, isPlayerInactive } from "@/lib/fetch-players-db"
+import { fetchPlayersFromDB } from "@/lib/fetch-players-db"
 import { verifySessionValue, PLAYER_SESSION_COOKIE } from "@/lib/player-auth"
 import { createServiceClient } from "@/lib/supabase/admin"
 import { PlayerVoteForm } from "./player-vote-form"
@@ -40,12 +40,13 @@ export default async function VoteCategoryPage({ params }: Props) {
 
   // Only the two open kinds need anything fetched. The roster is skipped
   // entirely when signed out, so a logged-out visitor never pulls it just to
-  // be told to log in.
+  // be told to log in. Every player is selectable here, active or not --
+  // unlike the balancer, an awards vote isn't about who's available to play
+  // right now, and someone who sat the season out can still be this year's
+  // best teammate.
   const players =
     category.kind === "player" && signedIn
-      ? (await fetchPlayersFromDB())
-          .filter((p) => !isPlayerInactive(p))
-          .map((p) => ({ id: p.id, name: p.name }))
+      ? (await fetchPlayersFromDB()).map((p) => ({ id: p.id, name: p.name }))
       : []
 
   // Re-opening the page after voting should show what you already picked,
