@@ -384,8 +384,9 @@ function secretCandidates(
 
 // Every player's chronological match sequence, built from the same full
 // dataset secretCandidates uses — needed by resolveCompletionistHolder (All
-// Too Easy), which asks "has EVERY player maxed every family" and so, like
-// the one-of-ones above, can't be read off a single profile's own history.
+// Too Easy), which has to check EVERY player's full history for whoever
+// unlocked every family first, and so, like the one-of-ones above, can't be
+// read off a single profile's own history.
 //
 // Mirrors the per-player loop in buildHistoryIndex (lib/achievements-server.ts)
 // field-for-field; the two MUST agree for the same reason the monthly merge

@@ -522,14 +522,18 @@ export function resolveMonthlySecretHolders(rows: CapperMonthRow[]): Map<string,
  * Holder of the completionist secret (All Too Easy).
  *
  * The fourth resolution shape, and a different question from the other
- * three: not "who crossed some threshold" but "who has nothing left to
- * climb" — every family in ACHIEVEMENTS maxed to its top rank. A family's
- * own completion moment is when its FINAL rank crossed (unlockEventsFor's
- * last entry for it); the crest's moment is the LATEST of those per player,
- * because whichever family they finished last is the one that completed the
- * set. Earliest such moment across all players wins, the same claimedFirst
- * tiebreak every other resolver uses, so the browser and the bot can never
- * disagree on the holder.
+ * three: not "who crossed some threshold" but "who has touched everything"
+ * — every family in ACHIEVEMENTS unlocked at rank 1. Deliberately NOT every
+ * family maxed to its top rank: a deep ladder like Hours Played or Career
+ * Kills can take hundreds of matches to summit, which would make this a
+ * "who has played longest" crest more than a "who has done everything"
+ * one. Rank 1 of each is the bar — a family's own completion moment is
+ * when it was FIRST crossed (unlockEventsFor's first entry for it); the
+ * crest's moment is the LATEST of those per player, because whichever
+ * family they touched last is the one that completed the set. Earliest
+ * such moment across all players wins, the same claimedFirst tiebreak
+ * every other resolver uses, so the browser and the bot can never disagree
+ * on the holder.
  *
  * A player who never touched a family contributes no event for it and so
  * can never read as complete — exactly the all-or-nothing behaviour this
@@ -545,17 +549,16 @@ export function resolveCompletionistHolder(seqByPlayer: Map<string, AchMatch[]>)
     const completions: UnlockEvent[] = []
     let complete = true
     for (const d of ACHIEVEMENTS) {
-      const events = unlockEventsFor(d, seq)
-      const top = events[events.length - 1]
-      if (!top || top.rank !== top.totalRanks) {
+      const first = unlockEventsFor(d, seq)[0]
+      if (!first) {
         complete = false
         break
       }
-      completions.push(top)
+      completions.push(first)
     }
     if (!complete) continue
 
-    // Whichever family they finished last is when the whole set became complete.
+    // Whichever family they touched last is when the whole set became complete.
     let last = completions[0]
     for (const c of completions) {
       const t = Date.parse(c.date)

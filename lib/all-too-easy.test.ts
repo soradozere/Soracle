@@ -92,9 +92,11 @@ describe("resolveCompletionistHolder", () => {
   })
 
   it("never awards a player who has one ordinary match and nothing else", () => {
-    // One modest match cannot max out every family in a catalogue this size —
-    // if this ever starts passing, either ACHIEVEMENTS shrank to almost
-    // nothing or the resolver stopped checking completeness.
+    // Even rank 1 of every family can't come from one modest match — several
+    // families (career totals, a 100-match win count) need many games no
+    // matter how low the bar is set. If this ever starts passing, either
+    // ACHIEVEMENTS shrank to almost nothing or the resolver stopped checking
+    // completeness.
     const seqByPlayer = new Map([["p1", [match("m1", "2026-01-01T00:00:00Z")]]])
     expect(resolveCompletionistHolder(seqByPlayer).size).toBe(0)
   })

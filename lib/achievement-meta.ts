@@ -25,7 +25,7 @@ export type AchievementCategory = "match" | "career" | "streak"
 // nobody else can ever earn should not be the same shape as the ones they can.
 //
 // "Transcendent" sits above One of One — not another one-of-one among several,
-// but THE single crest for clearing every other achievement family in the game
+// but THE single crest for unlocking every other achievement family in the game
 // (see "all-too-easy" below). Red, because it needs to read as categorically
 // different from the fuchsia ladder rather than one more rung on it, and its
 // crest is a circle — every other shape in the ladder is an angular gem; the
@@ -1248,10 +1248,11 @@ export interface SecretDef {
   monthly?: MonthlySecretMetric
   /**
    * The fourth resolution kind: answered by neither one match, nor a score
-   * total, nor a calendar month, but by whether a player has maxed out every
-   * family in ACHIEVEMENTS. There is exactly one of these ("all-too-easy");
-   * the flag exists rather than a bare id check so a second one wouldn't need
-   * a parallel string comparison somewhere. See resolveCompletionistHolder in
+   * total, nor a calendar month, but by whether a player has unlocked every
+   * family in ACHIEVEMENTS (rank 1 of each, not maxed — see the def's own
+   * comment for why). There is exactly one of these ("all-too-easy"); the
+   * flag exists rather than a bare id check so a second one wouldn't need a
+   * parallel string comparison somewhere. See resolveCompletionistHolder in
    * lib/achievements.ts, and SECRET_RARITY vs this id's own "transcendent"
    * rarity (secretViewsFor and findAchievementDef both special-case it).
    */
@@ -1390,17 +1391,23 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
   },
   {
     /*
-     * The ULTIMATE crest: not for a feat, but for having no families left to
-     * climb — every ACHIEVEMENTS ladder maxed to its top rank, by one player.
+     * The ULTIMATE crest: not for a feat, but for having touched every
+     * family in the game — rank 1 of every ACHIEVEMENTS ladder, by one
+     * player. Deliberately rank 1, not maxed: several ladders (Hours
+     * Played, career kill/return/capture totals) take hundreds of matches
+     * to summit, which would turn this into "who has played the most" more
+     * than "who has done everything." Unlocking is still a genuine climb —
+     * 49 families spanning every stat the scoreboard tracks — just not a
+     * "grind one lifetime per family" one.
+     *
      * Deliberately scoped to the public ladder only, not the other five
      * secrets here: those are each exclusive to whoever claimed them first
      * (Pacifist is suvix's forever, Protector of Yavin is Interlude's), so
      * requiring a player to ALSO hold every one of them would make this
      * crest provably unclaimable the moment two of those go to different
-     * people — which they already have. Scoped this way it's merely the
-     * hardest real climb in the game, not a mathematical impossibility.
+     * people — which they already have.
      *
-     * Held by whoever was first to complete the LAST family they were
+     * Held by whoever was first to touch the LAST family they were
      * missing — see resolveCompletionistHolder in lib/achievements.ts, same
      * "replay the unlock ledger, find the crossing" shape as The GOAT, just
      * tracking set-completeness instead of a score sum.
@@ -1414,7 +1421,7 @@ export const SECRET_ACHIEVEMENTS: SecretDef[] = [
     title: "All Too Easy",
     category: "career",
     icon: "lord-revan", // shares Nah You're Hacking's crest — total mastery
-    condition: "Max every achievement in the game",
+    condition: "Unlock every achievement in the game",
     completionist: true,
   },
 ]
